@@ -78,8 +78,18 @@ python -m venv .venv   # 최초 1회
 - `importScoreFile(bytes, filename)`이 확장자로 라우팅하는 통합 진입점. 손상된 파일은 두 파서 모두 예외를 던지는 것을 실제 확인했기에 try/catch로 감싸 `{ok:false}` 반환(크래시 없음).
 - 실제 검증: MusicXML은 `qa-evidence/T0-4/drum_test.musicxml`(Phase 0 샘플). GP는 그 샘플을 alphaTab의 `Gp7Exporter`로 실제 GP7 바이너리로 만들어 왕복 검증(사람이 만든 파일은 아님 — Q-18 부분 해소).
 
+## 오디오 엔진 (T2-2, 2026-10-23)
+- `app/web/src/audio/` — 마스터 클록(Tone.js Transport 래퍼)·MIDI 드럼 신스·메트로놈·카운트인.
+- **jsdom은 Tone.js(Web Audio API)를 전혀 지원 안 함**(실제 실행으로 확인 — `Tone.getTransport()`가 예외 없이 "객체"를 반환하지만 내부적으로 깨져 있고, `new Tone.MembraneSynth()`는 바로 예외). 그래서 `timing.ts`(틱→초, 박/마디 계산)만 Tone 의존 없는 순수 함수로 분리해 단위 테스트하고, `clock.ts`/`drumVoices.ts`/`metronome.ts`/`scorePlayer.ts`(Tone.js를 실제로 쓰는 코드)는 **실제 브라우저로 수동 QA**.
+- `scorePlayer.ts`: 노트를 Transport의 틱 체계(기본 PPQ=192)가 아니라 DrumScore 자신의 ppq로 초 단위를 직접 계산해 예약(PPQ 불일치 회피). 재생 시작 전 항상 `transport.stop(); transport.position = 0` — 메트로놈을 먼저 돌리다 멈춘 뒤 재생하면 노트가 전부 과거 시각에 예약돼 무음이 되는 실제 버그를 수동 QA로 발견·수정.
+- `transport.timeSignature`에는 분자만 넘기면 안 됨(4가 아닌 분모에서 마디 길이가 틀어짐, 예: 6/8을 6으로 넘기면 Transport가 6/4로 취급 — Codex 모드A C-001, 실제 재현 후 수정) — 항상 `[분자,분모]` 배열 전체를 넘긴다.
+- `metronome.ts`의 강박 판정은 `Transport.getTicksAtTime()`으로 그 순간의 절대 틱을 읽어 계산(로컬 카운터 방식은 Transport가 마디 경계 아닌 위치에서 이미 돌고 있으면 틀어짐 — Codex 모드A C-002).
+- MIDI 드럼 소리는 Tone.js 내장 신스(합성음), 실제 샘플 오디오 아님 — 음색 승인 필요(Q-19).
+
 ## 아직 없는 것 (다음 작업)
 - 큐에 작업을 넣는 공개 API(업로드 트리거), 실제 처리 핸들러(Demucs/ADTOF/Audiveris) 등록 — Phase 3/4
 - 파일 선택 UI(input/드래그앤드롭), 가져온 DrumScore의 서버 저장(원본+편집본) — T2-5(라이브러리 화면)
+- BPM 슬라이더·A-B 루프(T2-4), 연습 화면 렌더러가 마스터 클록에 동기화(T2-3)
+- REQ-04 공식 ±30ms 측정(Q-05) — 분리 오디오 트랙(Phase 3)과 BPM UI 모두 있어야 가능
 - 실제 화면(연습·라이브러리·편집·믹서)은 Phase 2부터
 - 관리자 콘솔 UI 없음(API만) — 계정 생성은 지금은 API 직접 호출 필요
