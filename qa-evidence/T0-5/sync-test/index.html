@@ -194,24 +194,28 @@ async function runOneSegment(ctx, label, tempo, durationSec, mode) {
   const t0Audio = ctx.currentTime;
   const t0El = audioEl.currentTime;
 
+  // 진단용: ctx 클록과 audioEl 클록을 각각 실제 벽시계(performance.now())와도 비교해
+  // 어느 쪽이 실제 시간에서 벗어나는지 구분한다(둘 다 서로만 비교하면 어느 쪽 문제인지 알 수 없음).
   let maxDrift = 0;
   let samples = 0;
   const startWall = performance.now();
   return new Promise((resolve) => {
     const iv = setInterval(() => {
+      const elapsedWallSec = (performance.now() - startWall) / 1000;
       const elapsedCtx = ctx.currentTime - t0Audio;
-      const expected = elapsedCtx * tempo;
-      const actual = audioEl.currentTime - t0El;
-      const drift = (actual - expected) * 1000; // ms
+      const actualEl = audioEl.currentTime - t0El;
+      const expectedFromWall = elapsedWallSec * tempo;
+      const drift = (actualEl - expectedFromWall) * 1000; // ms, audioEl vs 실제 벽시계
+      const ctxDriftMs = (elapsedCtx - elapsedWallSec) * 1000; // ms, AudioContext 클록 vs 실제 벽시계(지연되면 음수)
       maxDrift = Math.max(maxDrift, Math.abs(drift));
       samples++;
-      if ((performance.now() - startWall) / 1000 >= durationSec || audioEl.ended) {
+      if (elapsedWallSec >= durationSec || audioEl.ended) {
         clearInterval(iv);
         audioEl.pause();
         if (stNode) stNode.disconnect();
         const finalDrift = drift;
-        log(`--- ${label} 종료: 최종 어긋남=${finalDrift.toFixed(1)}ms, 최대 어긋남=${maxDrift.toFixed(1)}ms (표본 ${samples}개) ---`);
-        resolve({ label, tempo, mode, finalDriftMs: finalDrift, maxDriftMs: maxDrift, samples });
+        log(`--- ${label} 종료: 최종 어긋남(벽시계 기준)=${finalDrift.toFixed(1)}ms, 최대=${maxDrift.toFixed(1)}ms, AudioContext클록-벽시계=${ctxDriftMs.toFixed(1)}ms, 표본 ${samples}개 ---`);
+        resolve({ label, tempo, mode, finalDriftMs: finalDrift, maxDriftMs: maxDrift, ctxDriftMs, samples });
       }
     }, 250);
   });
@@ -228,6 +232,20 @@ startBtn.addEventListener("click", async () => {
   appendResult(`보안컨텍스트=${features.secure} AudioWorklet=${features.audioWorkletOk} WakeLock=${features.wakeLockOk}`);
   appendResult("");
 
+  let wakeLock = null;
+  let wakeLockNote = "WakeLock 미지원";
+  if ("wakeLock" in navigator) {
+    try {
+      wakeLock = await navigator.wakeLock.request("screen");
+      wakeLockNote = "WakeLock 획득 성공(화면 안 꺼짐)";
+      wakeLock.addEventListener("release", () => log("[WakeLock] 해제됨(화면이 꺼졌거나 탭이 백그라운드로 감 — 측정값에 영향 줄 수 있음)"));
+    } catch (e) {
+      wakeLockNote = `WakeLock 획득 실패: ${e}`;
+    }
+  }
+  appendResult(wakeLockNote);
+  log(wakeLockNote);
+
   const AudioCtx = window.AudioContext || window.webkitAudioContext;
   const ctx = new AudioCtx();
   await ctx.resume();
@@ -243,7 +261,7 @@ startBtn.addEventListener("click", async () => {
     progressEl.textContent = `진행: ${i + 1}/${plan.length} - ${plan[i][0]}`;
     try {
       const r = await runOneSegment(ctx, plan[i][0], plan[i][1], durationSec, plan[i][2]);
-      appendResult(`[${r.label}] 최종=${r.finalDriftMs.toFixed(1)}ms 최대=${r.maxDriftMs.toFixed(1)}ms`);
+      appendResult(`[${r.label}] 최종=${r.finalDriftMs.toFixed(1)}ms 최대=${r.maxDriftMs.toFixed(1)}ms (AudioContext클록-벽시계=${r.ctxDriftMs.toFixed(1)}ms)`);
     } catch (e) {
       log(`[오류] ${plan[i][0]}: ${e}`);
       appendResult(`[${plan[i][0]}] 실패: ${e} (다시 버튼을 누르면 재생 허용 팝업이 뜰 수 있습니다)`);
@@ -251,6 +269,7 @@ startBtn.addEventListener("click", async () => {
   }
   progressEl.textContent = "완료";
   startBtn.disabled = false;
+  if (wakeLock) { try { await wakeLock.release(); } catch (e) {} }
   await ctx.close();
 });
 </script>
