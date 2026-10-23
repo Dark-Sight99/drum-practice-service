@@ -56,4 +56,5 @@ const score = alphaTab.importer.ScoreLoader.loadScoreFromBytes(new Uint8Array(fi
 ## Codex CLI (`/codex:setup` 결과, 2026-10-23)
 - 버전: codex-cli 0.163.0, 인증: ChatGPT 로그인(alltimetimo30@gmail.com) 완료
 - 세션 런타임: 첫 리뷰/작업 명령 시 자동 시작(direct mode)
-- ⚠ `codex exec --sandbox read-only` 등 정확한 플래그는 아직 `codex --help`/`codex exec --help`로 실제 확인 전 — 추측 사용 금지(06-pipeline.md §1 규칙). Phase 1 Codex 검수 도입 시 실제 확인 후 이 파일에 추가할 것.
+- **플래그 확인 완료**(`codex exec --help`, 2026-10-23): `-s, --sandbox <SANDBOX_MODE>` 값은 `read-only|workspace-write|danger-full-access`. 읽기 전용 검수 명령: `codex exec -s read-only -o <결과파일> "<프롬프트>"` (`-o/--output-last-message`로 마지막 응답을 파일로 저장 가능). `-C/--cd <DIR>`로 작업 디렉터리 지정 가능.
+- ⚠ 윈도우에서 `read-only` 샌드박스가 실제로 파일 쓰기를 막는지는 아직 실행으로 확인 안 함(06-pipeline.md §1의 확인 항목) — Phase 1 전 재확인 권장.
