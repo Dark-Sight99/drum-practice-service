@@ -58,7 +58,7 @@
 | 분리 | Demucs htdemucs (PyTorch), device 자동 선택 cuda→mps→cpu | MIT | ⚠ 현재 유지 저장소·설치 방법 확인 |
 | 드럼 채보 | ADTOF (1순위), 대안 조사 포함 | | ⚠ NC 라이선스, 실행 환경 확인 |
 | OMR | Audiveris (Java, CLI 배치 모드) → MusicXML | | ⚠ AGPL-3.0, 드럼 악보 품질 |
-| PDF → 이미지 | pypdfium2(1순위) 또는 PyMuPDF(2순위, AGPL/상업 듀얼 라이선스로 알려짐) | | ⚠ 라이선스 확인(Q-12), 문제 없으면 pypdfium2 채택 |
+| PDF → 이미지 | **pypdfium2 채택 확정**(Apache-2.0/BSD-3-Clause 확인, 2026-10-23). PyMuPDF는 AGPL/상업 듀얼이라 제외 | | Q-12 해소 |
 | 원격 접속 | Tailscale | 개인 무료 플랜(최대 6명, 비상업)으로 확정(2026-10-23). 지인은 Tailscale 네트워크 초대로 접속. Funnel(링크 공개) 포함 여부는 참고 조사(Q-13), 채택 여부는 별도 결정 | 사용자 설치 필요 |
 | 테스트 | Vitest, Playwright(스크린샷 증거), pytest | | |
 
@@ -85,6 +85,8 @@
 | alphaTab | MPL-2.0 ⚠확인 | 가능 | 가능(조건부) |
 | Lucide | ISC ⚠확인 | 가능 | 가능 |
 | Pretendard | SIL OFL ⚠확인 | 가능 | 가능 |
+| pypdfium2 | Apache-2.0/BSD-3-Clause(확인됨, 2026-10-23) | 가능 | 가능 |
+| ADTOF-pytorch(대안 채보 모델) | **없음**(LICENSE 파일·GitHub 라이선스 필드 모두 미표시, Q-15) | Phase 0 내부 테스트만 | 불가(해소 전) — Phase 3 채택 전 재확인 필요 |
 | 기타 | 추가 시 기록 | | |
 
 ## 5. 폴더 구조 (목표)

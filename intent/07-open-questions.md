@@ -15,7 +15,7 @@
 | Q-08 | Demucs 현재 유지 저장소·설치 방법 | **해소됨**(2026-10-23). `facebookresearch/demucs`는 archived, 현재는 `adefossez/demucs` 포크가 유지(v4.1.0, 2026-07-11). `pip install demucs numpy`로 설치, numpy는 별도 설치 필요 | wiki/tools.md 기록 완료 |
 | Q-09 | 드럼킷 그래픽 제작 방식 | 자체 SVG | Phase 2 디자인 시 의뢰인 확인 |
 | Q-10 | 셈여림 표시 신뢰도 | 자동 채보 셈여림은 정확도 미검증 | Phase 3 측정 |
-| Q-12 | PDF→이미지: pypdfium2 vs PyMuPDF 라이선스 | pypdfium2 1순위(확인 필요), PyMuPDF는 AGPL/상업 듀얼 라이선스로 알려짐 | T0-6 |
+| Q-12 | PDF→이미지: pypdfium2 vs PyMuPDF 라이선스 | **해소됨**(2026-10-23). pypdfium2=Apache-2.0/BSD-3-Clause(비카피레프트) 확인, PyMuPDF=AGPL/Artifex 상업 듀얼 확인. **pypdfium2 채택 확정** | 해소됨 |
 | Q-13 | Tailscale Funnel이 개인 무료 플랜에 포함되는지 | **확인됨**(2026-10-23, tailscale.com/kb/1223/funnel 공식 문서: "Funnel is available for all plans" — 단, 현재 베타 단계, MagicDNS·HTTPS 인증서 활성화 필요) | 해소됨. 채택(지인 초대에 Funnel 쓸지, 일반 Tailscale 네트워크 참여로만 할지)은 의뢰인 별도 결정 |
-| Q-14 | Audiveris(AGPL)·ADTOF(NC)를 지인 포함 소수 사용자(최대 6명) 네트워크 서비스로 쓸 때 라이선스 의무 | 서비스 범위가 "본인만"에서 "소수 지인 포함"으로 변경되어 재검토 필요 | T0-6에서 근거와 함께 조사 보고, 법적 단정 금지 |
+| Q-14 | Audiveris(AGPL)·ADTOF(NC)를 지인 포함 소수 사용자(최대 6명) 네트워크 서비스로 쓸 때 라이선스 의무 | **조사 완료, 법적 결론 아님**(2026-10-23). AGPL 제13조(네트워크 소스공개 의무)는 "프로그램을 수정했을 때만" 추가 적용됨(원문 해설 인용 확인). 우리는 Audiveris를 수정 없이 외부 프로세스로 호출할 계획이라 해당 의무가 적용 안 될 가능성. ADTOF(NC)는 비상업·무료 초대제라 NC 조건에 부합하는 것으로 보임. 상세: `qa-evidence/T0-6/result.md` | 전문가 확인 권장(특히 Audiveris 코드를 실제로 수정하게 될 경우 재검토) |
 | Q-15 | ADTOF-pytorch(xavriley 포크) 라이선스 | **신규**(2026-10-23). 저장소에 LICENSE 파일 없음, GitHub API `license: null`. 원본 ADTOF(CC BY-NC-SA 4.0) 가중치를 변환해 쓰지만 자체 라이선스 표시가 없어 사용 권한 불분명. 현재는 Phase 0 내부 테스트(배포 없음)에만 사용 | Phase 3(T3-2) 채택 전 저자에게 문의하거나 재확인 필요. 해소 전까지 프로덕션 채택 보류 |
