@@ -10,3 +10,5 @@ export type {
 export { GM_NOTE_TO_PIECE, PIECE_TO_GM_NOTE } from './gmMapping'
 export { isDrumScore, validateDrumScore } from './validate'
 export type { ValidationResult } from './validate'
+export { importMidiBuffer, importNotationBytes, importScoreFile } from './import'
+export type { ImportResult } from './import'
