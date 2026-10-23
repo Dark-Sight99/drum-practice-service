@@ -156,19 +156,24 @@ def test_concurrent_workers_cannot_claim_the_same_job(tmp_path, monkeypatch) -> 
     monkeypatch.setattr(runner_module, "_race_window_hook", lambda: race_barrier.wait(timeout=5))
 
     claimed: list[int] = []
-    claim_lock = threading.Lock()
+    errors: list[BaseException] = []
+    result_lock = threading.Lock()
     start_barrier = threading.Barrier(2)
 
     def worker_sim() -> None:
-        worker_engine = create_sqlite_engine(f"sqlite:///{db_path}")
-        worker_db = sessionmaker(bind=worker_engine)()
-        start_barrier.wait()
-        result = process_next_job(worker_db)
-        if result is not None:
-            with claim_lock:
-                claimed.append(result.id)
-        worker_db.close()
-        worker_engine.dispose()
+        try:
+            worker_engine = create_sqlite_engine(f"sqlite:///{db_path}")
+            worker_db = sessionmaker(bind=worker_engine)()
+            start_barrier.wait()
+            result = process_next_job(worker_db)
+            if result is not None:
+                with result_lock:
+                    claimed.append(result.id)
+            worker_db.close()
+            worker_engine.dispose()
+        except BaseException as exc:  # noqa: BLE001 — 아래에서 명시적으로 검증·실패 처리
+            with result_lock:
+                errors.append(exc)
 
     threads = [threading.Thread(target=worker_sim) for _ in range(2)]
     for t in threads:
@@ -176,4 +181,8 @@ def test_concurrent_workers_cannot_claim_the_same_job(tmp_path, monkeypatch) -> 
     for t in threads:
         t.join()
 
+    # Codex 모드B C-003: 워커 스레드에서 예외(예: SQLite 잠금 오류)가 나면 그 스레드는
+    # claimed에 아무것도 안 남기고 조용히 끝나버려서, claimed == [job_id]만 보면 "정상
+    # 동작"과 "한쪽이 깨짐"을 구분 못할 수 있음 — 예외를 모아 명시적으로 검증한다.
+    assert errors == []
     assert claimed == [job_id]  # 둘 중 정확히 하나만 작업을 가져가야 함
