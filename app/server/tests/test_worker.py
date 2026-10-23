@@ -1,5 +1,7 @@
 """T1-4 작업 큐 워커 테스트. 근거: REQ-10, work/T1-4/plan.md."""
 
+import threading
+
 import pytest
 from sqlalchemy.orm import sessionmaker
 
@@ -121,3 +123,45 @@ def test_recover_orphaned_jobs_does_not_touch_queued_or_completed(db) -> None:
     db.refresh(queued)
     assert recovered_count == 0
     assert queued.status == JobStatus.QUEUED
+
+
+def test_concurrent_workers_cannot_claim_the_same_job(tmp_path) -> None:
+    """Codex 모드A C-001 회귀 테스트: 워커 두 개가 동시에 돌아도 같은 작업을
+    둘 다 처리하면 안 된다(파일 기반 DB + 별도 커넥션으로 실제 멀티프로세스 상황을 흉내냄)."""
+    db_path = tmp_path / "race.db"
+    engine = create_sqlite_engine(f"sqlite:///{db_path}")
+    Base.metadata.create_all(engine)
+    SessionLocal = sessionmaker(bind=engine)
+
+    setup_db = SessionLocal()
+    user, song = _make_user_and_song(setup_db)
+    job = Job(user_id=user.id, song_id=song.id, job_type=JobType.SEPARATE)
+    setup_db.add(job)
+    setup_db.commit()
+    job_id = job.id
+    setup_db.close()
+
+    register_handler(JobType.SEPARATE, lambda j: None)
+
+    claimed: list[int] = []
+    claim_lock = threading.Lock()
+    barrier = threading.Barrier(2)
+
+    def worker_sim() -> None:
+        worker_engine = create_sqlite_engine(f"sqlite:///{db_path}")
+        worker_db = sessionmaker(bind=worker_engine)()
+        barrier.wait()
+        result = process_next_job(worker_db)
+        if result is not None:
+            with claim_lock:
+                claimed.append(result.id)
+        worker_db.close()
+        worker_engine.dispose()
+
+    threads = [threading.Thread(target=worker_sim) for _ in range(2)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert claimed == [job_id]  # 둘 중 정확히 하나만 작업을 가져가야 함

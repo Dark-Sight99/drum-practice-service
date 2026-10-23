@@ -36,3 +36,10 @@ REQ-01/02의 실제 처리 로직(Demucs 분리, ADTOF 채보, Audiveris OMR)은
 ## 남은 문제
 - 큐에 작업을 넣는 공개 API(업로드 트리거)는 Phase 3에서 추가.
 - 실제 처리 핸들러(Demucs/ADTOF/Audiveris)는 Phase 3/4에서 `register_handler()`로 등록.
+- Q-17(워커 2개 이상 동시 실행 시 재시작 복구 로직의 소유권 문제) — 운영 규칙(워커 1개만 띄움)으로 당장은 대응, 여러 워커가 필요해지면 재설계 필요.
+
+## Codex 모드 A 검수 반영 (2026-10-23)
+판정: REQUEST_CHANGES. 원문: `qa-evidence/T1-4/codex-modeA.md`.
+
+- **C-001**(필수): 작업 선점(조회→`PROCESSING` 전환)이 원자적이지 않아, 워커 프로세스 2개를 동시에 띄우면 같은 작업을 둘 다 처리할 수 있다는 지적 — 파일 기반 SQLite+별도 커넥션 2개로 직접 재현 스크립트를 돌려 **재현 확인**(두 워커 모두 같은 Job id를 가져감). `worker/runner.py`에 `_claim_next_job()`을 추가해 `UPDATE ... WHERE id=? AND status='queued'` 단일 문장으로 선점하도록 수정(두 번째 워커의 UPDATE는 0행 갱신 → 자동으로 선점 실패). 회귀 테스트 `test_concurrent_workers_cannot_claim_the_same_job` 추가, 8회 반복 실행 전부 통과. 스키마·인터페이스 변경 없는 국소 수정이라 파이프라인 자동수정 기준을 충족해 바로 적용함.
+- **C-002**(필수로 지적, 판단 대기로 처리): 재시작 복구 로직이 워커 소유자를 구분하지 않아 다른 워커가 정상 처리 중인 작업까지 실패 처리할 수 있다는 지적 — 코드 검토로 재현됨(논리상 명백), 다만 제대로 고치려면 Job에 워커 식별자 컬럼을 추가하는 **스키마 변경**이 필요해 자동수정 범위를 벗어남. 수정하지 않고 `intent/07-open-questions.md` Q-17로 등록, 현재는 "워커 프로세스 1개만 운영"이라는 설계 전제(`intent/03-architecture-stack.md`, `work/T1-4/plan.md`)로 실질 위험이 낮다고 판단(추천일 뿐, 최종 결정은 사용자).

@@ -38,12 +38,40 @@ def recover_orphaned_jobs(db: Session) -> int:
     return len(stuck)
 
 
+def _claim_next_job(db: Session) -> Job | None:
+    """가장 오래된 QUEUED 작업 하나를 원자적으로 선점(PROCESSING 전환)한다.
+
+    Codex 모드A C-001(재현됨): 조회(SELECT)와 상태 변경(commit)을 분리해서 하면,
+    워커 프로세스를 두 개 이상 띄웠을 때 둘 다 같은 작업을 선택해 동시에 처리할 수
+    있음(스레드+별도 커넥션으로 실제 재현, qa-evidence/T1-4/result.md 참고).
+    `UPDATE ... WHERE status=QUEUED`을 단일 문장으로 실행해, 두 번째 워커의 UPDATE는
+    0행을 갱신하도록(SQLite가 쓰기 트랜잭션을 직렬화하므로 둘 다 성공할 수 없음) 막는다.
+    """
+    candidate_id = (
+        db.query(Job.id)
+        .filter(Job.status == JobStatus.QUEUED)
+        .order_by(Job.created_at.asc(), Job.id.asc())
+        .limit(1)
+        .scalar()
+    )
+    if candidate_id is None:
+        return None
+    claimed = (
+        db.query(Job)
+        .filter(Job.id == candidate_id, Job.status == JobStatus.QUEUED)
+        .update(
+            {"status": JobStatus.PROCESSING, "started_at": utcnow_naive()},
+            synchronize_session=False,
+        )
+    )
+    db.commit()
+    if claimed == 0:
+        return None
+    return db.get(Job, candidate_id)
+
+
 def _run_job(db: Session, job: Job) -> None:
     handler = get_handler(job.job_type)
-    job.status = JobStatus.PROCESSING
-    job.started_at = utcnow_naive()
-    db.commit()
-
     if handler is None:
         job.status = JobStatus.FAILED
         job.error_message = f"'{job.job_type.value}' 처리 로직이 아직 구현되지 않았습니다"
@@ -62,14 +90,9 @@ def _run_job(db: Session, job: Job) -> None:
 
 
 def process_next_job(db: Session) -> Job | None:
-    """가장 오래된 QUEUED 작업 하나를 꺼내 처리한다(FIFO: created_at, 동률이면 id 순).
-    처리한 Job을 반환하거나, 큐가 비어 있으면 None을 반환한다."""
-    job = (
-        db.query(Job)
-        .filter(Job.status == JobStatus.QUEUED)
-        .order_by(Job.created_at.asc(), Job.id.asc())
-        .first()
-    )
+    """가장 오래된 QUEUED 작업 하나를 원자적으로 선점해 처리한다(FIFO: created_at, 동률이면 id 순).
+    처리한 Job을 반환하거나, 큐가 비어 있거나(또는 다른 워커가 먼저 선점했으면) None을 반환한다."""
+    job = _claim_next_job(db)
     if job is None:
         return None
     _run_job(db, job)
