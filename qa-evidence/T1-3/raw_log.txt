@@ -1,0 +1,39 @@
+============================= test session starts =============================
+platform win32 -- Python 3.12.7, pytest-9.1.1, pluggy-1.7.0 -- C:\Users\Jaewoo\드럼연습서비스\app\server\.venv\Scripts\python.exe
+cachedir: .pytest_cache
+rootdir: C:\Users\Jaewoo\드럼연습서비스\app\server
+configfile: pyproject.toml
+plugins: anyio-4.15.1
+collecting ... collected 29 items
+
+tests/test_auth.py::test_login_success_sets_httponly_cookie PASSED       [  3%]
+tests/test_auth.py::test_login_wrong_password_rejected PASSED            [  6%]
+tests/test_auth.py::test_login_inactive_account_rejected PASSED          [ 10%]
+tests/test_auth.py::test_protected_endpoint_requires_login PASSED        [ 13%]
+tests/test_auth.py::test_cross_user_cannot_see_others_songs PASSED       [ 17%]
+tests/test_auth.py::test_logout_invalidates_session PASSED               [ 20%]
+tests/test_auth.py::test_suspend_existing_session_blocks_immediately PASSED [ 24%]
+tests/test_auth.py::test_expired_session_rejected PASSED                 [ 27%]
+tests/test_auth.py::test_admin_can_create_and_suspend_user PASSED        [ 31%]
+tests/test_auth.py::test_non_admin_cannot_access_admin_endpoints PASSED  [ 34%]
+tests/test_auth.py::test_login_failures_return_identical_response PASSED [ 37%]
+tests/test_auth.py::test_tampered_session_token_rejected PASSED          [ 41%]
+tests/test_auth.py::test_session_token_stored_only_as_hash PASSED        [ 44%]
+tests/test_health.py::test_health PASSED                                 [ 48%]
+tests/test_migrations.py::test_alembic_upgrade_head PASSED               [ 51%]
+tests/test_models.py::test_create_user PASSED                            [ 55%]
+tests/test_models.py::test_duplicate_username_rejected PASSED            [ 58%]
+tests/test_models.py::test_song_belongs_to_user PASSED                   [ 62%]
+tests/test_models.py::test_asset_cascade_delete_with_song PASSED         [ 65%]
+tests/test_models.py::test_enum_columns_store_lowercase_value_not_member_name PASSED [ 68%]
+tests/test_models.py::test_job_queue_per_user PASSED                     [ 72%]
+tests/test_models.py::test_job_cannot_reference_another_users_song PASSED [ 75%]
+tests/test_models.py::test_fk_violation_rejected_for_invalid_user PASSED [ 79%]
+tests/test_models.py::test_asset_file_path_rejects_path_traversal PASSED [ 82%]
+tests/test_models.py::test_asset_file_path_rejects_absolute_paths[/etc/passwd] PASSED [ 86%]
+tests/test_models.py::test_asset_file_path_rejects_absolute_paths[C:\\Windows\\System32\\config] PASSED [ 89%]
+tests/test_models.py::test_asset_file_path_rejects_absolute_paths[\\\\fileserver\\share\\secret.txt] PASSED [ 93%]
+tests/test_models.py::test_asset_file_path_accepts_relative_path PASSED  [ 96%]
+tests/test_models.py::test_practice_setting_one_to_one PASSED            [100%]
+
+============================= 29 passed in 2.31s ==============================

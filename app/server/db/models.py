@@ -91,6 +91,9 @@ class User(Base):
 
     songs: Mapped[list["Song"]] = relationship(back_populates="user")
     jobs: Mapped[list["Job"]] = relationship(back_populates="user")
+    sessions: Mapped[list["UserSession"]] = relationship(
+        back_populates="user", cascade="all, delete-orphan"
+    )
 
 
 class Song(Base):
@@ -205,3 +208,19 @@ class PracticeSetting(Base):
     )
 
     song: Mapped["Song"] = relationship(back_populates="practice_setting")
+
+
+class UserSession(Base):
+    """T1-3: HttpOnly 세션 쿠키(intent/03-architecture-stack.md §3). 쿠키엔 무작위 토큰만 담고
+    DB엔 그 토큰의 SHA-256 해시만 저장한다(auth/security.py의 hash_session_token)."""
+
+    __tablename__ = "user_sessions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True, nullable=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    last_seen_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+
+    user: Mapped["User"] = relationship(back_populates="sessions")
