@@ -5,5 +5,9 @@ target-version = "py312"
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP"]
 
+[tool.ruff.lint.per-file-ignores]
+# alembic이 자동 생성하는 마이그레이션 파일은 린트 대상에서 제외(손으로 고치지 않음)
+"alembic/versions/*.py" = ["E501", "I001", "UP035", "UP007"]
+
 [tool.pytest.ini_options]
 pythonpath = ["."]

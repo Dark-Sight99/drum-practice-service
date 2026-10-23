@@ -1,0 +1,49 @@
+=== 최종 검증(2026-10-23, C-001~C-003/C-007 전부 반영 후) ===
+
+$ ruff check .
+All checks passed!
+
+$ pytest -v
+============================= test session starts =============================
+platform win32 -- Python 3.12.7, pytest-9.1.1, pluggy-1.7.0
+collected 16 items
+
+tests/test_health.py::test_health PASSED                                 [  6%]
+tests/test_migrations.py::test_alembic_upgrade_head PASSED               [ 12%]
+tests/test_models.py::test_create_user PASSED                            [ 18%]
+tests/test_models.py::test_duplicate_username_rejected PASSED            [ 25%]
+tests/test_models.py::test_song_belongs_to_user PASSED                   [ 31%]
+tests/test_models.py::test_asset_cascade_delete_with_song PASSED         [ 37%]
+tests/test_models.py::test_enum_columns_store_lowercase_value_not_member_name PASSED [ 43%]
+tests/test_models.py::test_job_queue_per_user PASSED                     [ 50%]
+tests/test_models.py::test_job_cannot_reference_another_users_song PASSED [ 56%]
+tests/test_models.py::test_fk_violation_rejected_for_invalid_user PASSED [ 62%]
+tests/test_models.py::test_asset_file_path_rejects_path_traversal PASSED [ 68%]
+tests/test_models.py::test_asset_file_path_rejects_absolute_paths[/etc/passwd] PASSED [ 75%]
+tests/test_models.py::test_asset_file_path_rejects_absolute_paths[C:\Windows\System32\config] PASSED [ 81%]
+tests/test_models.py::test_asset_file_path_rejects_absolute_paths[\\fileserver\share\secret.txt] PASSED [ 87%]
+tests/test_models.py::test_asset_file_path_accepts_relative_path PASSED  [ 93%]
+tests/test_models.py::test_practice_setting_one_to_one PASSED            [100%]
+
+============================== 16 passed in 0.97s ==============================
+
+=== 실제 enum 저장값 버그 재현(수정 전, C-있음 발견 당시 기록) ===
+수정 전: ('PENDING', 'AUDIO')   <- SQLAlchemy 기본 동작(.name 저장), 의도와 다름
+수정 후(values_callable 추가): ('pending', 'audio')  <- 의도대로 .value 저장
+
+=== 마이그레이션 제약 확인(최종) ===
+$ grep -n "ForeignKeyConstraint\|CheckConstraint\|UniqueConstraint" alembic/versions/*.py
+sa.ForeignKeyConstraint(['user_id'], ['users.id'], )
+sa.UniqueConstraint('id', 'user_id', name='uq_songs_id_user_id')
+sa.CheckConstraint("file_path NOT LIKE '%..%' AND file_path NOT LIKE '/%' AND file_path NOT LIKE '\%' AND file_path NOT LIKE '_:%'", name='ck_assets_file_path_no_traversal')
+sa.ForeignKeyConstraint(['song_id'], ['songs.id'], )
+sa.ForeignKeyConstraint(['song_id', 'user_id'], ['songs.id', 'songs.user_id'], name='fk_jobs_song_user_match')
+sa.ForeignKeyConstraint(['user_id'], ['users.id'], )
+sa.ForeignKeyConstraint(['song_id'], ['songs.id'], )
+sa.UniqueConstraint('song_id', name='uq_practice_settings_song_id')
+
+=== Codex 검수 이력 ===
+모드A 1차: REQUEST_CHANGES (C-001,C-002,C-003 필수 / C-004,C-005 권장 / C-006 의견)
+  -> C-001,C-002,C-003 수정, C-005는 수정 과정에서 자동 해결, C-004/C-006은 범위 밖으로 판단(수정 안 함)
+모드B 1차: REQUEST_CHANGES (C-007 필수 — CHECK 제약이 절대경로는 안 막음 / C-008 권장 — 로그 9개↔보고서 12개 불일치)
+  -> C-007 수정(절대경로·UNC·드라이브 문자 차단 추가), C-008 수정(result.md 상단 수치 12로 동기화, 상세 로그 전체 교체)
