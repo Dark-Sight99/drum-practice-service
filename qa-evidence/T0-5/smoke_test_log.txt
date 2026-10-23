@@ -1,0 +1,33 @@
+2026-10-23 데스크톱 스모크테스트 로그 (Chrome, http://localhost:8731, duration=5s per segment — 실제 폰 테스트는 180s 기본값)
+
+file:// 로 열었을 때 (보안 컨텍스트 아님):
+보안 컨텍스트(HTTPS/localhost): false
+AudioWorklet 지원: false
+Wake Lock 지원: false
+
+http://localhost:8731 로 열었을 때:
+보안 컨텍스트(HTTPS/localhost): true
+AudioWorklet 지원: true
+Wake Lock 지원: true
+
+4구간 실행 콘솔 로그:
+--- preservesPitch 60% (tempo=0.6, mode=native) 시작 ---
+--- preservesPitch 60% 종료: 최종 어긋남=-44.2ms, 최대 어긋남=44.2ms (표본 20개) ---
+--- preservesPitch 130% (tempo=1.3, mode=native) 시작 ---
+--- preservesPitch 130% 종료: 최종 어긋남=-37.2ms, 최대 어긋남=41.8ms (표본 20개) ---
+--- SoundTouch 60% (tempo=0.6, mode=soundtouch) 시작 ---
+--- SoundTouch 60% 종료: 최종 어긋남=0.0ms, 최대 어긋남=0.7ms (표본 20개) ---
+--- SoundTouch 130% (tempo=1.3, mode=soundtouch) 시작 ---
+--- SoundTouch 130% 종료: 최종 어긋남=-3.5ms, 최대 어긋남=6.1ms (표본 20개) ---
+
+결과 텍스트 영역 최종 내용:
+T0-5 측정 결과 — 2026-10-23T03:05:05.975Z
+출력: 유선/스피커 / UA: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Claude/3.6556.1 Chrome/152.0.7977.167 Safari/537.36 MSIX
+보안컨텍스트=true AudioWorklet=true WakeLock=true
+
+[preservesPitch 60%] 최종=-44.2ms 최대=44.2ms
+[preservesPitch 130%] 최종=-37.2ms 최대=41.8ms
+[SoundTouch 60%] 최종=0.0ms 최대=0.7ms
+[SoundTouch 130%] 최종=-3.5ms 최대=6.1ms
+
+참고: 이 수치는 데스크톱 Chrome 5초 구간 결과이며 iOS Safari 실측(180초, ±30ms 기준 판단)을 대체하지 않음. 자바스크립트 오류 없이 4구간 모두 완료되는지 확인하는 용도.
