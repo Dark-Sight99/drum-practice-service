@@ -54,8 +54,8 @@ function validateNote(note: unknown, index: number, errors: string[]): void {
     errors.push(`notes[${index}]: 객체가 아님`)
     return
   }
-  if (typeof note.tick !== 'number' || !Number.isFinite(note.tick) || note.tick < 0) {
-    errors.push(`notes[${index}].tick: 0 이상의 유한한 숫자가 아님`)
+  if (typeof note.tick !== 'number' || !Number.isInteger(note.tick) || note.tick < 0) {
+    errors.push(`notes[${index}].tick: 0 이상의 정수가 아님`)
   }
   if (typeof note.piece !== 'string' || !DRUM_PIECES.includes(note.piece as DrumPiece)) {
     errors.push(`notes[${index}].piece: 유효한 타악기 분류가 아님(${DRUM_PIECES.join('|')})`)
@@ -76,16 +76,7 @@ function validateNote(note: unknown, index: number, errors: string[]): void {
   }
 }
 
-/** DrumScore 구조·범위를 검사한다. 예외를 던지지 않음 — REQ-02 수용 기준
- * ("인식 실패/부분 인식 시에도 크래시 없이 '인식된 부분 + 편집 필요' 상태로 진입")에
- * 맞춰, 호출자가 항상 에러 목록을 받아 어느 부분이 문제인지 보여줄 수 있게 한다. */
-export function validateDrumScore(data: unknown): ValidationResult {
-  const errors: string[] = []
-
-  if (!isPlainObject(data)) {
-    return { valid: false, errors: ['DrumScore는 객체여야 함'] }
-  }
-
+function runChecks(data: Record<string, unknown>, errors: string[]): void {
   if (data.version !== 1) {
     errors.push('version: 1이 아님')
   }
@@ -104,6 +95,27 @@ export function validateDrumScore(data: unknown): ValidationResult {
 
   if (typeof data.audioOffsetMs !== 'number' || !Number.isFinite(data.audioOffsetMs)) {
     errors.push('audioOffsetMs: 유한한 숫자가 아님')
+  }
+}
+
+/** DrumScore 구조·범위를 검사한다. 예외를 던지지 않음 — REQ-02 수용 기준
+ * ("인식 실패/부분 인식 시에도 크래시 없이 '인식된 부분 + 편집 필요' 상태로 진입")에
+ * 맞춰, 호출자가 항상 에러 목록을 받아 어느 부분이 문제인지 보여줄 수 있게 한다.
+ *
+ * Codex 모드A C-001(재현됨): 필드 접근 중 예외를 던지는 값(예: getter가 던지는
+ * 객체)이 섞여 있으면 검사 로직 자체가 예외를 던질 수 있었음 — 전체를 try/catch로
+ * 감싸 "절대 던지지 않는다"는 보장을 입력 형태와 무관하게 지킨다. */
+export function validateDrumScore(data: unknown): ValidationResult {
+  if (!isPlainObject(data)) {
+    return { valid: false, errors: ['DrumScore는 객체여야 함'] }
+  }
+
+  const errors: string[] = []
+  try {
+    runChecks(data, errors)
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    return { valid: false, errors: [`검증 중 예상치 못한 오류: ${message}`] }
   }
 
   return { valid: errors.length === 0, errors }

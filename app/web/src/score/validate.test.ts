@@ -90,6 +90,14 @@ describe('validateDrumScore', () => {
     expect(result.errors[0]).toContain('notes[0].tick')
   })
 
+  it('rejects a non-integer tick (Codex 모드A C-002)', () => {
+    const score = minimalScore()
+    score.notes = [{ tick: 1.5, piece: 'kick', velocity: 100, hand: null }]
+    const result = validateDrumScore(score)
+    expect(result.valid).toBe(false)
+    expect(result.errors[0]).toContain('notes[0].tick')
+  })
+
   it('rejects a hand value outside R|L|RF|LF|null', () => {
     const score = minimalScore()
     // @ts-expect-error 의도적으로 잘못된 값 주입
@@ -112,6 +120,23 @@ describe('validateDrumScore', () => {
     expect(validateDrumScore(42).valid).toBe(false)
     expect(() => validateDrumScore({ notes: 'not an array' })).not.toThrow()
     expect(validateDrumScore({ notes: 'not an array' }).valid).toBe(false)
+  })
+
+  it('does not crash when a note field throws on access (Codex 모드A C-001 회귀)', () => {
+    const score = minimalScore()
+    score.notes = [
+      Object.defineProperty({}, 'piece', {
+        get() {
+          throw new Error('악의적/손상된 데이터의 getter가 접근 중 예외를 던짐')
+        },
+        enumerable: true,
+      }) as never,
+    ]
+    let result: ReturnType<typeof validateDrumScore> | undefined
+    expect(() => {
+      result = validateDrumScore(score)
+    }).not.toThrow()
+    expect(result?.valid).toBe(false)
   })
 })
 

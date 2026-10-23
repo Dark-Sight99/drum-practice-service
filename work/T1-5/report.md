@@ -1,4 +1,4 @@
-> 한 줄 요약: DrumScore TypeScript 타입·GM 매핑 상수(공식 표 재확인)·검증 함수(크래시 없음) 구현. REQ-02의 최소 분류 9종 전부 표현, 테스트 18개로 증명.
+> 한 줄 요약: DrumScore TypeScript 타입·GM 매핑 상수(공식 표 재확인)·검증 함수(크래시 없음) 구현. REQ-02의 최소 분류 9종 전부 표현, 테스트 20개로 증명.
 
 # T1-5 보고
 
@@ -9,7 +9,7 @@
 | `app/web/src/score/gmMapping.ts` | `PIECE_TO_GM_NOTE`, `GM_NOTE_TO_PIECE`(역방향) | REQ-02(MIDI 내보내기), 향후 T2-1(MIDI 가져오기) |
 | `app/web/src/score/validate.ts` | `validateDrumScore`(예외 없이 에러 목록 반환), `isDrumScore`(타입가드) | REQ-02 수용 기준("인식 실패/부분 인식 시에도 크래시 없이... 진입") |
 | `app/web/src/score/index.ts` | 재노출 | — |
-| `app/web/src/score/gmMapping.test.ts`, `validate.test.ts` | 테스트 18개 | `work/T1-5/plan.md` 테스트계획 |
+| `app/web/src/score/gmMapping.test.ts`, `validate.test.ts` | 테스트 20개(Codex 모드A 회귀 2개 포함) | `work/T1-5/plan.md` 테스트계획 + Codex 모드A C-001/C-002 |
 
 ## 범위 결정: 왜 app/web(TypeScript)만
 `intent/03-architecture-stack.md` §1 "모든 화면이 이 형식만 읽음"에 따라 DrumScore는 프런트엔드가 소비하는 계약으로 판단. T1-1에서 이미 `app/web/src/score/`를 빈 디렉터리로 스캐폴드해둔 것도 이 판단을 뒷받침함. REQ-02 경로 C(MIDI/MusicXML/GP)는 `@tonejs/midi`·`alphaTab`(JS/TS 라이브러리)로 **브라우저에서 직접** DrumScore를 만드는 경로라 TypeScript 타입이 먼저 필요함. 경로 A(ADT)·B(OMR)가 Python에서 DrumScore를 생성하는 부분은 Phase 3(T3-2)·Phase 4(T4-1) 범위라 이번엔 다루지 않음(CLAUDE.md 절대규칙 6) — 그 작업에서 Python이 만든 JSON을 이 TypeScript 타입·검증 함수로 교차 검증하면 됨. 자세한 근거는 `work/T1-5/plan.md` §범위.
@@ -20,7 +20,13 @@
 - 완전히 잘못된 입력(`null`, 문자열, `notes`가 배열이 아님 등)에도 예외 없이 `invalid` 반환하는 것을 테스트로 확인.
 
 ## 실행한 검증
-`qa-evidence/T1-5/result.md`, `raw_log.txt` — tsc/oxlint/vitest(18/18) PASS. prettier는 이번 변경 파일(`src/score/`)만 따로 돌려 PASS 확인 — 전체 `src` 기준으로는 T1-1 때부터 있던 기존 파일 6개(App.tsx 등)에서 포맷 경고가 있으나 이번 작업과 무관해 손대지 않음(범위 밖).
+`qa-evidence/T1-5/result.md`, `raw_log.txt` — tsc/oxlint/vitest(20/20) PASS. prettier는 이번 변경 파일(`src/score/`)만 따로 돌려 PASS 확인 — 전체 `src` 기준으로는 T1-1 때부터 있던 기존 파일 6개(App.tsx 등)에서 포맷 경고가 있으나 이번 작업과 무관해 손대지 않음(범위 밖).
+
+## Codex 모드 A 검수 반영 (2026-10-23)
+판정: REQUEST_CHANGES. 원문: `qa-evidence/T1-5/codex-modeA.md`.
+
+- **C-001**(필수): `data.notes` 원소의 필드 접근이 예외를 던지면(예: getter) `validateDrumScore`가 그대로 예외를 전파한다는 지적 — 실제로 `piece` 접근 시 예외를 던지는 getter를 가진 객체로 직접 재현(예외가 그대로 전파됨). **수정함**: 필드 검사 로직을 `try/catch`로 감싸 어떤 예외든 `{valid:false, errors:[...]}`로 변환. 회귀 테스트 추가. "검증 함수는 절대 예외를 던지지 않는다"를 입력 형태와 무관하게 보장하는 국소 수정이라 바로 적용함.
+- **C-002**(권장): `tick`이 정수인지 확인하지 않아 소수 틱도 허용된다는 지적 — 수용 기준엔 명시 안 됐지만 `ppq` 기반 정수 틱이 스키마 의도에 맞아 타당하다고 판단, 수정함(`Number.isFinite` → `Number.isInteger`). 회귀 테스트 추가.
 
 ## 가정
 - 서버(Python)에 동일한 DrumScore 타입/검증을 만들지 않음 — Phase 3/4에서 실제 생성 코드가 필요해질 때 이 TypeScript 쪽과 교차 검증하는 방식으로 대응.
