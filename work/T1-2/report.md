@@ -18,7 +18,7 @@
 - Alembic `env.py`는 기본 템플릿이 `target_metadata = None`이라 autogenerate가 빈 마이그레이션만 만든다는 것을 실행으로 확인 → `db.models.Base.metadata`를 연결하고 `db.session.get_database_url()`로 URL을 주입하도록 수정.
 
 ## 실행한 검증
-`qa-evidence/T1-2/result.md`, `raw_log.txt` 참고 — ruff PASS, pytest 9/9 PASS.
+`qa-evidence/T1-2/result.md`, `raw_log.txt` 참고 — ruff PASS, pytest 16/16 PASS(Codex 모드A/B 반영 테스트 포함 최종 수치).
 
 ## 가정
 - `password_hash` 컬럼은 이번엔 타입(String)만 만듦 — 실제 argon2 해싱 로직과 로그인 세션은 T1-3 범위.
