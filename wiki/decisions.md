@@ -22,6 +22,23 @@
 | Audiveris(AGPL)·ADTOF(NC) 다중 사용자 라이선스 해석 | 조사 완료, 법적 결론 아님 | 전문가 확인 권장, Audiveris 코드 직접 수정 시 재검토 |
 | 종이 악보 OMR 품질 | 압축 한 줄 표기에서 낮음(완전 인식 40%). REQ-03 편집기 필수 확인 | 표준 5선 표기 샘플이 생기면 추가 비교 |
 
+## Phase 1 게이트 (2026-10-23, 태그 `phase-1`)
+
+| 결정 | 선택 | 근거 | 관련 |
+|---|---|---|---|
+| DrumScore 구현 위치 | app/web(TypeScript)만, Python 쪽은 안 만듦 | "모든 화면이 이 형식만 읽음" 원칙(`03-architecture-stack.md` §1) + 경로C(MIDI/MusicXML/GP)가 브라우저에서 처리됨. 경로A/B의 Python 생성은 Phase 3/4에서 이 타입과 교차 검증 | T1-5 |
+| 관리자가 관리자 생성 가능 여부 | 제한 없이 그대로 둠(의뢰인 1명 전제) | Codex 지적(Q-16)이지만 현재 1인 관리자 구조에서 위험 낮다고 판단, 최종 결정은 보류 | T1-3, Q-16 |
+| 워커 다중 실행 지원 여부 | "워커는 항상 1개만 띄운다"는 운영 규칙으로 대응, 스키마 변경 안 함 | 다중 워커 지원엔 Job에 워커 식별자 컬럼 추가가 필요해 범위 밖으로 판단 | T1-4, Q-17 |
+
+## Phase 2 진행 중 결정 (2026-10-23)
+
+| 결정 | 선택 | 근거 | 관련 |
+|---|---|---|---|
+| MIDI/MusicXML/GP 가져오기 아키텍처 | alphaTab으로 파싱 → alphaTab 자신의 MIDI 생성기로 표준 MIDI 바이너리 재수출 → @tonejs/midi로 재파싱, `.mid` 직접 가져오기와 같은 변환기로 합류 | 틱·템포·타이 계산을 alphaTab에 전부 맡기고 "MIDI 이벤트→DrumScore" 로직은 한 곳만 유지. 실제 Phase 0 샘플(`qa-evidence/T0-4/drum_test.musicxml`)로 검증 | T2-1 |
+| 오디오 엔진 마스터 클록 | Tone.js Transport를 감싸는 자체 래퍼(`clock.ts`) | "단일 마스터 클록" 원칙(`03-architecture-stack.md` §1), Tone 직접 참조를 다른 모듈에 안 흘려 교체 가능하게 유지 | T2-2 |
+| **MIDI 드럼 소리 최종 선택** | **Virtuosity Drums(Versilian Studios/Karoryfer, CC0) 실제 녹음 샘플** — Tone.js 내장 신스(초안)는 폐기 | 의뢰인이 신스 음색을 "실제 소리 같지 않다"고 피드백 → 사운드폰트(FluidR3Mono, MIT)·샘플팩(Virtuosity Drums, CC0) 조사 후 Virtuosity Drums로 교체 지시 → 교체 후 의뢰인이 직접 듣고 승인("소리 좋은데") | T2-2b, Q-19 |
+| 톰 3종(high/mid/floor) ↔ 샘플팩 2종(Low/High) 불일치 처리 | 피치시프트 등 가공 안 함, Low Tom의 실제 타법(center=mid, off-center=floor)으로 구분 | 근거 없는 음원 가공 금지(CLAUDE.md 규칙1) | T2-2b |
+
 ## 환경/인프라
 
 | 항목 | 내용 |
