@@ -37,3 +37,9 @@
 - T2-3(연습 화면 렌더러)이 `getMasterClock().getPositionSeconds()`를 읽어 레인과 동기화할 차례.
 - T2-4(BPM 슬라이더)가 `getMasterClock().setBpm()`을 실제로 UI에 연결.
 - Q-05(±30ms 공식 측정), Q-19(신스 음색 승인) 모두 열려 있음.
+
+## Codex 모드 A 검수 반영 (2026-10-23)
+판정: REQUEST_CHANGES. 원문: `qa-evidence/T2-2/codex-modeA.md`.
+
+- **C-001**(필수): `clock.ts`·`scorePlayer.ts`가 `transport.timeSignature`에 분자만 넘겨서, 4가 아닌 분모(6/8 등)에서 Transport의 "1마디" 길이 계산이 틀어진다는 지적 — 실제 브라우저로 재현 확인(분자만 6→1마디 3초로 잘못 계산, 정답 1.5초). `score.meta.timeSignature` 배열 전체를 그대로 넘기도록 수정, 수정 후 1.5초로 정확히 나옴을 재확인.
+- **C-002**(권장): 메트로놈 강박 판정이 로컬 카운터 기반이라 Transport가 마디 경계 아닌 위치에서 이미 돌고 있으면 강박이 틀어질 수 있다는 지적 — `Transport.getTicksAtTime()`으로 그 순간의 절대 틱을 읽어 계산하도록 변경, 실제 브라우저에서 Transport를 1.1초(마디 경계 아님)에서 시작해도 강박이 정확히 전역 마디 경계(0,2,4...초)에 맞음을 확인.

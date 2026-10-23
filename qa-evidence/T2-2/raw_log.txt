@@ -70,3 +70,41 @@ JS 콜백 실행 시점에 Transport.seconds를 읽은 값이라 실제 오디�
 정밀도(Web Audio API가 내부적으로 미리 스케줄함)보다 다소 늦게 보일 수 있음
 (측정 방법의 한계, 실제 오디오 타이밍 오차로 단정 못함 — REQ-04의 공식
 ±30ms 측정은 Q-05 계획대로 더 많은 조각이 모인 뒤 별도 수행).
+
+=== Codex 모드A 지적(C-001, C-002) 반영 후 재검증 ===
+
+--- C-001(박자표 분자만 Transport에 설정) 재현/수정 확인 (실제 브라우저 콘솔) ---
+setTimeSignature([6,8]) 적용 전(분자만 6으로 설정): Transport가 "1마디"를 3초로 계산
+(6/4로 취급 — 틀림, 기대값 1.5초)
+수정 후(배열 [6,8] 그대로 전달): Transport.TimeClass('1m').toSeconds() = 1.5
+→ "C-001 검증: setTimeSignature([6,8]) 후 1마디(1m) = 1.5초 (기대값 1.5)" 로그로 확인
+
+--- C-002(메트로놈 강박이 로컬 카운터 기반 — 마디 경계 아닌 위치에서 시작하면 틀어짐) 재현/수정 확인 ---
+Transport를 마디 경계가 아닌 1.1초 위치로 이동 후 메트로놈 시작(4/4, 120bpm).
+수정 후(Transport 절대 틱 기반으로 클릭 인덱스 계산)의 실제 로그:
+  clickIndex=3(1.65s,비강박) → 4(2.15s,강박) → ... → 8(4.17s,강박) → ... → 12(6.15s,강박)
+  → ... → 16(8.15s,강박) → ... → 20(10.15s,강박)
+→ 강박이 항상 4클릭마다(4/4 기준) 정확히 돌아오고, 그 시각이 전부 "절대 0초 기준
+2초 배수"(2,4,6,8,10초)에 가깝게 맞음 — Transport가 1.1초라는 애매한 위치에서
+시작했는데도 강박 위치가 틀어지지 않음(수정 전이었다면 로컬 카운터가 0부터
+다시 세기 시작해 강박이 실제 마디 경계와 무관한 위치에서 울렸을 것).
+
+--- 최종 재검증(tsc/oxlint/prettier/vitest) ---
+--- tsc ---
+exit: 0
+--- oxlint ---
+exit: 0
+--- prettier(src/audio) ---
+Checking formatting...
+All matched files use Prettier code style!
+exit: 0
+--- vitest ---
+
+ RUN  v5.0.5 C:/Users/Jaewoo/드럼연습서비스/app/web
+
+
+ Test Files  7 passed (7)
+      Tests  46 passed (46)
+   Start at  22:16:58
+   Duration  1.07s (environment 82%, setup 12%, import 3%, tests 2%, transform 1%, worker 1%)
+

@@ -24,20 +24,22 @@ export function createMetronome(options: MetronomeOptions): Metronome {
   const synth = new Tone.MembraneSynth({ volume: options.volumeDb ?? -6 }).toDestination()
   const transport = Tone.getTransport()
 
-  let beatIndex = 0
   const clicksPerBar = Math.round(
     options.timeSignature[0] * (subdivision / options.timeSignature[1]),
   )
+  // Codex 모드A C-002(재현됨): 클릭마다 로컬 카운터를 1씩 올리는 방식은
+  // Transport가 마디 경계가 아닌 위치에서 이미 돌고 있을 때(예: 이전 재생을
+  // 멈췄다가 메트로놈만 다시 켠 경우) 몇 번째 클릭이 강박인지 처음부터 틀어짐.
+  // 대신 Transport 절대 틱(항상 0=1마디 1박 기준)에서 직접 몇 번째 클릭인지
+  // 계산해, 메트로놈이 언제 시작되든 항상 올바른 위치에서 강박이 울리게 함.
+  const ticksPerClick = transport.PPQ * (4 / subdivision)
   let enabled = true
 
   const eventId = transport.scheduleRepeat((time) => {
-    if (!enabled) {
-      beatIndex = (beatIndex + 1) % clicksPerBar
-      return
-    }
-    const isAccent = beatIndex === 0
+    if (!enabled) return
+    const clickIndex = Math.round(transport.getTicksAtTime(time) / ticksPerClick)
+    const isAccent = clickIndex % clicksPerBar === 0
     synth.triggerAttackRelease(isAccent ? 'C3' : 'C2', '16n', time)
-    beatIndex = (beatIndex + 1) % clicksPerBar
   }, CLICK_INTERVAL[subdivision])
 
   return {

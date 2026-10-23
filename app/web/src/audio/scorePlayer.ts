@@ -34,7 +34,10 @@ export function playDrumScore(
   transport.stop()
   transport.position = 0
   transport.bpm.value = score.meta.bpm
-  transport.timeSignature = score.meta.timeSignature[0]
+  // Codex 모드A C-001(재현됨): 분자만 넘기면 Transport가 분모를 4로 가정해
+  // "1마디" 길이가 실제와 달라짐(6/8을 6으로 넘기면 Transport는 6/4로 취급 —
+  // 실제 실행으로 확인: 6/8·120bpm 1마디는 1.5초인데 분자만 넘기면 3초가 됨).
+  transport.timeSignature = score.meta.timeSignature
 
   const countInSeconds = barDurationSeconds(score.meta.timeSignature, score.meta.bpm) * countInBars
   const countInClicks = metronomeBeatTimes(score.meta.timeSignature, score.meta.bpm, countInBars)
