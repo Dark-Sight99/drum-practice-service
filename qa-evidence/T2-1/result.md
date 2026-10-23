@@ -17,7 +17,7 @@
 |---|---|
 | `importMidi.test.ts`(5개) | 퍼커션 채널(9) 노트→DrumScore 변환, 비퍼커션 채널 무시, 9종 밖 GM 노트(카우벨 등) 스킵+집계, 손상 바이트도 크래시 없이 `{ok:false}`, 템포/박자 이벤트 없을 때 120bpm/4·4 기본값 |
 | `importNotation.test.ts`(3개) | **`qa-evidence/T0-4/drum_test.musicxml`(Phase 0 실제 드럼 샘플)**로 kick/snare/hihat_closed·closed 4노트 정확히 생성 + `validateDrumScore` 통과, **`qa-evidence/T0-3/out/IMG_7945.mxl`(Audiveris 실제 OMR 출력)**로 크래시 없이 처리, 손상 바이트도 `{ok:false}` |
-| `index.test.ts`(4개) | 확장자별 라우팅(.mid→MIDI 경로, .musicxml→악보 경로, .gp5→악보 경로), 미지원 확장자 거부 |
+| `index.test.ts`(5개) | 확장자별 라우팅(.mid→MIDI 경로, .musicxml→악보 경로, .gp5→악보 경로), **GP7 실제 바이너리로 kick/snare/hihat_closed×2 정확히 생성**(Codex 모드A C-001 반영), 손상된 .gp5 입력도 크래시 없이 실패, 미지원 확장자 거부 |
 
 ## 수용 기준(REQ-02 경로 C) 충족 여부
 - [x] 각 경로별 샘플 1개 이상으로 DrumScore 생성 성공 — **MIDI**: 직접 구성한 테스트 MIDI로 확인. **MusicXML**: `qa-evidence/T0-4/drum_test.musicxml`(실제 샘플)로 확인. **GP**: alphaTab의 `Gp7Exporter`로 그 MusicXML 샘플을 실제 Guitar Pro 7+ 바이너리로 내보낸 `qa-evidence/T2-1/drum_test_roundtrip.gp`로 확인(Codex 모드A C-001 지적으로 보강, 아래 "Codex 모드A 검수 반영" 참고) — 단, 사람이 실제 GP 앱으로 만든 파일은 아직 미검증(Q-18)
