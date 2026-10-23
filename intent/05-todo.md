@@ -42,6 +42,7 @@
   - 완료(2026-10-23): `app/web/src/score/import/`. alphaTab으로 MusicXML/.mxl/GP를 파싱해 자신의 MIDI 생성기로 표준 MIDI 바이너리를 뽑아낸 뒤 @tonejs/midi로 재파싱 — .mid 직접 가져오기와 같은 변환기로 합류시키는 단일 경로. `qa-evidence/T0-4/drum_test.musicxml`(Phase 0 실제 샘플)로 MusicXML 경로 검증, GP는 alphaTab 자신의 Gp7Exporter로 만든 실제 GP7 바이너리로 검증(Codex 모드A C-001 반영 — 사람이 만든 파일은 아니라 Q-18 부분 해소로 등록). 모드B 2회 끝에 APPROVE. 테스트 13개(전체 웹 33개). 증거: `qa-evidence/T2-1/`, 위키: `wiki/architecture.md`
 - [x] T2-2 ∥ 오디오 엔진: 마스터 클록, MIDI 드럼 소리, 메트로놈, 카운트인 (REQ-04)
   - 완료(2026-10-23): `app/web/src/audio/`. 틱→초 변환 등 순수 계산(`timing.ts`)은 단위 테스트, Tone.js 연동(Transport·신스)은 jsdom이 Web Audio API를 구현 안 해 실제 브라우저로 수동 QA. 수동 QA 중 실제 버그 발견(메트로놈 먼저 실행 후 재생 시 전부 무음 — Transport 절대시각 리셋 안 함) 및 수정. Codex 모드A에서 박자표 분자만 전달(C-001, 필수)·메트로놈 강박 로컬카운터(C-002, 권장) 추가 발견·수정, 모드B 1회 APPROVE. REQ-04의 ±30ms 공식 측정은 Q-05 계획대로 보류(분리 오디오+BPM UI 필요). 테스트 46개(전체 웹). 증거: `qa-evidence/T2-2/`, 위키: `wiki/architecture.md`
+- [ ] T2-2b 드럼 소리를 실제 샘플(Virtuosity Drums, CC0)로 교체 — 의뢰인 피드백(T2-2 합성음이 실제 소리 같지 않음), `intent/07-open-questions.md` Q-19
 - [ ] T2-3 ∥ 연습 화면 렌더러: 레인 + 킷 점등 + 마디선 (REQ-06). 구현은 병렬 가능, fps 측정(⏱)은 단독 실행
 - [ ] T2-4 BPM 변경·A-B 루프 (REQ-04)
 - [ ] T2-5 라이브러리 화면·업로드 (REQ-07)
