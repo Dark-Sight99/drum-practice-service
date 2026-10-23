@@ -25,3 +25,23 @@ exit: 1
    Start at  21:27:18
    Duration  862ms (environment 78%, setup 12%, import 4%, transform 3%, tests 2%, worker 1%)
 
+
+=== Codex 모드A 지적(C-001, GP 경로 성공 샘플 없음) 반영 후 재검증 ===
+--- tsc ---
+exit: 0
+--- oxlint ---
+exit: 0
+--- prettier(src/score) ---
+Checking formatting...
+All matched files use Prettier code style!
+exit: 0
+--- vitest ---
+
+ RUN  v5.0.5 C:/Users/Jaewoo/드럼연습서비스/app/web
+
+
+ Test Files  6 passed (6)
+      Tests  33 passed (33)
+   Start at  21:31:08
+   Duration  880ms (environment 79%, setup 13%, import 3%, tests 2%, transform 1%, worker 1%)
+
