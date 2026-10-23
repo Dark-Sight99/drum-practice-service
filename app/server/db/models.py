@@ -3,7 +3,18 @@
 import enum
 from datetime import datetime
 
-from sqlalchemy import DateTime, Enum, Float, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import (
+    CheckConstraint,
+    DateTime,
+    Enum,
+    Float,
+    ForeignKey,
+    ForeignKeyConstraint,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 
@@ -84,6 +95,12 @@ class User(Base):
 
 class Song(Base):
     __tablename__ = "songs"
+    __table_args__ = (
+        # Job.song_id+user_id 복합 FK가 "이 곡의 소유자"를 DB 레벨에서 검증할 수 있게 하는 대상
+        # (Codex 모드A C-002). id는 이미 PK로 유일하지만, 복합 FK의 참조 대상이 되려면
+        # SQLite에 (id, user_id) 쌍에 대한 유일 인덱스가 별도로 있어야 한다.
+        UniqueConstraint("id", "user_id", name="uq_songs_id_user_id"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
@@ -106,7 +123,10 @@ class Song(Base):
     assets: Mapped[list["Asset"]] = relationship(
         back_populates="song", cascade="all, delete-orphan"
     )
-    jobs: Mapped[list["Job"]] = relationship(back_populates="song")
+    # overlaps: Job이 user_id를 (users FK)와 (songs 복합 FK) 양쪽에서 쓰는 것에 대해
+    # SQLAlchemy가 경고를 내는데, 의도한 설계(Job.user_id는 항상 Job.song.user_id와 같아야 함)라
+    # 실제 실행 결과(SAWarning 문구)가 안내한 대로 overlaps를 달아 경고를 끈다.
+    jobs: Mapped[list["Job"]] = relationship(back_populates="song", overlaps="jobs")
     practice_setting: Mapped["PracticeSetting | None"] = relationship(
         back_populates="song", uselist=False, cascade="all, delete-orphan"
     )
@@ -114,6 +134,12 @@ class Song(Base):
 
 class Asset(Base):
     __tablename__ = "assets"
+    __table_args__ = (
+        # Codex 모드A C-003: file_path에 ".."가 들어가면(경로 조작) DB 레벨에서 거부.
+        # 전체 경로 검증(절대경로 금지, data/ 내부인지 확인 등)은
+        # 실제 파일 저장 코드(Phase 3)에서 추가로 한다 — 이건 최소한의 DB 레벨 방어선.
+        CheckConstraint("file_path NOT LIKE '%..%'", name="ck_assets_file_path_no_traversal"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     song_id: Mapped[int] = mapped_column(ForeignKey("songs.id"), nullable=False, index=True)
@@ -126,10 +152,22 @@ class Asset(Base):
 
 class Job(Base):
     __tablename__ = "jobs"
+    __table_args__ = (
+        # Codex 모드A C-002: user_id/song_id를 각각 독립 FK로 두면
+        # "다른 사용자의 곡을 참조하는 작업"이 DB에 그냥 저장될 수 있음.
+        # 복합 FK로 (song_id, user_id)가 songs의 (id, user_id)와 정확히 일치해야만
+        # 저장되게 해서, 작업의 소유자가 곡의 소유자와 다를 수 없게 한다.
+        ForeignKeyConstraint(
+            ["song_id", "user_id"],
+            ["songs.id", "songs.user_id"],
+            name="fk_jobs_song_user_match",
+        ),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
-    song_id: Mapped[int | None] = mapped_column(ForeignKey("songs.id"), nullable=True, index=True)
+    # REQ-10의 모든 작업 유형(분리/채보/OMR/가져오기)은 특정 곡에 대한 처리라 song_id는 필수로 둔다.
+    song_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
     job_type: Mapped[JobType] = mapped_column(str_enum_column(JobType), nullable=False)
     status: Mapped[JobStatus] = mapped_column(
         str_enum_column(JobStatus), default=JobStatus.QUEUED, nullable=False, index=True
@@ -139,8 +177,10 @@ class Job(Base):
     started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
-    user: Mapped["User"] = relationship(back_populates="jobs")
-    song: Mapped["Song | None"] = relationship(back_populates="jobs")
+    user: Mapped["User"] = relationship(
+        back_populates="jobs", foreign_keys=[user_id], overlaps="jobs"
+    )
+    song: Mapped["Song"] = relationship(back_populates="jobs", overlaps="jobs,user")
 
 
 class PracticeSetting(Base):

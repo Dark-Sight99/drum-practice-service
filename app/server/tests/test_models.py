@@ -1,5 +1,5 @@
 import pytest
-from sqlalchemy import create_engine, text
+from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -16,11 +16,15 @@ from db.models import (
     SongStatus,
     User,
 )
+from db.session import create_sqlite_engine
 
 
 @pytest.fixture
 def session():
-    engine = create_engine("sqlite:///:memory:")
+    # create_sqlite_engine를 써야 PRAGMA foreign_keys=ON이 걸려 FK 위반 테스트가 의미 있음
+    # (그냥 create_engine을 쓰면 SQLite가 FK를 검사하지 않아 아래 FK 관련 테스트들이 통과해버림 —
+    # Codex 모드A C-005 지적, 실제 재현 확인).
+    engine = create_sqlite_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine)
     SessionLocal = sessionmaker(bind=engine)
     db = SessionLocal()
@@ -93,16 +97,62 @@ def test_enum_columns_store_lowercase_value_not_member_name(session: Session) ->
     assert row == ("pending", "audio")
 
 
+def _make_song(db: Session, user: User, title: str = "곡") -> Song:
+    song = Song(user_id=user.id, title=title, source_type=SongSourceType.AUDIO)
+    db.add(song)
+    db.commit()
+    db.refresh(song)
+    return song
+
+
 def test_job_queue_per_user(session: Session) -> None:
     u1 = _make_user(session, "user1")
     u2 = _make_user(session, "user2")
-    session.add(Job(user_id=u1.id, job_type=JobType.SEPARATE, status=JobStatus.QUEUED))
-    session.add(Job(user_id=u2.id, job_type=JobType.TRANSCRIBE, status=JobStatus.QUEUED))
+    s1 = _make_song(session, u1, "u1곡")
+    s2 = _make_song(session, u2, "u2곡")
+    session.add(
+        Job(user_id=u1.id, song_id=s1.id, job_type=JobType.SEPARATE, status=JobStatus.QUEUED)
+    )
+    session.add(
+        Job(user_id=u2.id, song_id=s2.id, job_type=JobType.TRANSCRIBE, status=JobStatus.QUEUED)
+    )
     session.commit()
 
     u1_jobs = session.query(Job).filter(Job.user_id == u1.id).all()
     assert len(u1_jobs) == 1
     assert u1_jobs[0].job_type == JobType.SEPARATE
+
+
+def test_job_cannot_reference_another_users_song(session: Session) -> None:
+    """Codex 모드A C-002: user_id/song_id가 각각 독립 FK면 사용자 A의 작업이 사용자 B의 곡을
+    참조할 수 있었음 — 복합 FK(song_id, user_id) -> (songs.id, songs.user_id)로 막았는지 확인."""
+    u1 = _make_user(session, "user1")
+    u2 = _make_user(session, "user2")
+    s2 = _make_song(session, u2, "u2곡")
+
+    # u1이 u2의 곡을 참조하는 작업을 만들려고 하면 복합 FK 위반으로 막혀야 한다.
+    session.add(Job(user_id=u1.id, song_id=s2.id, job_type=JobType.SEPARATE))
+    with pytest.raises(IntegrityError):
+        session.commit()
+
+
+def test_fk_violation_rejected_for_invalid_user(session: Session) -> None:
+    """Codex 모드A C-001: SQLite는 기본적으로 FK를 검사하지 않음 —
+    create_sqlite_engine의 PRAGMA foreign_keys=ON이 실제로 적용되는지 확인."""
+    session.add(Song(user_id=999999, title="없는 사용자", source_type=SongSourceType.AUDIO))
+    with pytest.raises(IntegrityError):
+        session.commit()
+
+
+def test_asset_file_path_rejects_path_traversal(session: Session) -> None:
+    """Codex 모드A C-003: file_path에 '..'가 들어간 경로 조작 시도를 DB 레벨에서 거부하는지 확인."""
+    user = _make_user(session)
+    song = _make_song(session, user)
+    session.add(
+        Asset(song_id=song.id, kind=AssetKind.ORIGINAL, file_path="../../etc/passwd")
+    )
+    with pytest.raises(IntegrityError):
+        session.commit()
 
 
 def test_practice_setting_one_to_one(session: Session) -> None:

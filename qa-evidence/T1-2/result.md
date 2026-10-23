@@ -23,6 +23,14 @@
 
 전체 로그: `raw_log.txt`
 
+## Codex 모드A 반영 후 테스트 (총 12개, 신규 4개 추가)
+| 신규 테스트 | 확인하는 것 |
+|---|---|
+| `test_fk_violation_rejected_for_invalid_user` | C-001: FK 제약이 실제로 켜져 있는지(없는 user_id 거부) |
+| `test_job_cannot_reference_another_users_song` | C-002: 복합 FK로 다른 사용자 곡 참조 작업 거부 |
+| `test_asset_file_path_rejects_path_traversal` | C-003: `..` 경로 조작 문자열 거부 |
+| (fixture 변경) | C-005: 테스트 엔진도 FK 검사 켜짐 |
+
 ## 수용 기준(T1-2) 충족 여부
 - [x] 5개 테이블(users, songs, assets, jobs, practice_settings) 스키마 구현
 - [x] REQ-07: songs에 제목/아티스트/원곡BPM/입력경로(source_type)/상태 컬럼, assets로 원본·분리트랙·DrumScore 저장 구조, practice_settings로 BPM/볼륨/루프 저장

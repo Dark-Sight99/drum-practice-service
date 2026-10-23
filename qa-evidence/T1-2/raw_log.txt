@@ -23,6 +23,11 @@ $ python -c "... Song(status 기본값) 생성 후 SELECT status, source_type FR
 수정 전: ('PENDING', 'AUDIO')   <- SQLAlchemy 기본 동작(.name 저장), 의도와 다름
 수정 후(values_callable 추가): ('pending', 'audio')  <- 의도대로 .value 저장
 
+=== Codex 모드A 지적(C-001/002/003) 수정 후 재검증 ===
+ruff check .: All checks passed!
+pytest -v: 12 passed (신규 4개 — FK invalid user, job cross-user song, path traversal,
+            fixture가 PRAGMA foreign_keys=ON 쓰도록 변경)
+
 === 마이그레이션 enum 값 확인 ===
 $ grep -n "Enum(" alembic/versions/*.py
 sa.Enum('audio', 'omr', 'midi', 'musicxml', 'gp', name='songsourcetype', ...)

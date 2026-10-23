@@ -1,8 +1,8 @@
 """initial schema: users songs assets jobs practice_settings
 
-Revision ID: 6ac99cc023f0
+Revision ID: 996f91585f8c
 Revises: 
-Create Date: 2026-10-23 15:02:31.117770
+Create Date: 2026-10-23 15:08:21.788367
 
 """
 from typing import Sequence, Union
@@ -12,7 +12,7 @@ import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
-revision: str = '6ac99cc023f0'
+revision: str = '996f91585f8c'
 down_revision: Union[str, Sequence[str], None] = None
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
@@ -44,7 +44,8 @@ def upgrade() -> None:
     sa.Column('created_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
     sa.Column('updated_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
     sa.ForeignKeyConstraint(['user_id'], ['users.id'], ),
-    sa.PrimaryKeyConstraint('id')
+    sa.PrimaryKeyConstraint('id'),
+    sa.UniqueConstraint('id', 'user_id', name='uq_songs_id_user_id')
     )
     op.create_index(op.f('ix_songs_user_id'), 'songs', ['user_id'], unique=False)
     op.create_table('assets',
@@ -53,6 +54,7 @@ def upgrade() -> None:
     sa.Column('kind', sa.Enum('original', 'stem_drums', 'stem_bass', 'stem_vocals', 'stem_other', 'drumscore_raw', 'drumscore_edited', 'sheet_image', 'midi_export', name='assetkind', native_enum=False), nullable=False),
     sa.Column('file_path', sa.String(length=500), nullable=False),
     sa.Column('created_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
+    sa.CheckConstraint("file_path NOT LIKE '%..%'", name='ck_assets_file_path_no_traversal'),
     sa.ForeignKeyConstraint(['song_id'], ['songs.id'], ),
     sa.PrimaryKeyConstraint('id')
     )
@@ -60,14 +62,14 @@ def upgrade() -> None:
     op.create_table('jobs',
     sa.Column('id', sa.Integer(), nullable=False),
     sa.Column('user_id', sa.Integer(), nullable=False),
-    sa.Column('song_id', sa.Integer(), nullable=True),
+    sa.Column('song_id', sa.Integer(), nullable=False),
     sa.Column('job_type', sa.Enum('separate', 'transcribe', 'omr', 'import', name='jobtype', native_enum=False), nullable=False),
     sa.Column('status', sa.Enum('queued', 'processing', 'completed', 'failed', name='jobstatus', native_enum=False), nullable=False),
     sa.Column('error_message', sa.Text(), nullable=True),
     sa.Column('created_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
     sa.Column('started_at', sa.DateTime(), nullable=True),
     sa.Column('completed_at', sa.DateTime(), nullable=True),
-    sa.ForeignKeyConstraint(['song_id'], ['songs.id'], ),
+    sa.ForeignKeyConstraint(['song_id', 'user_id'], ['songs.id', 'songs.user_id'], name='fk_jobs_song_user_match'),
     sa.ForeignKeyConstraint(['user_id'], ['users.id'], ),
     sa.PrimaryKeyConstraint('id')
     )

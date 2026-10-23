@@ -31,3 +31,13 @@
 ## 남은 문제
 - 로그인/세션/비로그인 차단은 T1-3.
 - `jobs` 테이블의 FIFO 순서 보장(워커 쪽 로직)은 T1-4.
+
+## Codex 모드 A 검수 반영 (2026-10-23)
+- **C-001**(필수): SQLite는 기본적으로 FK를 검사하지 않음(실행으로 재현) → `db/session.py`에 `create_sqlite_engine()` 헬퍼 추가, 연결마다 `PRAGMA foreign_keys=ON` 실행. 유효하지 않은 `user_id`로 Song 생성 시 `IntegrityError` 발생 확인(`test_fk_violation_rejected_for_invalid_user`).
+- **C-002**(필수): `Job.user_id`/`Job.song_id`가 독립 FK라 다른 사용자의 곡을 참조하는 작업이 저장될 수 있었음 → `songs`에 `UniqueConstraint(id, user_id)` 추가, `jobs`는 `ForeignKeyConstraint([song_id, user_id], [songs.id, songs.user_id])` 복합 FK로 변경(`song_id`는 NOT NULL로 조정 — REQ-10 작업 유형 전부 특정 곡에 대한 처리라 nullable일 이유 없음). 다른 사용자 곡 참조 시 `IntegrityError` 확인(`test_job_cannot_reference_another_users_song`).
+- **C-003**(필수): `assets.file_path`에 경로 조작(`..`) 방지가 없었음 → `CheckConstraint("file_path NOT LIKE '%..%'")` 추가. `../../etc/passwd` 저장 시도 시 거부 확인(`test_asset_file_path_rejects_path_traversal`). 전체 경로 검증(절대경로 금지 등)은 실제 파일 저장 코드(Phase 3) 몫으로 남김.
+- **C-004**(권장): REQ-08 최대 6명 제한은 스키마로 강제하지 않음 — 계정 생성은 관리자 1명이 수동으로 하므로(가입 화면 없음) 애플리케이션 레벨(T1-3 로그인/계정 관리) 책임으로 남김. 수정 안 함.
+- **C-005**(권장): 테스트 fixture가 FK 검사 꺼진 엔진을 쓰고 있었음(C-001과 같은 원인) → `create_sqlite_engine()`으로 교체하며 자동 해결, 추가 조치 불필요.
+- **C-006**(리스크 의견): FIFO·동시성·재시도는 T1-4(워커) 범위 — 이번엔 해당 없음, 수정 안 함.
+
+복합 FK 도입 후 `Job.user`/`Job.song`/`Song.jobs` relationship이 같은 컬럼(`jobs.user_id`)을 쓰는 것에 대해 SQLAlchemy가 `SAWarning`을 냄(실제 실행으로 확인) → 각 relationship에 `overlaps=` 파라미터를 경고 문구가 안내한 대로 추가해 해소.
