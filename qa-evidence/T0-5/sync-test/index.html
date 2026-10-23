@@ -137,6 +137,25 @@ function audioBufferToWav(buffer) {
   return new Blob([bufferArr], { type: "audio/wav" });
 }
 
+// ---- 3-0. iOS Safari 자동재생 차단 대응: 탭하면 그 자리에서 바로 play() 호출 ----
+function waitForTapThenPlay(audioEl, label) {
+  return new Promise((resolve, reject) => {
+    const btn = document.createElement("button");
+    btn.textContent = `탭해서 "${label}" 재생 시작`;
+    btn.style.marginTop = "8px";
+    progressEl.appendChild(btn);
+    btn.addEventListener("click", async () => {
+      btn.remove();
+      try {
+        await audioEl.play(); // 탭 이벤트 핸들러 안에서 바로 호출해야 iOS가 사용자 제스처로 인정함
+        resolve();
+      } catch (e) {
+        reject(e);
+      }
+    }, { once: true });
+  });
+}
+
 // ---- 3. 한 구간(후보 x 속도) 실행 ----
 async function runOneSegment(ctx, label, tempo, durationSec, mode) {
   log(`--- ${label} (tempo=${tempo}, mode=${mode}) 시작 ---`);
@@ -162,8 +181,17 @@ async function runOneSegment(ctx, label, tempo, durationSec, mode) {
     src.connect(ctx.destination);
   }
 
+  // 먼저 직접 재생 시도(이전 구간의 재생이 아직 이어지는 제스처 범위 안이면 바로 성공).
+  // iOS Safari가 거부하면(NotAllowedError) 탭 버튼을 보여주고, 그 탭 자체를 새 제스처로 써서 재생한다.
+  try {
+    await audioEl.play();
+  } catch (e) {
+    log(`[재생 거부] ${label}: ${e.name || e} — 화면의 버튼을 탭해주세요`);
+    progressEl.textContent = `탭 필요: ${label}`;
+    await waitForTapThenPlay(audioEl, label);
+  }
+
   const t0Audio = ctx.currentTime;
-  await audioEl.play();
   const t0El = audioEl.currentTime;
 
   let maxDrift = 0;
