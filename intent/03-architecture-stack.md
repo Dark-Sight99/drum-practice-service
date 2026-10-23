@@ -46,7 +46,7 @@
 | PWA | vite-plugin-pwa (Workbox) | 오프라인 캐시 | |
 | 렌더링 | Canvas 2D (성능 부족 시 PixiJS) | 레인 60fps | ⚠ 폰 성능 측정 |
 | 오디오 엔진 | Web Audio API, 스케줄링·메트로놈은 Tone.js | 정확한 타이밍 | |
-| 음정 유지 속도 변경 | 후보1: SoundTouch 계열 AudioWorklet / 후보2: HTMLMediaElement `preservesPitch` | | ⚠ 스파이크로 동기·음질 비교 후 선택 |
+| 음정 유지 속도 변경 | **HTMLMediaElement `preservesPitch`** 채택 제안(2026-10-23, 의뢰인 승인 대기). SoundTouch AudioWorklet은 실기기(iPhone 13 Pro·iPad mini 5) 테스트에서 오디오 엔진이 간헐적으로 수 초씩 밀리는 현상 확인돼 제외 | | Q-04 해소 제안, 상세는 `qa-evidence/T0-5/result.md` |
 | MIDI 입출력 | @tonejs/midi | | |
 | GP/MusicXML 가져오기 | alphaTab (MPL-2.0) | GP3~7·MusicXML 읽기 지원으로 알려짐 | ⚠ 드럼 트랙 변환 실검증 |
 | UI 아이콘 | Lucide (ISC ⚠확인) | 08-design.md 지정 | ⚠ 라이선스 확인 |

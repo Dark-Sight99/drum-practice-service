@@ -1,0 +1,79 @@
+T0-5 실제 기기 측정 원본 결과 (의뢰인이 붙여넣은 텍스트 그대로, 2026-10-23)
+
+=== 1차 시도 (180초, iOS 자동재생 정책으로 2~4구간 실패 — 버그 발견 계기) ===
+iPhone 유선:
+T0-5 측정 결과 — 2026-10-23T03:33:29.845Z
+출력: 유선/스피커 / UA: iPhone iOS 27.0.1 Safari
+[preservesPitch 60%] 최종=-345.7ms 최대=346.4ms
+[preservesPitch 130%] 최종=-786.9ms 최대=786.9ms
+[SoundTouch 60%] 최종=7475.7ms 최대=7475.7ms
+[SoundTouch 130%] 최종=12701.9ms 최대=12701.9ms
+
+iPad 유선:
+T0-5 측정 결과 — 2026-10-23T03:34:37.502Z
+출력: 유선/스피커 / UA: iPad iPadOS 26.6.1 Safari
+[preservesPitch 60%] 최종=-326.8ms 최대=328.0ms
+[preservesPitch 130%] 최종=-457.6ms 최대=457.6ms
+[SoundTouch 60%] 최종=6327.1ms 최대=6327.1ms
+[SoundTouch 130%] 최종=12351.7ms 최대=12409.7ms
+
+iPhone 블루투스:
+T0-5 측정 결과 — 2026-10-23T03:52:09.517Z
+출력: 블루투스
+[preservesPitch 60%] 최종=-463.9ms 최대=466.4ms
+[preservesPitch 130%] 최종=-790.4ms 최대=790.4ms
+[SoundTouch 60%] 최종=-393.8ms 최대=400.5ms
+[SoundTouch 130%] 최종=2336.5ms 최대=2461.8ms
+
+=== 2차 시도 (180초, iOS 자동재생 정책 수정 후, AudioContext클록-벽시계 진단 지표 추가 전) ===
+(ctxDrift 진단 지표 없이 측정됨 — 분석 가치 낮아 요약 생략, 결론 3차 데이터로 대체)
+
+=== 3차 시도 (180초, Wake Lock 실제 획득 + ctx클록-벽시계 진단 지표 추가 후) ===
+iPhone 유선:
+[preservesPitch 60%] 최종=-355.9ms 최대=356.0ms (AudioContext클록-벽시계=-1.7ms)
+[preservesPitch 130%] 최종=-791.7ms 최대=791.7ms (AudioContext클록-벽시계=1.7ms)
+[SoundTouch 60%] 최종=-307.6ms 최대=307.7ms (AudioContext클록-벽시계=-12323.3ms)
+[SoundTouch 130%] 최종=-499.2ms 최대=499.2ms (AudioContext클록-벽시계=-9789.3ms)
+
+iPhone 블루투스:
+[preservesPitch 60%] 최종=-452.6ms 최대=452.6ms (AudioContext클록-벽시계=0.0ms)
+[preservesPitch 130%] 최종=-890.1ms 최대=890.1ms (AudioContext클록-벽시계=-3.7ms)
+[SoundTouch 60%] 최종=-397.2ms 최대=397.3ms (AudioContext클록-벽시계=-19.3ms)
+[SoundTouch 130%] 최종=-888.8ms 최대=888.8ms (AudioContext클록-벽시계=-893.3ms)
+
+iPad 유선:
+[preservesPitch 60%] 최종=-329.5ms 최대=329.6ms (AudioContext클록-벽시계=-5.3ms)
+[preservesPitch 130%] 최종=-465.4ms 최대=465.4ms (AudioContext클록-벽시계=-3.3ms)
+[SoundTouch 60%] 최종=-286.0ms 최대=286.0ms (AudioContext클록-벽시계=-11360.0ms)
+[SoundTouch 130%] 최종=-486.2ms 최대=486.2ms (AudioContext클록-벽시계=-10064.7ms)
+
+iPad 블루투스:
+[preservesPitch 60%] 최종=-396.1ms 최대=396.3ms (AudioContext클록-벽시계=1.7ms)
+[preservesPitch 130%] 최종=-891.4ms 최대=891.4ms (AudioContext클록-벽시계=0.7ms)
+[SoundTouch 60%] 최종=-379.0ms 최대=379.5ms (AudioContext클록-벽시계=-3769.3ms)
+[SoundTouch 130%] 최종=-892.7ms 최대=892.7ms (AudioContext클록-벽시계=-3307.0ms)
+
+=== 4차 시도 (최종, 60초, 재생 시작 지연 보정 적용 후) — result.md 표로 요약됨 ===
+iPhone 유선 (2026-10-23T04:45:49.327Z):
+[preservesPitch 60%] 최종=-223.0ms 최대=223.3ms (ctx-벽시계=2.3ms)
+[preservesPitch 130%] 최종=-578.5ms 최대=578.5ms (ctx-벽시계=1.3ms)
+[SoundTouch 60%] 최종=-198.4ms 최대=198.5ms (ctx-벽시계=-4257.3ms)
+[SoundTouch 130%] 최종=-571.7ms 최대=571.7ms (ctx-벽시계=-1.3ms)
+
+iPad 유선 (2026-10-23T04:45:47.279Z):
+[preservesPitch 60%] 최종=-214.6ms 최대=215.0ms (ctx-벽시계=1.0ms)
+[preservesPitch 130%] 최종=-571.9ms 최대=571.9ms (ctx-벽시계=-0.3ms)
+[SoundTouch 60%] 최종=-263.3ms 최대=263.7ms (ctx-벽시계=-3715.3ms)
+[SoundTouch 130%] 최종=-578.6ms 최대=578.6ms (ctx-벽시계=1.0ms)
+
+iPhone 블루투스 (2026-10-23T04:50:57.407Z):
+[preservesPitch 60%] 최종=-316.2ms 최대=316.4ms (ctx-벽시계=-1.7ms)
+[preservesPitch 130%] 최종=-614.7ms 최대=614.7ms (ctx-벽시계=1.0ms)
+[SoundTouch 60%] 최종=-291.7ms 최대=291.9ms (ctx-벽시계=-20.0ms, 정상)
+[SoundTouch 130%] 최종=-575.5ms 최대=575.5ms (ctx-벽시계=-3.0ms)
+
+iPad 블루투스 (2026-10-23T04:56:49.638Z):
+[preservesPitch 60%] 최종=-245.1ms 최대=245.6ms (ctx-벽시계=-8.7ms)
+[preservesPitch 130%] 최종=-582.9ms 최대=582.9ms (ctx-벽시계=2.0ms)
+[SoundTouch 60%] 최종=-221.1ms 최대=226.5ms (ctx-벽시계=-2723.3ms)
+[SoundTouch 130%] 최종=-585.3ms 최대=585.3ms (ctx-벽시계=2.0ms)
