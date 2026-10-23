@@ -1,0 +1,36 @@
+/* 디자인 토큰 — intent/08-design.md §2,3 그대로. 컴포넌트는 이 변수만 참조한다(§7). */
+:root {
+  --bg: #0f1115;
+  --surface: #181b22;
+  --surface-2: #222632;
+  --border: #2e3340;
+  --text: #e8eaf0;
+  --text-muted: #9aa1b2;
+  --accent: #5b8cff;
+  --danger: #e5484d;
+  --success: #3fb97a;
+  --warning: #e8a33d;
+  --lane-bar: #3a4050;
+  --lane-beat: #262a35;
+  --hit-line: #e8eaf0;
+
+  /* 킷 피스 색 (intent/08-design.md §3) */
+  --piece-hihat: #e9c46a;
+  --piece-crash: #f4a261;
+  --piece-ride: #a7c957;
+  --piece-snare: #e76f51;
+  --piece-tom1: #6ec1e4;
+  --piece-tom2: #4f86c6;
+  --piece-floortom: #9d7bd8;
+  --piece-kick: #d9dde6;
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-6: 24px;
+  --space-8: 32px;
+
+  --radius-control: 10px;
+  --radius-note: 4px;
+}

@@ -1,0 +1,9 @@
+/* 전역 리셋. 디자인 토큰(색·폰트·간격)은 전부 ./styles/tokens.css 한 곳에서만 정의한다 (intent/08-design.md §7). */
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: -apple-system, system-ui, 'Segoe UI', Roboto, sans-serif;
+}
