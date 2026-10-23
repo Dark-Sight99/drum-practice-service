@@ -28,7 +28,8 @@
 ## Phase 1 — 뼈대
 - [x] T1-1 저장소 구조·린트·테스트 러너 세팅 (web, server), `.gitignore` 확인, `CLAUDE.md` §5 git 규칙 적용
   - 완료(2026-10-23): app/web(Vite+React+TS+PWA, oxlint/Vitest), app/server(FastAPI, ruff/pytest) 스캐폴드. Codex 모드A에서 디자인 토큰 중복(C-001) 지적 → 수정 → 모드B APPROVE → `main` 병합. 증거: `qa-evidence/T1-1/`, 위키: `wiki/architecture.md`
-- [ ] T1-2 FastAPI + SQLite 스키마(users, songs, assets, jobs, practice_settings) (REQ-07, 08, 10)
+- [x] T1-2 FastAPI + SQLite 스키마(users, songs, assets, jobs, practice_settings) (REQ-07, 08, 10)
+  - 완료(2026-10-23): SQLAlchemy 2.0 + Alembic. Codex 모드A/B 검수로 FK 미검사(C-001)·사용자간 곡 참조(C-002)·경로조작(C-003/007) 실제 버그 발견·수정 후 APPROVE. 테스트 16개. 증거: `qa-evidence/T1-2/`, 위키: `wiki/architecture.md`
 - [ ] T1-3 로그인/세션, 비로그인 차단 테스트 (REQ-08)
 - [ ] T1-4 작업 큐 워커(별도 프로세스, 재시작 복구) (REQ-10)
 - [ ] T1-5 DrumScore 타입·검증·GM 매핑 상수 + 단위 테스트 (REQ-02)

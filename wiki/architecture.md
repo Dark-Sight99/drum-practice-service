@@ -14,8 +14,9 @@ app/server/   FastAPI(Python). 자체 .venv(루트 .venv는 Phase 0 스파이크
   api/            FastAPI 앱(현재 /health만)
   worker/         작업 큐 워커(Phase 1 T1-4에서 구현)
   modules/{separator,transcriber,omr,importer}/   REQ-01/02 처리 모듈(인터페이스로 교체 가능하게 설계 예정, 03-architecture-stack.md §1)
-  db/             DB 스키마(Phase 1 T1-2에서 구현)
-  storage/        파일 저장소
+  db/             SQLAlchemy 2.0 모델(models.py) + 세션 팩토리(session.py) — T1-2 완료
+  alembic/        DB 마이그레이션(초기 리비전 1개)
+  storage/        (현재 미사용 — 실제 DB/파일은 루트 data/ 아래. 용도 생기면 채움)
 
 data/         (git 제외) 사용자 음원·악보, Phase 0 스파이크 산출물
 qa-evidence/<작업ID>/   QA 증거
@@ -43,7 +44,15 @@ python -m venv .venv   # 최초 1회
 ./.venv/Scripts/python.exe -m pytest
 ```
 
+## DB 스키마 (T1-2, 2026-10-23)
+5개 테이블: `users`(계정, is_admin/is_active), `songs`(user_id로 소유, status/needs_review), `assets`(song_id, kind, file_path), `jobs`(user_id+song_id 복합 FK — 다른 사용자 곡 참조 DB 레벨에서 차단), `practice_settings`(song_id 1:1).
+- SQLite FK는 `db/session.py`의 `create_sqlite_engine()`으로 연결마다 `PRAGMA foreign_keys=ON` 켜야 동작(기본은 꺼져 있음 — 실제 재현 확인됨).
+- enum 컬럼은 `str_enum_column()` 헬퍼로 `.value`(소문자) 저장(기본은 `.name`을 저장해 대문자가 됨 — 실제 재현 확인됨).
+- `assets.file_path`는 CHECK 제약으로 `..`/절대경로(`/`,`\`,드라이브 문자)를 막음(완전한 경로 검증은 아님, Phase 3 파일 저장 코드에서 보강 필요).
+- 마이그레이션: `cd app/server && ./.venv/Scripts/python.exe -m alembic upgrade head`
+
 ## 아직 없는 것 (다음 작업)
-- 인증/세션, DB 스키마, 작업 큐 워커 (T1-2~T1-4)
+- 인증/세션 (T1-3)
+- 작업 큐 워커 (T1-4)
 - DrumScore 타입·GM 매핑 (T1-5)
 - 실제 화면(연습·라이브러리·편집·믹서)은 Phase 2부터
