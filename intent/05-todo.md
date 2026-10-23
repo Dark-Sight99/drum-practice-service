@@ -34,7 +34,8 @@
   - 완료(2026-10-23): argon2+서버세션(HttpOnly/Secure 쿠키), 관리자 계정 생성/정지, REQ-08 수용기준 전부 테스트로 증명. Codex 모드A에서 계정 존재 노출(응답내용+타이밍 사이드채널) 발견·수정 후 APPROVE. 테스트 29개. Q-16(관리자가 관리자 생성 가능) 신규 등록. 증거: `qa-evidence/T1-3/`, 위키: `wiki/architecture.md`
 - [x] T1-4 작업 큐 워커(별도 프로세스, 재시작 복구) (REQ-10)
   - 완료(2026-10-23): FIFO 작업 큐 워커(`worker/runner.py`, `--once`/무한루프), 핸들러 레지스트리(Phase3/4용, 지금은 비워둠), `GET /jobs`·`/jobs/{id}`(사용자간 격리). 수동 서브프로세스 QA로 `expire_on_commit` 버그 발견·수정. Codex 모드A에서 동시 워커 이중선점(C-001, 필수) 발견·원자적 claim으로 수정, 재시작복구 소유권 문제(C-002)는 스키마변경 필요해 판단 대기(Q-17). 모드B 3회(수치 동기화→회귀테스트 결정성→예외캡처) 끝에 APPROVE. 테스트 38개. 증거: `qa-evidence/T1-4/`, 위키: `wiki/architecture.md`
-- [ ] T1-5 DrumScore 타입·검증·GM 매핑 상수 + 단위 테스트 (REQ-02)
+- [x] T1-5 DrumScore 타입·검증·GM 매핑 상수 + 단위 테스트 (REQ-02)
+  - 완료(2026-10-23): `app/web/src/score/`에 DrumScore 타입(9종 분류)·GM 매핑(공식 표로 재확인)·검증 함수(예외 없이 에러 목록 반환) 구현. "모든 화면이 이 형식만 읽음" 원칙 + 경로C(MIDI/MusicXML/GP)가 브라우저 처리라 TypeScript로 한정, 경로A/B의 Python 생성은 Phase 3/4로 보류. Codex 모드A에서 검증 함수의 예외 전파 가능성(C-001, 필수) 발견·수정. 모드B 1회에서 바로 APPROVE. 테스트 20개. 증거: `qa-evidence/T1-5/`, 위키: `wiki/architecture.md`
 
 ## Phase 2 — 디지털 악보로 연습 (첫 사용 가능 버전)
 - [ ] T2-1 ∥ MIDI/MusicXML/GP → DrumScore 가져오기 (REQ-02 경로 C)
