@@ -1,0 +1,13 @@
+Virtuosity Drums
+Copyright: Versilian Studios / Karoryfer Samples
+Source: https://versilian-studios.com/virtuosity-drums/
+License: Creative Commons Zero (CC0) — public domain dedication, as stated on
+the official product page: "an open source (Creative Commons 0) contemporary
+Jazz drum kit library."
+
+No attribution, royalty, or permission is required. The WAV files in this
+directory are individual drum hits selected from the full Virtuosity Drums
+sample library (original distribution format: .sfz + .wav, ~1.1GB). Only the
+samples needed for this project's 9-piece drum classification are included
+here; see work/T2-2b/report.md for which specific articulation/mic was
+selected for each piece.

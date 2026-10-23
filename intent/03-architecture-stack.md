@@ -84,6 +84,8 @@
 | Audiveris | AGPL-3.0 ⚠확인 | 지인 포함 소수 사용자 네트워크 서비스 시 소스 공개 의무 재검토 중(Q-14) | 서버 제공 시 소스 공개 의무 검토 |
 | alphaTab | MPL-2.0(확인됨, 2026-10-23, npm 레지스트리 `license` 필드) | 가능 | 가능(조건부) |
 | @tonejs/midi | MIT(확인됨, 2026-10-23, npm 레지스트리 `license` 필드) | 가능 | 가능(고지) |
+| tone(Tone.js) | MIT(확인됨, 2026-10-23, npm 레지스트리 `license` 필드) — T2-2에서 빠뜨렸다가 T2-2b에서 기록 | 가능 | 가능(고지) |
+| Virtuosity Drums(드럼 샘플) | CC0(확인됨, 2026-10-23, 공식 페이지 "open source (Creative Commons 0)" 명시, https://versilian-studios.com/virtuosity-drums/) | 가능(고지·로열티 불필요) | 가능(고지·로열티 불필요) |
 | Lucide | ISC ⚠확인 | 가능 | 가능 |
 | Pretendard | SIL OFL ⚠확인 | 가능 | 가능 |
 | pypdfium2 | Apache-2.0/BSD-3-Clause(확인됨, 2026-10-23) | 가능 | 가능 |

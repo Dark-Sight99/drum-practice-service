@@ -1,0 +1,54 @@
+=== npx tsc -b ===
+exit: 0
+
+=== npx oxlint ===
+exit: 0
+
+=== npx prettier --check src/audio ===
+Checking formatting...
+All matched files use Prettier code style!
+exit: 0
+
+=== npx vitest run ===
+
+ RUN  v5.0.5 C:/Users/Jaewoo/드럼연습서비스/app/web
+
+
+ Test Files  8 passed (8)
+      Tests  50 passed (50)
+   Start at  23:35:13
+   Duration  1.51s (environment 82%, setup 11%, import 4%, tests 2%, transform 1%, worker 1%)
+
+
+=== 변환된 WAV 파일 목록(출처: Virtuosity Drums, CC0) ===
+total 9276
+drwxr-xr-x 1 Jaewoo 197121       0 Oct 23 23:32 .
+drwxr-xr-x 1 Jaewoo 197121       0 Oct 23 23:28 ..
+-rw-r--r-- 1 Jaewoo 197121     701 Oct 23 23:28 LICENSE.txt
+-rw-r--r-- 1 Jaewoo 197121 2708632 Oct 23 23:32 crash.wav
+-rw-r--r-- 1 Jaewoo 197121  150004 Oct 23 23:32 hihat_closed.wav
+-rw-r--r-- 1 Jaewoo 197121 2191604 Oct 23 23:32 hihat_open.wav
+-rw-r--r-- 1 Jaewoo 197121  453064 Oct 23 23:32 kick.wav
+-rw-r--r-- 1 Jaewoo 197121 1492756 Oct 23 23:32 ride.wav
+-rw-r--r-- 1 Jaewoo 197121  365300 Oct 23 23:32 snare.wav
+-rw-r--r-- 1 Jaewoo 197121  874136 Oct 23 23:32 tom_floor.wav
+-rw-r--r-- 1 Jaewoo 197121  428704 Oct 23 23:32 tom_high.wav
+-rw-r--r-- 1 Jaewoo 197121  804212 Oct 23 23:32 tom_mid.wav
+
+=== 샘플 선정 내역(Virtuosity Drums Samples/mid/, FLAC → WAV 16bit 변환) ===
+kick         <- mid/kick/mid_kick_snon_vl4_rr1.flac   (snares on, 최대 벨로시티)
+snare        <- mid/snare/mid_snare_center_vl36.flac  (center hit, 최대 벨로시티)
+hihat_closed <- mid/hh/mid_hh_closed_vl4_rr1.flac
+hihat_open   <- mid/hh/mid_hh_open_vl4_rr1.flac
+tom_high     <- mid/htom/mid_htom_center_vl16.flac
+tom_mid      <- mid/ltom/mid_ltom_center_vl16.flac     (low tom, center hit)
+tom_floor    <- mid/ltom/mid_ltom_offcenter_vl12.flac  (low tom, off-center hit — tom_mid과 실제 타법으로 구분)
+crash        <- mid/crash/mid_crash_crash_vl3_rr1.flac
+ride         <- mid/ride/mid_ride_ride_vl3_rr1.flac
+(변환: Python soundfile 라이브러리, FLAC 원본 48kHz → WAV PCM_16 48kHz, 피치/템포 가공 없음)
+
+=== 수동 QA: 실제 브라우저(Claude Browser pane)에서 실제 샘플 재생 확인 ===
+1. 샘플 로드(createDrumVoices, 9개 fetch+디코딩): 콘솔 에러 없음, "9개 샘플 로드됨" 로그 확인
+2. 9종 순서대로 트리거(1.2초 간격): 콘솔 에러 없음
+3. 하이햇 6연타(0.15초 간격, Player 모노포닉 한계 때문에 트리거마다 새 Player
+   생성하는 "발사 후 소멸" 패턴 검증): 콘솔 에러 없음(끊기지 않고 겹쳐 재생됨)
