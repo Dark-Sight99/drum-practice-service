@@ -164,6 +164,7 @@ async function runOneSegment(ctx, label, tempo, durationSec, mode) {
   audioEl.loop = false;
 
   let stNode = null;
+  let src = null;
   if (mode === "soundtouch") {
     const mod = await import(MODULE_URL);
     await mod.SoundTouchNode.register(ctx, PROCESSOR_URL);
@@ -171,13 +172,13 @@ async function runOneSegment(ctx, label, tempo, durationSec, mode) {
     stNode.connect(ctx.destination);
     audioEl.preservesPitch = false;
     audioEl.playbackRate = tempo;
-    const src = ctx.createMediaElementSource(audioEl);
+    src = ctx.createMediaElementSource(audioEl);
     src.connect(stNode);
     stNode.playbackRate.value = tempo;
   } else {
     audioEl.preservesPitch = true;
     audioEl.playbackRate = tempo;
-    const src = ctx.createMediaElementSource(audioEl);
+    src = ctx.createMediaElementSource(audioEl);
     src.connect(ctx.destination);
   }
 
@@ -212,7 +213,10 @@ async function runOneSegment(ctx, label, tempo, durationSec, mode) {
       if (elapsedWallSec >= durationSec || audioEl.ended) {
         clearInterval(iv);
         audioEl.pause();
+        src.disconnect();
         if (stNode) stNode.disconnect();
+        audioEl.src = "";
+        URL.revokeObjectURL(blobUrl);
         const finalDrift = drift;
         log(`--- ${label} 종료: 최종 어긋남(벽시계 기준)=${finalDrift.toFixed(1)}ms, 최대=${maxDrift.toFixed(1)}ms, AudioContext클록-벽시계=${ctxDriftMs.toFixed(1)}ms, 표본 ${samples}개 ---`);
         resolve({ label, tempo, mode, finalDriftMs: finalDrift, maxDriftMs: maxDrift, ctxDriftMs, samples });
