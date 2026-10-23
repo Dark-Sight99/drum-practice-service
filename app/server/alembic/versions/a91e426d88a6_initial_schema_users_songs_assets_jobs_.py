@@ -1,8 +1,8 @@
 """initial schema: users songs assets jobs practice_settings
 
-Revision ID: 996f91585f8c
+Revision ID: a91e426d88a6
 Revises: 
-Create Date: 2026-10-23 15:08:21.788367
+Create Date: 2026-10-23 15:10:56.418531
 
 """
 from typing import Sequence, Union
@@ -12,7 +12,7 @@ import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
-revision: str = '996f91585f8c'
+revision: str = 'a91e426d88a6'
 down_revision: Union[str, Sequence[str], None] = None
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
@@ -54,7 +54,7 @@ def upgrade() -> None:
     sa.Column('kind', sa.Enum('original', 'stem_drums', 'stem_bass', 'stem_vocals', 'stem_other', 'drumscore_raw', 'drumscore_edited', 'sheet_image', 'midi_export', name='assetkind', native_enum=False), nullable=False),
     sa.Column('file_path', sa.String(length=500), nullable=False),
     sa.Column('created_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
-    sa.CheckConstraint("file_path NOT LIKE '%..%'", name='ck_assets_file_path_no_traversal'),
+    sa.CheckConstraint("file_path NOT LIKE '%..%' AND file_path NOT LIKE '/%' AND file_path NOT LIKE '\\%' AND file_path NOT LIKE '_:%'", name='ck_assets_file_path_no_traversal'),
     sa.ForeignKeyConstraint(['song_id'], ['songs.id'], ),
     sa.PrimaryKeyConstraint('id')
     )

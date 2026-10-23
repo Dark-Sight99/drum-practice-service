@@ -1,12 +1,12 @@
-> 한 줄 요약: T1-2 QA — ruff/pytest 9개 전부 통과(모델 CRUD, FK/unique 제약, alembic 마이그레이션 실제 적용, enum 저장값 회귀 테스트 포함).
+> 한 줄 요약: T1-2 QA — ruff/pytest 16개 전부 통과(모델 CRUD, FK/unique/복합FK/CHECK 제약 — 상대경로 조작·절대경로·UNC 전부 포함, alembic 마이그레이션 실제 적용, enum 저장값·Codex 지적 회귀 테스트 포함).
 
-# T1-2 QA 결과(2026-10-23)
+# T1-2 QA 결과(2026-10-23, Codex 모드A·모드B 반영 후 최종)
 
 ## 실행 결과
 | 항목 | 명령 | 결과 |
 |---|---|---|
 | lint | `ruff check .` | PASS (지적 0건) |
-| test | `pytest -v` | PASS (9/9) |
+| test | `pytest -v` | PASS (16/16) |
 
 ## 테스트 목록과 의미
 | 테스트 | 확인하는 것 |
@@ -23,13 +23,21 @@
 
 전체 로그: `raw_log.txt`
 
-## Codex 모드A 반영 후 테스트 (총 12개, 신규 4개 추가)
+## Codex 모드A 반영 후 테스트 (신규 4개)
 | 신규 테스트 | 확인하는 것 |
 |---|---|
 | `test_fk_violation_rejected_for_invalid_user` | C-001: FK 제약이 실제로 켜져 있는지(없는 user_id 거부) |
 | `test_job_cannot_reference_another_users_song` | C-002: 복합 FK로 다른 사용자 곡 참조 작업 거부 |
 | `test_asset_file_path_rejects_path_traversal` | C-003: `..` 경로 조작 문자열 거부 |
 | (fixture 변경) | C-005: 테스트 엔진도 FK 검사 켜짐 |
+
+## Codex 모드B 반영 후 테스트 (신규 4개, 총 16개)
+| 신규 테스트 | 확인하는 것 |
+|---|---|
+| `test_asset_file_path_rejects_absolute_paths[/etc/passwd]` | C-007: 유닉스 절대경로 거부 |
+| `test_asset_file_path_rejects_absolute_paths[C:\Windows\...]` | C-007: 윈도우 드라이브 절대경로 거부 |
+| `test_asset_file_path_rejects_absolute_paths[\\fileserver\...]` | C-007: UNC 경로 거부 |
+| `test_asset_file_path_accepts_relative_path` | 대조군: 정상 상대경로는 막히지 않음 |
 
 ## 수용 기준(T1-2) 충족 여부
 - [x] 5개 테이블(users, songs, assets, jobs, practice_settings) 스키마 구현

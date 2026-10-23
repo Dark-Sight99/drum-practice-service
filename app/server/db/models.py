@@ -135,10 +135,17 @@ class Song(Base):
 class Asset(Base):
     __tablename__ = "assets"
     __table_args__ = (
-        # Codex 모드A C-003: file_path에 ".."가 들어가면(경로 조작) DB 레벨에서 거부.
-        # 전체 경로 검증(절대경로 금지, data/ 내부인지 확인 등)은
-        # 실제 파일 저장 코드(Phase 3)에서 추가로 한다 — 이건 최소한의 DB 레벨 방어선.
-        CheckConstraint("file_path NOT LIKE '%..%'", name="ck_assets_file_path_no_traversal"),
+        # Codex 모드A C-003 + 모드B C-007: 상위 디렉터리 이동("..")뿐 아니라
+        # 절대경로(유닉스 "/...", 윈도우 드라이브 "C:...", UNC "\\server\...")도 막는다.
+        # 그래도 이건 최소한의 DB 레벨 방어선이고, 실제 파일 접근 시 data/ 내부로 재검증하는
+        # 로직은 Phase 3 파일 저장 코드에서 추가로 둔다(여기서 "완전히 안전"을 주장하지 않음).
+        CheckConstraint(
+            "file_path NOT LIKE '%..%' "
+            "AND file_path NOT LIKE '/%' "
+            "AND file_path NOT LIKE '\\%' "
+            "AND file_path NOT LIKE '_:%'",
+            name="ck_assets_file_path_no_traversal",
+        ),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)

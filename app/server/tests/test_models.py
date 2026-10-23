@@ -155,6 +155,34 @@ def test_asset_file_path_rejects_path_traversal(session: Session) -> None:
         session.commit()
 
 
+@pytest.mark.parametrize(
+    "bad_path",
+    [
+        "/etc/passwd",
+        "C:\\Windows\\System32\\config",
+        "\\\\fileserver\\share\\secret.txt",
+    ],
+)
+def test_asset_file_path_rejects_absolute_paths(session: Session, bad_path: str) -> None:
+    """Codex 모드B C-007: '..' 없는 절대경로(유닉스/윈도우 드라이브/UNC)도 거부하는지 확인."""
+    user = _make_user(session)
+    song = _make_song(session, user)
+    session.add(Asset(song_id=song.id, kind=AssetKind.ORIGINAL, file_path=bad_path))
+    with pytest.raises(IntegrityError):
+        session.commit()
+    session.rollback()
+
+
+def test_asset_file_path_accepts_relative_path(session: Session) -> None:
+    """정상적인 상대 경로는 막히지 않아야 한다(위 거부 테스트들의 대조군)."""
+    user = _make_user(session)
+    song = _make_song(session, user)
+    session.add(
+        Asset(song_id=song.id, kind=AssetKind.ORIGINAL, file_path="data/songs/1/original.mp3")
+    )
+    session.commit()
+
+
 def test_practice_setting_one_to_one(session: Session) -> None:
     user = _make_user(session)
     song = Song(user_id=user.id, title="곡", source_type=SongSourceType.MIDI)

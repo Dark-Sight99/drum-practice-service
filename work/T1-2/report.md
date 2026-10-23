@@ -41,3 +41,7 @@
 - **C-006**(리스크 의견): FIFO·동시성·재시도는 T1-4(워커) 범위 — 이번엔 해당 없음, 수정 안 함.
 
 복합 FK 도입 후 `Job.user`/`Job.song`/`Song.jobs` relationship이 같은 컬럼(`jobs.user_id`)을 쓰는 것에 대해 SQLAlchemy가 `SAWarning`을 냄(실제 실행으로 확인) → 각 relationship에 `overlaps=` 파라미터를 경고 문구가 안내한 대로 추가해 해소.
+
+## Codex 모드 B 검수 반영 (2026-10-23)
+- **C-007**(필수): C-003의 `CHECK`가 `..`만 막고 절대경로(유닉스 `/...`, 윈도우 드라이브 `C:...`, UNC `\\server\...`)는 못 막는다는 지적 — **재현 확인**(실제로 `/etc/passwd`, `C:\Windows\...` 저장이 통과했음). `CHECK` 조건에 `NOT LIKE '/%'`, `NOT LIKE '\%'`, `NOT LIKE '_:%'`를 추가해 세 가지 절대경로 패턴을 모두 막음. 거부 3종 + 정상 상대경로 허용 대조군까지 테스트 4개 추가(총 16개).
+- **C-008**(권장): QA 로그가 "12 passed" 한 줄 요약만 있고 `result.md` 상단 수치가 옛날 "9/9"로 안 바뀌어 있었다는 지적 — **맞음**. `result.md` 상단 수치를 최신 테스트 수(16)로 동기화하고, `raw_log.txt`에 `pytest -v` 상세 출력 전체를 다시 붙여넣음.
