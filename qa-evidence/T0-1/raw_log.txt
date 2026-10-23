@@ -1,0 +1,48 @@
+2026-10-23 실행 로그 — T0-1 Demucs 벤치마크
+
+환경 확인:
+$ python --version
+Python 3.12.7
+$ node --version
+v24.22.1
+$ nvidia-smi --query-gpu=memory.total,memory.used,memory.free --format=csv
+memory.total [MiB], memory.used [MiB], memory.free [MiB]
+8151 MiB, 283 MiB, 7613 MiB
+
+torch 설치 확인:
+$ ./.venv/Scripts/python.exe -c "import torch; print(torch.__version__); print(torch.cuda.is_available()); print(torch.cuda.get_device_name(0)); print(torch.cuda.get_device_capability(0))"
+torch 2.11.0+cu128
+cuda available: True
+device: NVIDIA GeForce RTX 5060
+capability: (12, 0)
+
+=== GPU(cuda) 실행 ===
+$ ./.venv/Scripts/python.exe qa-evidence/T0-1/bench_demucs.py data/bench_input_4min.wav --device cuda --out data/bench_out
+{
+  "input": "data/bench_input_4min.wav",
+  "input_duration_sec": 235.77,
+  "device": "cuda",
+  "model": "htdemucs",
+  "elapsed_sec": 22.76,
+  "speed_ratio_input_over_elapsed": 10.36,
+  "returncode": 0
+}
+
+출력 파일 확인:
+$ find data/bench_out -type f
+data/bench_out/htdemucs/bench_input_4min/bass.wav
+data/bench_out/htdemucs/bench_input_4min/drums.wav
+data/bench_out/htdemucs/bench_input_4min/other.wav
+data/bench_out/htdemucs/bench_input_4min/vocals.wav
+
+=== CPU 실행 ===
+$ ./.venv/Scripts/python.exe qa-evidence/T0-1/bench_demucs.py data/bench_input_4min.wav --device cpu --out data/bench_out_cpu
+{
+  "input": "data/bench_input_4min.wav",
+  "input_duration_sec": 235.77,
+  "device": "cpu",
+  "model": "htdemucs",
+  "elapsed_sec": 53.43,
+  "speed_ratio_input_over_elapsed": 4.413,
+  "returncode": 0
+}

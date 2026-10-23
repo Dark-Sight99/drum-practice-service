@@ -12,7 +12,7 @@
 | Q-05 | 오디오-화면 동기 허용 오차 | 초기 목표 ±30ms | T0-5 측정 후 확정 |
 | Q-06 | 원격 접속: Tailscale vs Cloudflare Tunnel | Tailscale 확정(개인 무료 플랜, 최대 6명, 비상업) | 해소됨(2026-10-23) |
 | Q-07 | 상업화 여부 | 현재 "비공개, 지인 포함 소수 사용자(최대 6명), 비상업" | 범위 확대(불특정 공개) 시 ADTOF·Audiveris 라이선스 재검토 |
-| Q-08 | Demucs 현재 유지 저장소·설치 방법 | 미확인 | T0-1에서 확인, wiki/tools.md 기록 |
+| Q-08 | Demucs 현재 유지 저장소·설치 방법 | **해소됨**(2026-10-23). `facebookresearch/demucs`는 archived, 현재는 `adefossez/demucs` 포크가 유지(v4.1.0, 2026-07-11). `pip install demucs numpy`로 설치, numpy는 별도 설치 필요 | wiki/tools.md 기록 완료 |
 | Q-09 | 드럼킷 그래픽 제작 방식 | 자체 SVG | Phase 2 디자인 시 의뢰인 확인 |
 | Q-10 | 셈여림 표시 신뢰도 | 자동 채보 셈여림은 정확도 미검증 | Phase 3 측정 |
 | Q-12 | PDF→이미지: pypdfium2 vs PyMuPDF 라이선스 | pypdfium2 1순위(확인 필요), PyMuPDF는 AGPL/상업 듀얼 라이선스로 알려짐 | T0-6 |
