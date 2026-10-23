@@ -25,6 +25,16 @@ pip install demucs numpy
 nvidia-smi --query-gpu=memory.total,memory.used,memory.free --format=csv
 ```
 
+## Audiveris OMR (T0-3) — 2026-10-23 확인
+```bash
+"C:\Program Files\Audiveris\Audiveris.exe" -batch -transcribe -export -output <출력폴더> <입력이미지...>
+```
+- 버전 5.11.0, 설치: 공식 Windows MSI(`Audiveris-5.11.0-windows-x86_64.msi`, GitHub Releases) — **관리자 권한 필요**(일반 사용자 토큰으로 설치 시도 시 Error 1925, 의뢰인이 직접 UAC 동의하고 설치).
+- 사진이 회전된 상태로 촬영됐다면 Audiveris가 자동으로 바로 세워주지 않음 — Pillow로 `im.rotate(-90, expand=True)` 등 사전 회전 필요(방향은 실제 사진으로 눈으로 확인 후 결정).
+- 출력: 입력 1개 이미지에 여러 곡/악장이 있으면 `<파일명>.mvt1.mxl`, `.mvt2.mxl`...로 분리돼 나옴.
+- 한 줄 압축 표기(표준 5선 드럼보표 아님) 악보에서는 `percussion` 클레프 인식률이 낮고(약 40%), 인식돼도 보이스(스템 방향)별 악기 배정이 틀릴 수 있음 — 상세는 `qa-evidence/T0-3/result.md`.
+- OCR 텍스트 인식은 `eng` 언어팩 미설치로 비활성 상태(`WARN TesseractOCR: supported languages is empty`) — 노트 인식과 무관, 필요 시 별도 설치.
+
 ## ADTOF-pytorch (드럼 채보, Q-02/T0-2) — 2026-10-23 확인
 원본 ADTOF(madmom 의존)는 Windows에서 MSVC Build Tools 또는 WSL 없이 설치 불가(madmom은 PyPI에 소스만 배포, 항상 컴파일 필요 — https://pypi.org/pypi/madmom/json 로 전 버전 확인). 대안으로 순수 PyTorch 포크 사용:
 ```bash

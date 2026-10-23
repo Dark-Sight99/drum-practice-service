@@ -28,6 +28,9 @@ dist/
 playwright-report/
 test-results/
 
+# 사용자 악보에서 추출된 실제 악보 콘텐츠(저작권 있을 수 있음) — 통계·분석 결과(result.md)만 커밋, 원본 추출물은 제외
+qa-evidence/T0-3/out/
+
 # OS
 .DS_Store
 Thumbs.db

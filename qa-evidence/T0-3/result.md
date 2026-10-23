@@ -1,26 +1,49 @@
-> 한 줄 요약: T0-3(OMR) 블록 상태. 사진 미제공 + Audiveris 설치에 관리자 권한 필요(현재 세션엔 없음).
+> 한 줄 요약: Audiveris OMR 완료(21장 전부 처리, 크래시 없음). 퍼커션 클레프 인식률 약 40%(완전)+35%(부분), 인식되어도 하이햇 보이스가 다른 악기로 잘못 매핑되는 문제 확인 — REQ-03 편집기가 필수임을 뒷받침.
 
-# T0-3 결과 — OMR 확인(블록, 2026-10-23)
+# T0-3 결과 — OMR 확인(2026-10-23)
 
 ## 근거 REQ
-REQ-02 드럼 채보 모델 — 경로 B(종이 악보 OMR)
+REQ-02 드럼 채보 모델 — 경로 B(종이 악보 OMR), 수용 기준 "인식 실패/부분 인식 시에도 크래시 없이 '인식된 부분 + 편집 필요' 상태로 진입"
 
-## 진행한 것
-- Audiveris CLI 사용법 조사(공식 핸드북 확인, 추측 아님): 기본 문법 `audiveris -batch -transcribe -export -output <폴더> <입력이미지>`. 출처: https://audiveris.github.io/audiveris/_pages/guides/advanced/cli/
-- 최신 릴리스 확인: 5.11.0 (GitHub Releases API), Windows용 `Audiveris-5.11.0-windows-x86_64.msi` 다운로드 완료 → `data/installers/`(git 제외 대상)
-- 설치 시도 → **실패**. `msiexec /i ... /quiet /l*v <log>` 결과 Exit Code 1603, 로그에 명시:
-  > Error 1925. You do not have sufficient privileges to complete this installation for all users of the machine. Log on as administrator and then retry this installation.
+## 입력
+의뢰인 제공 종이 악보 사진 21장(`data/samples/sheets/IMG_7943~7963.jpg`) — 선생님이 초보자용으로 단순화한 드럼 악보(한 줄 압축 표기, 스템-업=하이햇 x노트, 스템-다운=킥/스네어 둥근 노트). 전부 90도 회전된 상태로 촬영돼 `-90도` 회전 전처리 후 사용(`data/samples/sheets_rotated/`).
 
-## 블록 사유
-1. **관리자 권한 없음**: 이 세션(에이전트)은 시스템 전역 설치 권한이 없음. 되돌릴 수 없는 시스템 변경(CLAUDE.md §7)에 해당해 에이전트가 우회 설치를 시도하지 않음.
-2. **테스트용 사진 없음**: `data/samples/sheets/`에 의뢰인이 넣기로 한 종이 악보 사진이 아직 없음(2026-10-23 확인).
-
-## 필요한 조치 (의뢰인)
-- 다운로드된 설치 파일을 관리자 권한으로 직접 실행: `data/installers/Audiveris-5.11.0-windows-x86_64.msi` (더블클릭 후 관리자 승인, 또는 "관리자 권한으로 실행")
-- 또는 이 세션에 관리자 권한을 부여할 방법이 있다면 알려주면 재시도
-- 종이 드럼 악보 사진 2~3장을 `data/samples/sheets/`에 추가
-
-## 재현 명령 (설치 완료 후 실행할 것)
+## 실행
 ```bash
-audiveris -batch -transcribe -export -output qa-evidence/T0-3/out "data/samples/sheets/<파일명>"
+Audiveris.exe -batch -transcribe -export -output qa-evidence/T0-3/out data/samples/sheets_rotated/*.jpg
 ```
+21장 전부 **크래시 없이** 처리 완료, 총 40개 MusicXML(.mxl) 파일 생성(한 사진에 여러 곡/악장이 있으면 `.mvt1`, `.mvt2`...로 분리 — 곡 1개가 여러 페이지에 걸침).
+
+## 결과 — 퍼커션 클레프 인식률
+| 구분 | 파일 수 | 비율 |
+|---|---|---|
+| 완전히 percussion clef로 인식 | 16 | 40% |
+| 시스템 일부만 percussion, 나머지는 F/C(일반 음고) 클레프로 오인식 | 14 | 35% |
+| 전부 F/C 클레프로 오인식(퍼커션 인식 전무) | 9 | 22.5% |
+| (클레프 자체 미검출, 극단치 1건) | 1 | 2.5% |
+
+- F/C 클레프로 오인식된 경우: 드럼 악기 정보가 완전히 사라지고 일반 음고 노트(예: B3, C4)로만 나옴 — `<instrument>` 참조 없음, 악기 구분 불가능한 상태.
+- percussion clef로 인식된 경우: GM 타악기 47종 전체가 `<score-instrument>`로 나열되고 각 노트에 `<instrument id="...">`(Bass_Drum_1=킥, Acoustic_Snare=스네어 등)가 붙음 — **이 부분은 03-architecture-stack.md의 GM 매핑과 바로 연결 가능한 수준**.
+
+## 결과 — 노트 단위 정확도(표본 점검, IMG_7946)
+`qa-evidence/T0-3/analyze.py`로 악기 시퀀스 추출 후 원본 사진과 대조. 원본은 거의 모든 박자에 하이햇(x노트) + 간헐적 킥/스네어가 나오는 패턴인데, 추출된 시퀀스는:
+```
+Bass_Drum_1, High_Tom, High_Tom, High_Tom, Acoustic_Snare, High_Tom, Bass_Drum_1, ...
+```
+**하이햇(Closed_Hi_Hat)이 단 한 번도 등장하지 않음** — 지속적으로 울리는 하이햇 보이스를 통째로 놓치고, 그 자리의 노트를 톰으로 잘못 분류함. 이 한 줄 압축 표기(스템 방향으로 두 보이스를 구분하는 방식)가 Audiveris가 기대하는 표준 5선 드럼보표 규칙과 달라서 보이스 분리·위치→악기 매핑이 제대로 안 되는 것으로 추정(확정 아님, 추가 조사 필요).
+→ **"percussion clef로 인식됨" ≠ "악기 배정이 맞음"** — 인식률 수치(40%)보다 실제 쓸 수 있는 수준은 더 낮다고 봐야 함.
+
+## 결과 — 박자/마디 정확도
+21장 **전부(100%)** 로그에 `No target duration for measures` 또는 `No timeOffset` 경고가 있었음 — 마디 길이·박자가 안 맞는 노트가 모든 페이지에서 발생. 리듬(타이밍) 정보도 수동 보정 없이는 못 씀.
+
+## 기타
+- OCR(가사/텍스트 인식)용 Tesseract 언어팩(`eng`)이 설치 안 돼 있어 텍스트 인식은 전부 건너뜀 — 음표 인식과는 무관하지만, 필요하면 Phase 4에서 별도 설치.
+
+## 결론 (제안)
+1. **REQ-03(편집기)는 선택이 아니라 필수** — 이 노트 압축 표기 스타일에서는 자동 인식만으로 쓸 수 있는 수준이 아님(클레프 인식만 40%, 그마저 악기 배정이 더 틀릴 수 있음, 박자는 100% 수동 확인 필요).
+2. 이건 Audiveris 자체의 결함이라기보다 **이 표기법(한 줄 압축, 스템 방향 구분)이 비표준적이라 OMR 학습 데이터와 안 맞는 것**으로 보임(확정 아님) — 표준 5선 드럼보표였다면 결과가 달랐을 수 있음. 검증하려면 표준 표기 악보 샘플이 필요(의뢰인에게 있으면 추가 테스트 가능).
+3. REQ-02 수용 기준("크래시 없이 인식된 부분+편집 필요 상태로 진입")은 **충족**. 단, "얼마나 편집이 필요한가"는 예상보다 많을 수 있음 — Phase 4 작업량 산정 시 참고.
+
+## REQ-02 수용 기준 충족 여부
+- [x] 경로 B: 인식 실패/부분 인식 시에도 크래시 없이 처리(21/21 성공, 크래시 0건)
+- [x] "드럼 노트가 얼마나 살아남는지 보고" — 위 수치로 보고 완료
