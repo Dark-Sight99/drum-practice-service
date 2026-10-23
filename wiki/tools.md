@@ -25,6 +25,17 @@ pip install demucs numpy
 nvidia-smi --query-gpu=memory.total,memory.used,memory.free --format=csv
 ```
 
+## ADTOF-pytorch (드럼 채보, Q-02/T0-2) — 2026-10-23 확인
+원본 ADTOF(madmom 의존)는 Windows에서 MSVC Build Tools 또는 WSL 없이 설치 불가(madmom은 PyPI에 소스만 배포, 항상 컴파일 필요 — https://pypi.org/pypi/madmom/json 로 전 버전 확인). 대안으로 순수 PyTorch 포크 사용:
+```bash
+git clone https://github.com/xavriley/ADTOF-pytorch.git
+pip install -e ADTOF-pytorch
+adtof --audio <입력.wav> --out <출력.mid> --device cuda
+```
+- 클래스: GM 피치 `[35,38,47,42,49]` = kick/snare/tom(합산)/hihat(합산)/cymbal(합산) 5-class (`adtof_pytorch/post_processing.py`의 `LABELS_5` 확인)
+- ⚠ **라이선스 미표시**: 저장소에 LICENSE 파일 없음, GitHub API `license: null`. 내부 테스트용으로만 사용 중, 실제 서비스(Phase 3 T3-2) 채택 전 재확인 필요 — Q-15 참고
+- F-measure 평가: `mir_eval.onset.f_measure(ref, est, window=0.05)` (mir_eval 기본값)
+
 ## Tailscale Funnel 플랜 확인 (Q-13)
 공식 문서: https://tailscale.com/kb/1223/funnel — "Funnel is available for all plans"(무료 Personal 포함). 베타 단계, MagicDNS·HTTPS 인증서 필요.
 

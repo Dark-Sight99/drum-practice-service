@@ -1,0 +1,44 @@
+2026-10-23 실행 로그 — T0-2 ADTOF-pytorch 정확도 평가
+
+madmom 빌드 가능 여부 확인 (원본 ADTOF 블로커):
+$ curl -s https://pypi.org/pypi/madmom/json | python -c "...releases 목록 출력..."
+-> 모든 버전이 madmom-X.Y.tar.gz(소스)만 존재, Windows wheel 없음
+$ where cl.exe
+INFO: 지정된 파일을 찾을 수 없습니다. (MSVC 없음)
+$ wsl --status
+Linux용 Windows 하위 시스템이 설치되어 있지 않습니다. (WSL 없음)
+-> 의뢰인에게 질문 후 "ADTOF-pytorch로 단축 진행" 선택
+
+ADTOF-pytorch 라이선스 확인:
+$ curl -s https://api.github.com/repos/xavriley/ADTOF-pytorch | grep -A3 '"license"'
+  "license": null,
+-> LICENSE 파일도 저장소에 없음(find 결과 없음). Q-15로 기록.
+
+설치:
+$ git clone --depth 1 https://github.com/xavriley/ADTOF-pytorch.git data/repos/ADTOF-pytorch
+$ ./.venv/Scripts/python.exe -m pip install -e "data/repos/ADTOF-pytorch"
+Successfully installed adtof-pytorch-0.1.0 ... (librosa, pretty_midi, scikit-learn 등 의존성 포함)
+
+CLI 확인:
+$ ./.venv/Scripts/adtof.exe --help
+usage: adtof [-h] --audio AUDIO [--out OUT] [--out-suffix OUT_SUFFIX]
+             [--threshold THRESHOLD] [--thresholds THRESHOLDS] [--fps FPS]
+             [--weights WEIGHTS] [--device DEVICE]
+
+클래스 매핑 확인(소스 그대로 인용, 추측 아님):
+$ grep -n "LABELS_5" data/repos/ADTOF-pytorch/src/adtof_pytorch/post_processing.py
+LABELS_5 = [35, 38, 47, 42, 49]
+
+mir_eval.onset.f_measure 실제 시그니처 확인(기억 의존 금지 원칙):
+$ ./.venv/Scripts/python.exe -c "import mir_eval, inspect; print(inspect.signature(mir_eval.onset.f_measure))"
+(reference_onsets, estimated_onsets, window=0.05)
+
+MDB Drums 어노테이션 클래스 전체 확인:
+$ cat "data/datasets/MDBDrums/MDB Drums/annotations/class"/*.txt | awk -F'\t' '{print $2}' | sort -u
+CY / HH / KD / OT / SD / TT
+
+평가 실행 (전체 stdout은 qa-evidence/T0-2/result_raw.json과 동일):
+$ ./.venv/Scripts/python.exe qa-evidence/T0-2/eval_adtof.py
+(5개 트랙: FreeJazz, FunkJazz, FusionJazz, LatinJazz, Grunge — Demucs 분리 후 adtof-pytorch 채보 → mir_eval F-measure)
+summary.OVERALL_macro = 0.7585
+(클래스별 수치는 result.md 표 참고)
