@@ -1,0 +1,32 @@
+=== ruff check . ===
+All checks passed!
+
+=== pytest -v ===
+============================= test session starts =============================
+platform win32 -- Python 3.12.7, pytest-9.1.1, pluggy-1.7.0
+collected 9 items
+
+tests/test_health.py::test_health PASSED                                 [ 11%]
+tests/test_migrations.py::test_alembic_upgrade_head PASSED               [ 22%]
+tests/test_models.py::test_create_user PASSED                            [ 33%]
+tests/test_models.py::test_duplicate_username_rejected PASSED            [ 44%]
+tests/test_models.py::test_song_belongs_to_user PASSED                   [ 55%]
+tests/test_models.py::test_asset_cascade_delete_with_song PASSED         [ 66%]
+tests/test_models.py::test_enum_columns_store_lowercase_value_not_member_name PASSED [ 77%]
+tests/test_models.py::test_job_queue_per_user PASSED                     [ 88%]
+tests/test_models.py::test_practice_setting_one_to_one PASSED            [100%]
+
+============================== 9 passed in 0.95s ==============================
+
+=== 실제 enum 저장값 버그 재현(수정 전) ===
+$ python -c "... Song(status 기본값) 생성 후 SELECT status, source_type FROM songs ..."
+수정 전: ('PENDING', 'AUDIO')   <- SQLAlchemy 기본 동작(.name 저장), 의도와 다름
+수정 후(values_callable 추가): ('pending', 'audio')  <- 의도대로 .value 저장
+
+=== 마이그레이션 enum 값 확인 ===
+$ grep -n "Enum(" alembic/versions/*.py
+sa.Enum('audio', 'omr', 'midi', 'musicxml', 'gp', name='songsourcetype', ...)
+sa.Enum('pending', 'processing', 'completed', 'failed', name='songstatus', ...)
+sa.Enum('original', 'stem_drums', ..., name='assetkind', ...)
+sa.Enum('separate', 'transcribe', 'omr', 'import', name='jobtype', ...)
+sa.Enum('queued', 'processing', 'completed', 'failed', name='jobstatus', ...)

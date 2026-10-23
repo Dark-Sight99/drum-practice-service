@@ -1,6 +1,10 @@
 # 사용자 데이터 (음원·악보·분리 결과) — 절대 커밋 금지
 data/
 
+# 로컬 SQLite DB 파일(런타임 산출물) — 스키마는 alembic 마이그레이션으로 관리
+*.db
+*.db-journal
+
 # 모델 가중치·캐시
 models/
 *.onnx
