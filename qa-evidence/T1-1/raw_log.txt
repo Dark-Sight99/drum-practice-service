@@ -1,0 +1,53 @@
+=== web: npm run lint ===
+> web@0.0.0 lint
+> oxlint
+(출력 없음 = 지적 0건)
+
+=== web: npm run test ===
+> web@0.0.0 test
+> vitest run
+
+ RUN  v5.0.5
+ Test Files  1 passed (1)
+      Tests  1 passed (1)
+
+=== web: npm run build ===
+> web@0.0.0 build
+> tsc -b && vite build
+
+vite v8.3.5 building client environment for production...
+✓ 17 modules transformed.
+dist/registerSW.js                0.13 kB
+dist/manifest.webmanifest         0.17 kB
+dist/index.html                   0.57 kB │ gzip:  0.34 kB
+dist/assets/index-BvjGwuyw.css    2.32 kB │ gzip:  1.07 kB
+dist/assets/index-CWIJf6Wp.js   219.75 kB │ gzip: 68.81 kB
+✓ built in 1.15s
+
+PWA v2.0.0
+mode      generateSW
+precache  5 entries (217.57 KiB)
+files generated
+  dist/sw.js
+  dist/workbox-9c191d2f.js
+
+=== web: npm run format ===
+Checking formatting...
+All matched files use Prettier code style!
+
+=== server: ruff check . ===
+All checks passed!
+
+=== server: pytest -v ===
+============================= test session starts =============================
+platform win32 -- Python 3.12.7, pytest-9.1.1, pluggy-1.7.0
+collected 1 item
+
+tests/test_health.py::test_health PASSED                                 [100%]
+
+============================== 1 passed in 0.20s ==============================
+
+=== git add --dry-run app/ work/ (커밋 대상 확인, .venv/node_modules/dist 제외됨) ===
+44개 파일 — __init__.py, api/main.py, pyproject.toml, requirements*.txt,
+tests/test_health.py, web쪽 package.json/vite.config.ts/src 전체 등
+(.venv, node_modules, dist 전부 제외 확인됨)
