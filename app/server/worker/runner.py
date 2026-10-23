@@ -56,6 +56,7 @@ def _claim_next_job(db: Session) -> Job | None:
     )
     if candidate_id is None:
         return None
+    _race_window_hook()
     claimed = (
         db.query(Job)
         .filter(Job.id == candidate_id, Job.status == JobStatus.QUEUED)
@@ -68,6 +69,13 @@ def _claim_next_job(db: Session) -> Job | None:
     if claimed == 0:
         return None
     return db.get(Job, candidate_id)
+
+
+def _race_window_hook() -> None:
+    """운영 코드에서는 아무 동작도 하지 않는다. SELECT와 원자적 UPDATE 사이의 좁은
+    경쟁 구간을 테스트에서 monkeypatch로 결정적으로 넓혀, 두 워커가 실제로 같은
+    후보를 동시에 집으려 드는 상황을 안정적으로 재현하기 위한 테스트 전용 훅
+    (Codex 모드B 지적: 실제 스레드 타이밍에만 의존한 회귀 테스트는 비결정적)."""
 
 
 def _run_job(db: Session, job: Job) -> None:

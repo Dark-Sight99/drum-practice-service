@@ -5,6 +5,7 @@ import threading
 import pytest
 from sqlalchemy.orm import sessionmaker
 
+import worker.runner as runner_module
 from db.models import Base, Job, JobStatus, JobType, Song, SongSourceType, User
 from db.session import create_sqlite_engine
 from worker.handlers import clear_handlers, register_handler
@@ -125,9 +126,17 @@ def test_recover_orphaned_jobs_does_not_touch_queued_or_completed(db) -> None:
     assert queued.status == JobStatus.QUEUED
 
 
-def test_concurrent_workers_cannot_claim_the_same_job(tmp_path) -> None:
+def test_concurrent_workers_cannot_claim_the_same_job(tmp_path, monkeypatch) -> None:
     """Codex 모드A C-001 회귀 테스트: 워커 두 개가 동시에 돌아도 같은 작업을
-    둘 다 처리하면 안 된다(파일 기반 DB + 별도 커넥션으로 실제 멀티프로세스 상황을 흉내냄)."""
+    둘 다 처리하면 안 된다(파일 기반 DB + 별도 커넥션으로 실제 멀티프로세스 상황을 흉내냄).
+
+    Codex 모드B 지적: 실제 스레드 타이밍에만 맡기면 SELECT와 UPDATE 사이의 경쟁 구간이
+    너무 좁아 두 워커가 실제로 같은 후보를 동시에 집으려는 상황이 매번 재현되지 않고
+    테스트가 비결정적으로 통과할 수 있음(재현: 수정 전 코드로 30회 반복 시 약 70%만
+    실패, 나머지는 우연히 순차 처리돼 버그가 있어도 통과). `_race_window_hook`을
+    monkeypatch해서 두 워커가 SELECT 직후·UPDATE 직전에 반드시 동시에 멈추도록 강제해
+    경쟁을 매번 결정적으로 만든다.
+    """
     db_path = tmp_path / "race.db"
     engine = create_sqlite_engine(f"sqlite:///{db_path}")
     Base.metadata.create_all(engine)
@@ -143,14 +152,17 @@ def test_concurrent_workers_cannot_claim_the_same_job(tmp_path) -> None:
 
     register_handler(JobType.SEPARATE, lambda j: None)
 
+    race_barrier = threading.Barrier(2)
+    monkeypatch.setattr(runner_module, "_race_window_hook", lambda: race_barrier.wait(timeout=5))
+
     claimed: list[int] = []
     claim_lock = threading.Lock()
-    barrier = threading.Barrier(2)
+    start_barrier = threading.Barrier(2)
 
     def worker_sim() -> None:
         worker_engine = create_sqlite_engine(f"sqlite:///{db_path}")
         worker_db = sessionmaker(bind=worker_engine)()
-        barrier.wait()
+        start_barrier.wait()
         result = process_next_job(worker_db)
         if result is not None:
             with claim_lock:
