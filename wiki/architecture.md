@@ -51,8 +51,15 @@ python -m venv .venv   # 최초 1회
 - `assets.file_path`는 CHECK 제약으로 `..`/절대경로(`/`,`\`,드라이브 문자)를 막음(완전한 경로 검증은 아님, Phase 3 파일 저장 코드에서 보강 필요).
 - 마이그레이션: `cd app/server && ./.venv/Scripts/python.exe -m alembic upgrade head`
 
+## 인증/세션 (T1-3, 2026-10-23)
+- 비밀번호: argon2(`auth/security.py`). 세션: 서버 사이드(`user_sessions` 테이블), 쿠키엔 무작위 토큰만, DB엔 SHA-256 해시만 저장.
+- `api/deps.py`의 `get_current_user`가 **요청마다** `is_active`를 재확인 — 관리자가 계정을 정지하면 이미 로그인된 세션도 다음 요청부터 바로 막힘(REQ-08 "즉시" 요구사항).
+- 로그인 실패(아이디 없음/비밀번호 틀림/계정 정지) 응답은 **내용과 처리 비용을 전부 동일하게** 맞춤 — 계정 존재·상태가 새지 않도록(더미 argon2 해시로 상수 비용 유지).
+- 엔드포인트: `POST /auth/login`·`/logout`, `GET /auth/me`, `POST /admin/users`·`PATCH /admin/users/{id}`(관리자 전용, 가입 화면 없음), `GET /songs`·`/songs/{id}`(로그인한 사용자 자신의 곡만 — 다른 사용자 곡은 403이 아니라 404).
+- 쿠키는 `httponly`+`secure`+`samesite=lax` — 로컬 테스트 시 `TestClient(app, base_url="https://testserver")`로 HTTPS를 시뮬레이션해야 쿠키가 왕복함(http://testserver 기본값으로는 secure 쿠키가 전송 안 됨).
+
 ## 아직 없는 것 (다음 작업)
-- 인증/세션 (T1-3)
 - 작업 큐 워커 (T1-4)
 - DrumScore 타입·GM 매핑 (T1-5)
 - 실제 화면(연습·라이브러리·편집·믹서)은 Phase 2부터
+- 관리자 콘솔 UI 없음(API만) — 계정 생성은 지금은 API 직접 호출 필요
