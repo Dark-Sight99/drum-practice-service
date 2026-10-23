@@ -1,0 +1,47 @@
+=== npx tsc -b ===
+exit: 0
+
+=== npx oxlint ===
+exit: 0
+
+=== npx prettier --check src ===
+Checking formatting...
+[[33mwarn[39m] src/App.test.tsx
+[[33mwarn[39m] src/App.tsx
+[[33mwarn[39m] src/index.css
+[[33mwarn[39m] src/main.tsx
+[[33mwarn[39m] src/styles/tokens.css
+[[33mwarn[39m] src/test/setup.ts
+[[33mwarn[39m] Code style issues found in 6 files. Run Prettier with --write to fix.
+exit: 1
+
+=== npx vitest run ===
+
+ RUN  v5.0.5 C:/Users/Jaewoo/드럼연습서비스/app/web
+
+
+ Test Files  3 passed (3)
+      Tests  18 passed (18)
+   Start at  16:03:58
+   Duration  796ms (environment 82%, setup 12%, import 2%, tests 2%, transform 1%, worker 1%)
+
+
+=== Codex 모드A 지적(C-001,C-002) 반영 후 재검증 ===
+--- tsc ---
+exit: 0
+--- oxlint ---
+exit: 0
+--- prettier(src/score) ---
+Checking formatting...
+All matched files use Prettier code style!
+exit: 0
+--- vitest ---
+
+ RUN  v5.0.5 C:/Users/Jaewoo/드럼연습서비스/app/web
+
+
+ Test Files  3 passed (3)
+      Tests  20 passed (20)
+   Start at  16:07:23
+   Duration  830ms (environment 82%, setup 12%, import 2%, transform 1%, tests 1%, worker 1%)
+

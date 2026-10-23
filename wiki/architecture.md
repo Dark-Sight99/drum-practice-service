@@ -65,8 +65,14 @@ python -m venv .venv   # 최초 1회
 - `db/session.py`의 `SessionLocal`은 `expire_on_commit=False` — 기본값(True)이면 세션을 닫은 뒤 ORM 객체 속성에 접근할 때 `DetachedInstanceError`가 남(실제로 `worker.runner --once`를 독립 서브프로세스로 돌리다 재현됨 — pytest의 `TestClient`/직접 세션 호출 방식은 이 패턴을 안 건드려서 못 잡았음).
 - 엔드포인트: `GET /jobs`(내 작업 목록), `GET /jobs/{id}`(다른 사용자 작업은 404 — songs.py와 동일 원칙). 큐에 작업을 **넣는** API는 아직 없음(업로드 플로우가 Phase 3 범위).
 
+## DrumScore 타입·GM 매핑 (T1-5, 2026-10-23)
+- `app/web/src/score/`(TypeScript) — "모든 화면이 이 형식만 읽음" 원칙 + 경로C(MIDI/MusicXML/GP)가 `@tonejs/midi`·alphaTab로 브라우저에서 처리되므로 이쪽에 둠. 경로A(ADT)·B(OMR)의 Python 생성 로직은 Phase 3/4에서 이 타입과 교차 검증.
+- `types.ts`: `DrumPiece`(9종: kick/snare/hihat_closed·open/tom_high·mid·floor/crash/ride), `DrumScore`(version/meta/notes/ppq/audioOffsetMs).
+- `gmMapping.ts`: `PIECE_TO_GM_NOTE`/`GM_NOTE_TO_PIECE`(양방향) — General MIDI Level 1 퍼커션 키맵 공식 문서로 재확인(값 전부 일치, `qa-evidence/T1-5/result.md` 참고).
+- `validate.ts`: `validateDrumScore`가 예외를 절대 던지지 않고 `{valid, errors}` 반환(REQ-02 "부분 인식도 크래시 없이 진입") — 필드 접근 중 예외(예: getter)가 나도 try/catch로 흡수(Codex 모드A C-001, 실제 재현 후 수정).
+
 ## 아직 없는 것 (다음 작업)
 - 큐에 작업을 넣는 공개 API(업로드 트리거), 실제 처리 핸들러(Demucs/ADTOF/Audiveris) 등록 — Phase 3/4
-- DrumScore 타입·GM 매핑 (T1-5)
+- DrumScore를 실제로 쓰는 코드(MIDI/MusicXML/GP 파서, MIDI 내보내기) — T2-1부터
 - 실제 화면(연습·라이브러리·편집·믹서)은 Phase 2부터
 - 관리자 콘솔 UI 없음(API만) — 계정 생성은 지금은 API 직접 호출 필요
