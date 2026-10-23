@@ -8,7 +8,7 @@
 | Q-11 | 스티킹 자동 추천 규칙의 타당성 | 오른손잡이 기본 규칙(REQ-12) | Phase 2 게이트에서 의뢰인이 실제 곡으로 검토 |
 | Q-02 | 드럼 채보 모델 | **진행중 해소**(2026-10-23). 원본 ADTOF(madmom 의존)는 이 PC에서 빌드 불가(MSVC/WSL 없음) → 대안 **ADTOF-pytorch**로 Phase 0 테스트 진행(의뢰인 선택). MDB Drums 5트랙 F-measure macro 0.7585(클래스별 수치는 `qa-evidence/T0-2/result.md`). 라이선스 이슈는 Q-15 | T0-2 측정 완료. Phase 3 채택 여부는 Q-15(라이선스) 해소 후 최종 결정 |
 | Q-03 | 종이 드럼 악보 OMR 품질 | 미검증. 테스트용 사진은 선생님이 고친 초보자용 악보(원곡과 다름) — 인식 테스트 전용, 음원 채보 정답지 아님 | T0-3 |
-| Q-04 | 음정 유지 속도 변경 방식 | **해소 제안**(2026-10-23). `preservesPitch`(HTMLMediaElement 내장) 채택 제안. SoundTouch(AudioWorklet, `@soundtouchjs/audio-worklet`)는 iPhone 13 Pro·iPad mini 5 실기기에서 간헐적으로 오디오 엔진이 수 초씩 밀리는 현상(불규칙, 배속과 무관) 재현 확인 — 채택 안 함 | 의뢰인 승인 대기. 상세: `qa-evidence/T0-5/result.md` |
+| Q-04 | 음정 유지 속도 변경 방식 | **해소됨**(2026-10-23, 의뢰인 승인). `preservesPitch`(HTMLMediaElement 내장) 채택 확정. SoundTouch(AudioWorklet, `@soundtouchjs/audio-worklet`)는 iPhone 13 Pro·iPad mini 5 실기기에서 간헐적으로 오디오 엔진이 수 초씩 밀리는 현상(불규칙, 배속과 무관) 재현 확인 — 채택 안 함 | 해소됨. 상세: `qa-evidence/T0-5/result.md` |
 | Q-05 | 오디오-화면 동기 허용 오차 | 초기 목표 ±30ms. **T0-5에서 완전히 확정 못함** — 측정 방식이 두 내부 클록 비교일 뿐 실제 메트로놈·분리 오디오 트랙과의 동기가 아니고, 공통 출력 시작 지연(추정)이 보정 안 된 채 남아 있음(preservesPitch·SoundTouch 정상 구간 모두 배속 비례 -200~-600ms대 공통 오프셋 관측) | Phase 2~3에서 실제 메트로놈(Tone.js)·분리 오디오 트랙 함께 재생하는 end-to-end 테스트로 재검증 |
 | Q-06 | 원격 접속: Tailscale vs Cloudflare Tunnel | Tailscale 확정(개인 무료 플랜, 최대 6명, 비상업) | 해소됨(2026-10-23) |
 | Q-07 | 상업화 여부 | 현재 "비공개, 지인 포함 소수 사용자(최대 6명), 비상업" | 범위 확대(불특정 공개) 시 ADTOF·Audiveris 라이선스 재검토 |

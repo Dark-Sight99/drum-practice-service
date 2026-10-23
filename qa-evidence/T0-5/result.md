@@ -1,4 +1,4 @@
-> 한 줄 요약: T0-5 완료. SoundTouch(AudioWorklet)는 iPhone 13 Pro·iPad mini 5에서 간헐적으로 수 초씩 밀려 채택 불가, preservesPitch(HTMLMediaElement) 채택 제안(Q-04). ±30ms 최종 확인은 Phase 2~3 end-to-end 재검증 필요(Q-05).
+> 한 줄 요약: T0-5 완료. SoundTouch(AudioWorklet)는 iPhone 13 Pro·iPad mini 5에서 간헐적으로 수 초씩 밀려 채택 불가, preservesPitch(HTMLMediaElement) 채택 확정(Q-04, 2026-10-23 의뢰인 승인). ±30ms 최종 확인은 Phase 2~3 end-to-end 재검증 필요(Q-05).
 
 # T0-5 결과 — 속도 변경 동기화 측정(2026-10-23)
 
