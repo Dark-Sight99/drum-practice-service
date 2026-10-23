@@ -16,5 +16,5 @@
 | Q-09 | 드럼킷 그래픽 제작 방식 | 자체 SVG | Phase 2 디자인 시 의뢰인 확인 |
 | Q-10 | 셈여림 표시 신뢰도 | 자동 채보 셈여림은 정확도 미검증 | Phase 3 측정 |
 | Q-12 | PDF→이미지: pypdfium2 vs PyMuPDF 라이선스 | pypdfium2 1순위(확인 필요), PyMuPDF는 AGPL/상업 듀얼 라이선스로 알려짐 | T0-6 |
-| Q-13 | Tailscale Funnel이 개인 무료 플랜에 포함되는지 | 미확인, 참고용 조사 | T0-6에서 조사해 보고(채택 여부는 별도 결정) |
+| Q-13 | Tailscale Funnel이 개인 무료 플랜에 포함되는지 | **확인됨**(2026-10-23, tailscale.com/kb/1223/funnel 공식 문서: "Funnel is available for all plans" — 단, 현재 베타 단계, MagicDNS·HTTPS 인증서 활성화 필요) | 해소됨. 채택(지인 초대에 Funnel 쓸지, 일반 Tailscale 네트워크 참여로만 할지)은 의뢰인 별도 결정 |
 | Q-14 | Audiveris(AGPL)·ADTOF(NC)를 지인 포함 소수 사용자(최대 6명) 네트워크 서비스로 쓸 때 라이선스 의무 | 서비스 범위가 "본인만"에서 "소수 지인 포함"으로 변경되어 재검토 필요 | T0-6에서 근거와 함께 조사 보고, 법적 단정 금지 |
