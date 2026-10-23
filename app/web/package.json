@@ -12,6 +12,8 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@coderline/alphatab": "^1.8.4",
+    "@tonejs/midi": "^2.0.28",
     "react": "^19.3.1",
     "react-dom": "^19.3.1"
   },

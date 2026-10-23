@@ -71,8 +71,15 @@ python -m venv .venv   # 최초 1회
 - `gmMapping.ts`: `PIECE_TO_GM_NOTE`/`GM_NOTE_TO_PIECE`(양방향) — General MIDI Level 1 퍼커션 키맵 공식 문서로 재확인(값 전부 일치, `qa-evidence/T1-5/result.md` 참고).
 - `validate.ts`: `validateDrumScore`가 예외를 절대 던지지 않고 `{valid, errors}` 반환(REQ-02 "부분 인식도 크래시 없이 진입") — 필드 접근 중 예외(예: getter)가 나도 try/catch로 흡수(Codex 모드A C-001, 실제 재현 후 수정).
 
+## 디지털 악보 가져오기 (T2-1, 2026-10-23)
+- `app/web/src/score/import/` — MIDI(.mid)/MusicXML(.musicxml/.mxl)/Guitar Pro(.gp/.gp3~.gp5/.gpx)를 DrumScore로 변환.
+- 핵심 설계: alphaTab(`importer.ScoreLoader.loadScoreFromBytes`)으로 MusicXML/.mxl/GP를 파싱 → alphaTab 자신의 `midi.MidiFileGenerator`+`midi.AlphaSynthMidiFileHandler`로 표준 MIDI 바이너리 재수출 → `@tonejs/midi`로 재파싱 — `.mid` 직접 가져오기와 **같은 변환기**(`midiEvents.ts`의 `midiToDrumScore`)로 합류. 틱·템포·타이 계산을 alphaTab에 전부 맡김.
+- 퍼커션 트랙 판별: `track.instrument.percussion`(=`channel===9`, @tonejs/midi 소스로 확인). GM 노트 번호는 T1-5의 `GM_NOTE_TO_PIECE`로 변환 — 9종 밖 노트(카우벨 등)는 임의로 끼워 맞추지 않고 건너뛰며 `unmappedNoteCount`로 집계.
+- `importScoreFile(bytes, filename)`이 확장자로 라우팅하는 통합 진입점. 손상된 파일은 두 파서 모두 예외를 던지는 것을 실제 확인했기에 try/catch로 감싸 `{ok:false}` 반환(크래시 없음).
+- 실제 검증: MusicXML은 `qa-evidence/T0-4/drum_test.musicxml`(Phase 0 샘플). GP는 그 샘플을 alphaTab의 `Gp7Exporter`로 실제 GP7 바이너리로 만들어 왕복 검증(사람이 만든 파일은 아님 — Q-18 부분 해소).
+
 ## 아직 없는 것 (다음 작업)
 - 큐에 작업을 넣는 공개 API(업로드 트리거), 실제 처리 핸들러(Demucs/ADTOF/Audiveris) 등록 — Phase 3/4
-- DrumScore를 실제로 쓰는 코드(MIDI/MusicXML/GP 파서, MIDI 내보내기) — T2-1부터
+- 파일 선택 UI(input/드래그앤드롭), 가져온 DrumScore의 서버 저장(원본+편집본) — T2-5(라이브러리 화면)
 - 실제 화면(연습·라이브러리·편집·믹서)은 Phase 2부터
 - 관리자 콘솔 UI 없음(API만) — 계정 생성은 지금은 API 직접 호출 필요

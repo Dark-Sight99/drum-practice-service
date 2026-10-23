@@ -48,7 +48,7 @@
 | 오디오 엔진 | Web Audio API, 스케줄링·메트로놈은 Tone.js | 정확한 타이밍 | |
 | 음정 유지 속도 변경 | **HTMLMediaElement `preservesPitch`** 채택 확정(2026-10-23, 의뢰인 승인). SoundTouch AudioWorklet은 실기기(iPhone 13 Pro·iPad mini 5) 테스트에서 오디오 엔진이 간헐적으로 수 초씩 밀리는 현상 확인돼 제외 | | Q-04 해소됨, 상세는 `qa-evidence/T0-5/result.md` |
 | MIDI 입출력 | @tonejs/midi | | |
-| GP/MusicXML 가져오기 | alphaTab (MPL-2.0) | GP3~7·MusicXML 읽기 지원으로 알려짐 | ⚠ 드럼 트랙 변환 실검증 |
+| GP/MusicXML 가져오기 | alphaTab (MPL-2.0) | `ScoreLoader.loadScoreFromBytes` → `MidiFileGenerator`+`AlphaSynthMidiFileHandler` → `MidiFile.toBinary()`로 표준 MIDI 바이트를 뽑아 @tonejs/midi로 재파싱(퍼커션 채널9·GM 노트번호 전부 실제 MusicXML 파일로 실검증, `work/T2-1/plan.md`) | T0-3/T0-4의 실제 `.musicxml`/`.mxl` 샘플로 검증됨. GP(.gp/.gp3~5/.gpx)는 같은 API를 쓰지만 실제 GP 샘플로는 검증 못함 |
 | UI 아이콘 | Lucide (ISC ⚠확인) | 08-design.md 지정 | ⚠ 라이선스 확인 |
 | UI 폰트 | Pretendard (SIL OFL ⚠확인) | 08-design.md 지정, 자체 호스팅 | ⚠ 라이선스 확인 |
 | 백엔드 | Python 3.11+ / FastAPI / Uvicorn | ML 모델이 Python | |
@@ -82,7 +82,8 @@
 | Demucs | MIT | 가능 | 가능(고지) |
 | ADTOF | CC BY-NC-SA 4.0 | 비상업 범위 내 가능(지인 포함 소수 사용자 재검토 중, Q-14) | **불가 → 교체 필요** |
 | Audiveris | AGPL-3.0 ⚠확인 | 지인 포함 소수 사용자 네트워크 서비스 시 소스 공개 의무 재검토 중(Q-14) | 서버 제공 시 소스 공개 의무 검토 |
-| alphaTab | MPL-2.0 ⚠확인 | 가능 | 가능(조건부) |
+| alphaTab | MPL-2.0(확인됨, 2026-10-23, npm 레지스트리 `license` 필드) | 가능 | 가능(조건부) |
+| @tonejs/midi | MIT(확인됨, 2026-10-23, npm 레지스트리 `license` 필드) | 가능 | 가능(고지) |
 | Lucide | ISC ⚠확인 | 가능 | 가능 |
 | Pretendard | SIL OFL ⚠확인 | 가능 | 가능 |
 | pypdfium2 | Apache-2.0/BSD-3-Clause(확인됨, 2026-10-23) | 가능 | 가능 |
