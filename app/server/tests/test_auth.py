@@ -7,10 +7,10 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from api.deps import get_db
+from api.deps import SESSION_COOKIE_NAME, get_db
 from api.main import app
-from auth.security import hash_password, utcnow_naive
-from db.models import Base, Song, SongSourceType, User
+from auth.security import hash_password, hash_session_token, utcnow_naive
+from db.models import Base, Song, SongSourceType, User, UserSession
 from db.session import create_sqlite_engine
 
 
@@ -140,8 +140,6 @@ def test_expired_session_rejected(client: TestClient, db_session) -> None:
     user = _make_user(db_session, "jaewoo", "pw1234")
     client.post("/auth/login", json={"username": "jaewoo", "password": "pw1234"})
 
-    from db.models import UserSession
-
     session_row = db_session.query(UserSession).filter(UserSession.user_id == user.id).first()
     session_row.expires_at = utcnow_naive() - timedelta(days=1)
     db_session.commit()
@@ -168,3 +166,45 @@ def test_non_admin_cannot_access_admin_endpoints(client: TestClient, db_session)
 
     resp = client.post("/admin/users", json={"username": "x", "password": "y"})
     assert resp.status_code == 403
+
+
+def test_login_failures_return_identical_response(client: TestClient, db_session) -> None:
+    """Codex 모드A C-001: 존재하지 않는 아이디 / 틀린 비밀번호 / 정지된 계정, 셋 다 상태코드와
+    본문이 완전히 같아야 한다(계정 존재·상태를 응답으로 알 수 없게)."""
+    _make_user(db_session, "realuser", "correctpw", is_active=True)
+    _make_user(db_session, "suspended", "correctpw", is_active=False)
+
+    resp_no_user = client.post("/auth/login", json={"username": "ghost", "password": "whatever"})
+    resp_wrong_pw = client.post("/auth/login", json={"username": "realuser", "password": "wrong"})
+    resp_suspended = client.post(
+        "/auth/login", json={"username": "suspended", "password": "correctpw"}
+    )
+
+    statuses = {resp_no_user.status_code, resp_wrong_pw.status_code, resp_suspended.status_code}
+    assert statuses == {401}
+    assert resp_no_user.json() == resp_wrong_pw.json() == resp_suspended.json()
+
+
+def test_tampered_session_token_rejected(client: TestClient, db_session) -> None:
+    """쿠키 값을 변조해도(세션 테이블에 없는 토큰) 인증되면 안 된다."""
+    _make_user(db_session, "jaewoo", "pw1234")
+    client.post("/auth/login", json={"username": "jaewoo", "password": "pw1234"})
+
+    # httpx 쿠키 jar는 domain이 다르면 같은 이름이라도 별도 쿠키로 추가될 뿐 기존 걸 안 바꾼다
+    # (실제로 .set()만 호출하니 원래 유효한 쿠키가 그대로 남아 요청이 200으로 통과해버림 —
+    # 재현 확인). 먼저 비우고 변조된 토큰만 넣는다.
+    client.cookies.clear()
+    client.cookies.set(SESSION_COOKIE_NAME, "tampered-token-that-does-not-exist")
+    resp = client.get("/auth/me")
+    assert resp.status_code == 401
+
+
+def test_session_token_stored_only_as_hash(client: TestClient, db_session) -> None:
+    """쿠키로 내려준 원문 토큰이 DB에 그대로 저장되면 안 되고, 해시만 저장돼야 한다."""
+    _make_user(db_session, "jaewoo", "pw1234")
+    resp = client.post("/auth/login", json={"username": "jaewoo", "password": "pw1234"})
+    raw_token = resp.cookies[SESSION_COOKIE_NAME]
+
+    session_row = db_session.query(UserSession).first()
+    assert session_row.token_hash != raw_token
+    assert session_row.token_hash == hash_session_token(raw_token)

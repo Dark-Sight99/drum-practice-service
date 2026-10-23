@@ -1,12 +1,19 @@
-> 한 줄 요약: T1-3 QA — ruff/pytest 26개 전부 통과(로그인/세션/로그아웃/비로그인 차단/사용자간 격리/즉시 정지/관리자 전용 포함).
+> 한 줄 요약: T1-3 QA — ruff/pytest 29개 전부 통과(로그인/세션/로그아웃/비로그인 차단/사용자간 격리/즉시 정지/관리자 전용 + Codex 지적 반영 회귀 테스트 포함).
 
-# T1-3 QA 결과(2026-10-23)
+# T1-3 QA 결과(2026-10-23, Codex 모드A 반영 후 최종)
 
 ## 실행 결과
 | 항목 | 명령 | 결과 |
 |---|---|---|
 | lint | `ruff check .` | PASS (지적 0건) |
-| test | `pytest -v` | PASS (26/26, T1-3 신규 10개 + 기존 16개) |
+| test | `pytest -v` | PASS (29/29, T1-3 신규 13개 + 기존 16개) |
+
+## Codex 모드A 반영 후 테스트(신규 3개)
+| 테스트 | 확인하는 것 |
+|---|---|
+| `test_login_failures_return_identical_response` | C-001: 사용자없음/비밀번호틀림/계정정지 응답이 상태코드·본문 전부 동일 |
+| `test_tampered_session_token_rejected` | C-003: 변조된 세션 토큰 거부 |
+| `test_session_token_stored_only_as_hash` | C-003: 쿠키 원문 토큰이 DB에 그대로 저장 안 됨(해시만) |
 
 ## 신규 테스트(T1-3)와 REQ-08 수용 기준 대응
 | 테스트 | REQ-08 수용 기준 |
