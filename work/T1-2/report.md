@@ -8,7 +8,7 @@
 | `app/server/db/models.py` | User/Song/Asset/Job/PracticeSetting ORM 모델 + enum 5종 | REQ-07,08,10, `intent/05-todo.md` T1-2 |
 | `app/server/db/session.py` | 엔진/세션 팩토리, DB 경로를 루트 `data/db/app.db`로(pathlib, env var로 오버라이드 가능) | `intent/03-architecture-stack.md` §5("사용자 데이터는 data/"), §3("경로는 pathlib") |
 | `app/server/alembic/`, `alembic.ini` | 마이그레이션 환경, 초기 스키마 리비전 1개 | T1-2 |
-| `app/server/tests/test_models.py`, `test_migrations.py` | 모델 CRUD·제약·마이그레이션 테스트 9개 | 테스트 계획(`work/T1-2/plan.md`) |
+| `app/server/tests/test_models.py`, `test_migrations.py` | 모델 CRUD·제약·마이그레이션 테스트(최종 16개 — Codex 모드A/B 반영분 포함, 아래 섹션 참고) | 테스트 계획(`work/T1-2/plan.md`) |
 | `app/server/requirements.txt` | `sqlalchemy`, `alembic` 추가 | 실제 사용 |
 
 ## 구현 근거 (실행 결과로 확인)
