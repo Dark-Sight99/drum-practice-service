@@ -192,8 +192,17 @@ async function runOneSegment(ctx, label, tempo, durationSec, mode) {
     await waitForTapThenPlay(audioEl, label);
   }
 
+  // play()가 resolve된 시점과 실제로 소리가 나기 시작하는 시점 사이에 기기 디코딩 지연이
+  // 있을 수 있어(이전 측정에서 이 고정 오차가 배속만큼 곱해져 보이는 패턴 확인됨),
+  // audioEl.currentTime이 실제로 움직이기 시작하는 순간까지 기다렸다가 기준시각을 찍는다.
+  const waitStart = performance.now();
+  while (audioEl.currentTime <= 0 && performance.now() - waitStart < 2000) {
+    await new Promise((r) => setTimeout(r, 5));
+  }
   const t0Audio = ctx.currentTime;
   const t0El = audioEl.currentTime;
+  const startupDelayMs = performance.now() - waitStart;
+  log(`--- ${label}: 재생 시작 감지까지 ${startupDelayMs.toFixed(0)}ms 대기 ---`);
 
   // 진단용: ctx 클록과 audioEl 클록을 각각 실제 벽시계(performance.now())와도 비교해
   // 어느 쪽이 실제 시간에서 벗어나는지 구분한다(둘 다 서로만 비교하면 어느 쪽 문제인지 알 수 없음).
