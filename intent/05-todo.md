@@ -26,7 +26,8 @@
 - [ ] **게이트**: 결과 보고 → 사용자: 서버 PC 결정, 모델 선택, 허용 오차 확정
 
 ## Phase 1 — 뼈대
-- [ ] T1-1 저장소 구조·린트·테스트 러너 세팅 (web, server), `.gitignore` 확인, `CLAUDE.md` §5 git 규칙 적용
+- [x] T1-1 저장소 구조·린트·테스트 러너 세팅 (web, server), `.gitignore` 확인, `CLAUDE.md` §5 git 규칙 적용
+  - 완료(2026-10-23): app/web(Vite+React+TS+PWA, oxlint/Vitest), app/server(FastAPI, ruff/pytest) 스캐폴드. Codex 모드A에서 디자인 토큰 중복(C-001) 지적 → 수정 → 모드B APPROVE → `main` 병합. 증거: `qa-evidence/T1-1/`, 위키: `wiki/architecture.md`
 - [ ] T1-2 FastAPI + SQLite 스키마(users, songs, assets, jobs, practice_settings) (REQ-07, 08, 10)
 - [ ] T1-3 로그인/세션, 비로그인 차단 테스트 (REQ-08)
 - [ ] T1-4 작업 큐 워커(별도 프로세스, 재시작 복구) (REQ-10)
