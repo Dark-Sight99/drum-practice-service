@@ -1,0 +1,72 @@
+=== npx tsc -b ===
+exit: 0
+
+=== npx oxlint ===
+exit: 0
+
+=== npx prettier --check src/audio ===
+Checking formatting...
+All matched files use Prettier code style!
+exit: 0
+
+=== npx vitest run ===
+
+ RUN  v5.0.5 C:/Users/Jaewoo/드럼연습서비스/app/web
+
+
+ Test Files  7 passed (7)
+      Tests  46 passed (46)
+   Start at  22:10:19
+   Duration  1.32s (environment 82%, setup 12%, import 3%, tests 2%, transform 1%, worker 1%)
+
+
+=== 수동 QA: 실제 브라우저(Claude Browser pane, Chromium)에서 오디오 엔진 확인 ===
+(Tone.js는 jsdom에서 AudioContext가 없어 테스트 불가 — work/T2-2/plan.md 참고.
+임시 하니스(App.tsx에 ManualTestHarness 연결, QA 후 제거)로 확인)
+
+--- 1차: 오디오 시작 + 9종 신스 생성/트리거 ---
+[0.000s] Tone.start() 완료 — AudioContext state: running
+[0.000s] createDrumVoices() 완료
+[0.000s] 9종 전부 0.5초 간격으로 트리거
+→ 콘솔 에러 없음(read_console_messages onlyErrors=true: "No console logs")
+
+--- 2차: 메트로놈 단독 실행(120bpm, 4/4, 4분) ---
+[0.000s] 메트로놈 시작(120bpm, 4/4, 4분)
+→ 콘솔 에러 없음, 3~4초 대기 후에도 정상
+
+--- 3차: 버그 재현 — 메트로놈을 먼저 돌리고 멈춘 뒤 악보 재생 ---
+[0.000s] Tone.start() 완료
+[0.000s] createDrumVoices() 완료
+[0.000s] 메트로놈 시작(120bpm, 4/4, 4분)
+[13.140s] 메트로놈 정지
+[16.521s] playDrumScore 시작(countIn 1마디) — performance.now()=50182.9ms
+→ 이후 "노트 트리거" 로그가 전혀 안 찍힘(12개 노트 중 0개 트리거) — 재현됨.
+원인: Transport가 메트로놈 실행으로 이미 16.521초까지 진행된 상태인데,
+playDrumScore가 노트를 "Transport 0초 기준" 절대 시각(0~4.75초)으로 예약해서
+Transport 플레이헤드가 이미 지나간 과거 시각에 예약된 셈이 됨 — 발동 안 함.
+
+--- 수정(scorePlayer.ts: 예약 전 transport.stop(); transport.position = 0) 후 재검증 ---
+[0.000s] Tone.start() 완료 — AudioContext state: running
+[0.000s] createDrumVoices() 완료
+[0.000s] 메트로놈 시작(120bpm, 4/4, 4분)
+[3.042s] 메트로놈 정지
+[0.000s] playDrumScore 시작(countIn 1마디) — performance.now()=31499.7ms
+[2.029s] 노트 트리거: kick @ transport-time=33.543
+[2.278s] 노트 트리거: hihat_closed @ transport-time=33.793
+[2.528s] 노트 트리거: snare @ transport-time=34.043
+[2.769s] 노트 트리거: hihat_closed @ transport-time=34.293
+[3.019s] 노트 트리거: kick @ transport-time=34.543
+[3.268s] 노트 트리거: hihat_open @ transport-time=34.793
+[3.518s] 노트 트리거: snare @ transport-time=35.043
+[3.767s] 노트 트리거: crash @ transport-time=35.293
+[4.020s] 노트 트리거: tom_high @ transport-time=35.543
+[4.258s] 노트 트리거: tom_mid @ transport-time=35.793
+[4.508s] 노트 트리거: tom_floor @ transport-time=36.043
+[4.760s] 노트 트리거: ride @ transport-time=36.293
+→ 12개 노트 전부 트리거됨(0개 누락). 노트 간 간격 약 0.24~0.25초로
+(테스트 악보는 240틱=0.25초 간격) 기대값과 일치.
+→ 카운트인(1마디, 4/4, 120bpm=2.0초) 후 첫 노트 2.029초 — 로그 자체가
+JS 콜백 실행 시점에 Transport.seconds를 읽은 값이라 실제 오디오 스케줄
+정밀도(Web Audio API가 내부적으로 미리 스케줄함)보다 다소 늦게 보일 수 있음
+(측정 방법의 한계, 실제 오디오 타이밍 오차로 단정 못함 — REQ-04의 공식
+±30ms 측정은 Q-05 계획대로 더 많은 조각이 모인 뒤 별도 수행).
