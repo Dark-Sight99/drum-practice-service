@@ -1,0 +1,283 @@
+=== ruff check . ===
+All checks passed!
+
+=== pytest -v ===
+============================= test session starts =============================
+platform win32 -- Python 3.12.7, pytest-9.1.1, pluggy-1.7.0 -- C:\Users\Jaewoo\드럼연습서비스\app\server\.venv\Scripts\python.exe
+cachedir: .pytest_cache
+rootdir: C:\Users\Jaewoo\드럼연습서비스\app\server
+configfile: pyproject.toml
+plugins: anyio-4.15.1
+collecting ... collected 37 items
+
+tests/test_auth.py::test_login_success_sets_httponly_cookie PASSED       [  2%]
+tests/test_auth.py::test_login_wrong_password_rejected PASSED            [  5%]
+tests/test_auth.py::test_login_inactive_account_rejected PASSED          [  8%]
+tests/test_auth.py::test_protected_endpoint_requires_login PASSED        [ 10%]
+tests/test_auth.py::test_cross_user_cannot_see_others_songs PASSED       [ 13%]
+tests/test_auth.py::test_logout_invalidates_session PASSED               [ 16%]
+tests/test_auth.py::test_suspend_existing_session_blocks_immediately PASSED [ 18%]
+tests/test_auth.py::test_expired_session_rejected PASSED                 [ 21%]
+tests/test_auth.py::test_admin_can_create_and_suspend_user PASSED        [ 24%]
+tests/test_auth.py::test_non_admin_cannot_access_admin_endpoints PASSED  [ 27%]
+tests/test_auth.py::test_login_failures_return_identical_response PASSED [ 29%]
+tests/test_auth.py::test_tampered_session_token_rejected PASSED          [ 32%]
+tests/test_auth.py::test_session_token_stored_only_as_hash PASSED        [ 35%]
+tests/test_health.py::test_health PASSED                                 [ 37%]
+tests/test_jobs_api.py::test_jobs_require_login PASSED                   [ 40%]
+tests/test_jobs_api.py::test_user_only_sees_own_jobs PASSED              [ 43%]
+tests/test_migrations.py::test_alembic_upgrade_head PASSED               [ 45%]
+tests/test_models.py::test_create_user PASSED                            [ 48%]
+tests/test_models.py::test_duplicate_username_rejected PASSED            [ 51%]
+tests/test_models.py::test_song_belongs_to_user PASSED                   [ 54%]
+tests/test_models.py::test_asset_cascade_delete_with_song PASSED         [ 56%]
+tests/test_models.py::test_enum_columns_store_lowercase_value_not_member_name PASSED [ 59%]
+tests/test_models.py::test_job_queue_per_user PASSED                     [ 62%]
+tests/test_models.py::test_job_cannot_reference_another_users_song PASSED [ 64%]
+tests/test_models.py::test_fk_violation_rejected_for_invalid_user PASSED [ 67%]
+tests/test_models.py::test_asset_file_path_rejects_path_traversal PASSED [ 70%]
+tests/test_models.py::test_asset_file_path_rejects_absolute_paths[/etc/passwd] PASSED [ 72%]
+tests/test_models.py::test_asset_file_path_rejects_absolute_paths[C:\\Windows\\System32\\config] PASSED [ 75%]
+tests/test_models.py::test_asset_file_path_rejects_absolute_paths[\\\\fileserver\\share\\secret.txt] PASSED [ 78%]
+tests/test_models.py::test_asset_file_path_accepts_relative_path PASSED  [ 81%]
+tests/test_models.py::test_practice_setting_one_to_one PASSED            [ 83%]
+tests/test_worker.py::test_jobs_processed_in_fifo_order PASSED           [ 86%]
+tests/test_worker.py::test_empty_queue_returns_none PASSED               [ 89%]
+tests/test_worker.py::test_job_without_registered_handler_fails_cleanly PASSED [ 91%]
+tests/test_worker.py::test_handler_exception_marks_job_failed_with_message PASSED [ 94%]
+tests/test_worker.py::test_recover_orphaned_jobs_marks_stuck_processing_as_failed PASSED [ 97%]
+tests/test_worker.py::test_recover_orphaned_jobs_does_not_touch_queued_or_completed PASSED [100%]
+
+============================= 37 passed in 2.53s ==============================
+
+=== 수동 QA: python -m worker.runner --once (실제 서브프로세스, 독립 프로세스로 동작하는지 확인) ===
+--- 1차 시도(수정 전, SessionLocal 기본값 expire_on_commit=True) ---
+DetachedInstanceError 재현됨: sqlalchemy.orm.exc.DetachedInstanceError: Instance <Job at ...> is not bound to a Session; attribute refresh operation cannot proceed (run_once()의 db.close() 이후 __main__ 블록이 result.id를 읽으려다 실패)
+
+--- 수정(db/session.py: SessionLocal에 expire_on_commit=False 추가) 후 재검증 ---
+[사전 준비] 테스트용 Job 1건 시드(job_type=separate, status=queued)
+seeded job id 1
+[실행] python -m worker.runner --once (서브프로세스)
+처리한 작업: 1
+exit code: 0
+[확인] DB에서 처리 결과 조회(세션 재오픈)
+1 separate failed 'separate' 처리 로직이 아직 구현되지 않았습니다
+[정리] 수동 QA용 Job 삭제(dev DB를 깨끗하게 유지)
+deleted 1 jobs; remaining: 0
+=== ruff check . (Codex 모드A C-001 수정 후) ===
+All checks passed!
+
+=== pytest -v (C-001 수정 + 회귀 테스트 test_concurrent_workers_cannot_claim_the_same_job 추가 후, 38개) ===
+============================= test session starts =============================
+platform win32 -- Python 3.12.7, pytest-9.1.1, pluggy-1.7.0 -- C:\Users\Jaewoo\드럼연습서비스\app\server\.venv\Scripts\python.exe
+cachedir: .pytest_cache
+rootdir: C:\Users\Jaewoo\드럼연습서비스\app\server
+configfile: pyproject.toml
+plugins: anyio-4.15.1
+collecting ... collected 38 items
+
+tests/test_auth.py::test_login_success_sets_httponly_cookie PASSED       [  2%]
+tests/test_auth.py::test_login_wrong_password_rejected PASSED            [  5%]
+tests/test_auth.py::test_login_inactive_account_rejected PASSED          [  7%]
+tests/test_auth.py::test_protected_endpoint_requires_login PASSED        [ 10%]
+tests/test_auth.py::test_cross_user_cannot_see_others_songs PASSED       [ 13%]
+tests/test_auth.py::test_logout_invalidates_session PASSED               [ 15%]
+tests/test_auth.py::test_suspend_existing_session_blocks_immediately PASSED [ 18%]
+tests/test_auth.py::test_expired_session_rejected PASSED                 [ 21%]
+tests/test_auth.py::test_admin_can_create_and_suspend_user PASSED        [ 23%]
+tests/test_auth.py::test_non_admin_cannot_access_admin_endpoints PASSED  [ 26%]
+tests/test_auth.py::test_login_failures_return_identical_response PASSED [ 28%]
+tests/test_auth.py::test_tampered_session_token_rejected PASSED          [ 31%]
+tests/test_auth.py::test_session_token_stored_only_as_hash PASSED        [ 34%]
+tests/test_health.py::test_health PASSED                                 [ 36%]
+tests/test_jobs_api.py::test_jobs_require_login PASSED                   [ 39%]
+tests/test_jobs_api.py::test_user_only_sees_own_jobs PASSED              [ 42%]
+tests/test_migrations.py::test_alembic_upgrade_head PASSED               [ 44%]
+tests/test_models.py::test_create_user PASSED                            [ 47%]
+tests/test_models.py::test_duplicate_username_rejected PASSED            [ 50%]
+tests/test_models.py::test_song_belongs_to_user PASSED                   [ 52%]
+tests/test_models.py::test_asset_cascade_delete_with_song PASSED         [ 55%]
+tests/test_models.py::test_enum_columns_store_lowercase_value_not_member_name PASSED [ 57%]
+tests/test_models.py::test_job_queue_per_user PASSED                     [ 60%]
+tests/test_models.py::test_job_cannot_reference_another_users_song PASSED [ 63%]
+tests/test_models.py::test_fk_violation_rejected_for_invalid_user PASSED [ 65%]
+tests/test_models.py::test_asset_file_path_rejects_path_traversal PASSED [ 68%]
+tests/test_models.py::test_asset_file_path_rejects_absolute_paths[/etc/passwd] PASSED [ 71%]
+tests/test_models.py::test_asset_file_path_rejects_absolute_paths[C:\\Windows\\System32\\config] PASSED [ 73%]
+tests/test_models.py::test_asset_file_path_rejects_absolute_paths[\\\\fileserver\\share\\secret.txt] PASSED [ 76%]
+tests/test_models.py::test_asset_file_path_accepts_relative_path PASSED  [ 78%]
+tests/test_models.py::test_practice_setting_one_to_one PASSED            [ 81%]
+tests/test_worker.py::test_jobs_processed_in_fifo_order PASSED           [ 84%]
+tests/test_worker.py::test_empty_queue_returns_none PASSED               [ 86%]
+tests/test_worker.py::test_job_without_registered_handler_fails_cleanly PASSED [ 89%]
+tests/test_worker.py::test_handler_exception_marks_job_failed_with_message PASSED [ 92%]
+tests/test_worker.py::test_recover_orphaned_jobs_marks_stuck_processing_as_failed PASSED [ 94%]
+tests/test_worker.py::test_recover_orphaned_jobs_does_not_touch_queued_or_completed PASSED [ 97%]
+tests/test_worker.py::test_concurrent_workers_cannot_claim_the_same_job PASSED [100%]
+
+============================= 38 passed in 2.54s ==============================
+
+=== test_concurrent_workers_cannot_claim_the_same_job 8회 반복 실행(타이밍 테스트 불안정성 확인) ===
+.                                                                        [100%]
+1 passed in 0.27s
+.                                                                        [100%]
+1 passed in 0.27s
+.                                                                        [100%]
+1 passed in 0.27s
+.                                                                        [100%]
+1 passed in 0.28s
+.                                                                        [100%]
+1 passed in 0.30s
+.                                                                        [100%]
+1 passed in 0.27s
+.                                                                        [100%]
+1 passed in 0.27s
+.                                                                        [100%]
+1 passed in 0.26s
+
+=== Codex 모드B 지적(C-002) 반영: 회귀 테스트 결정성 보강 후 재검증 ===
+--- ruff ---
+All checks passed!
+--- 전체 테스트(38개, 최종) ---
+============================= test session starts =============================
+platform win32 -- Python 3.12.7, pytest-9.1.1, pluggy-1.7.0 -- C:\Users\Jaewoo\드럼연습서비스\app\server\.venv\Scripts\python.exe
+cachedir: .pytest_cache
+rootdir: C:\Users\Jaewoo\드럼연습서비스\app\server
+configfile: pyproject.toml
+plugins: anyio-4.15.1
+collecting ... collected 38 items
+
+tests/test_auth.py::test_login_success_sets_httponly_cookie PASSED       [  2%]
+tests/test_auth.py::test_login_wrong_password_rejected PASSED            [  5%]
+tests/test_auth.py::test_login_inactive_account_rejected PASSED          [  7%]
+tests/test_auth.py::test_protected_endpoint_requires_login PASSED        [ 10%]
+tests/test_auth.py::test_cross_user_cannot_see_others_songs PASSED       [ 13%]
+tests/test_auth.py::test_logout_invalidates_session PASSED               [ 15%]
+tests/test_auth.py::test_suspend_existing_session_blocks_immediately PASSED [ 18%]
+tests/test_auth.py::test_expired_session_rejected PASSED                 [ 21%]
+tests/test_auth.py::test_admin_can_create_and_suspend_user PASSED        [ 23%]
+tests/test_auth.py::test_non_admin_cannot_access_admin_endpoints PASSED  [ 26%]
+tests/test_auth.py::test_login_failures_return_identical_response PASSED [ 28%]
+tests/test_auth.py::test_tampered_session_token_rejected PASSED          [ 31%]
+tests/test_auth.py::test_session_token_stored_only_as_hash PASSED        [ 34%]
+tests/test_health.py::test_health PASSED                                 [ 36%]
+tests/test_jobs_api.py::test_jobs_require_login PASSED                   [ 39%]
+tests/test_jobs_api.py::test_user_only_sees_own_jobs PASSED              [ 42%]
+tests/test_migrations.py::test_alembic_upgrade_head PASSED               [ 44%]
+tests/test_models.py::test_create_user PASSED                            [ 47%]
+tests/test_models.py::test_duplicate_username_rejected PASSED            [ 50%]
+tests/test_models.py::test_song_belongs_to_user PASSED                   [ 52%]
+tests/test_models.py::test_asset_cascade_delete_with_song PASSED         [ 55%]
+tests/test_models.py::test_enum_columns_store_lowercase_value_not_member_name PASSED [ 57%]
+tests/test_models.py::test_job_queue_per_user PASSED                     [ 60%]
+tests/test_models.py::test_job_cannot_reference_another_users_song PASSED [ 63%]
+tests/test_models.py::test_fk_violation_rejected_for_invalid_user PASSED [ 65%]
+tests/test_models.py::test_asset_file_path_rejects_path_traversal PASSED [ 68%]
+tests/test_models.py::test_asset_file_path_rejects_absolute_paths[/etc/passwd] PASSED [ 71%]
+tests/test_models.py::test_asset_file_path_rejects_absolute_paths[C:\\Windows\\System32\\config] PASSED [ 73%]
+tests/test_models.py::test_asset_file_path_rejects_absolute_paths[\\\\fileserver\\share\\secret.txt] PASSED [ 76%]
+tests/test_models.py::test_asset_file_path_accepts_relative_path PASSED  [ 78%]
+tests/test_models.py::test_practice_setting_one_to_one PASSED            [ 81%]
+tests/test_worker.py::test_jobs_processed_in_fifo_order PASSED           [ 84%]
+tests/test_worker.py::test_empty_queue_returns_none PASSED               [ 86%]
+tests/test_worker.py::test_job_without_registered_handler_fails_cleanly PASSED [ 89%]
+tests/test_worker.py::test_handler_exception_marks_job_failed_with_message PASSED [ 92%]
+tests/test_worker.py::test_recover_orphaned_jobs_marks_stuck_processing_as_failed PASSED [ 94%]
+tests/test_worker.py::test_recover_orphaned_jobs_does_not_touch_queued_or_completed PASSED [ 97%]
+tests/test_worker.py::test_concurrent_workers_cannot_claim_the_same_job PASSED [100%]
+
+============================= 38 passed in 2.50s ==============================
+
+=== Codex 모드B 2차 지적(C-003) 반영: 워커 스레드 예외 캡처 추가 후 재검증 ===
+--- test_concurrent_workers_cannot_claim_the_same_job 20회 반복(예외 없음 확인) ---
+.                                                                        [100%]
+1 passed in 0.29s
+.                                                                        [100%]
+1 passed in 0.27s
+.                                                                        [100%]
+1 passed in 0.28s
+.                                                                        [100%]
+1 passed in 0.28s
+.                                                                        [100%]
+1 passed in 0.29s
+.                                                                        [100%]
+1 passed in 0.27s
+.                                                                        [100%]
+1 passed in 0.28s
+.                                                                        [100%]
+1 passed in 0.27s
+.                                                                        [100%]
+1 passed in 0.29s
+.                                                                        [100%]
+1 passed in 0.28s
+.                                                                        [100%]
+1 passed in 0.27s
+.                                                                        [100%]
+1 passed in 0.29s
+.                                                                        [100%]
+1 passed in 0.30s
+.                                                                        [100%]
+1 passed in 0.32s
+.                                                                        [100%]
+1 passed in 0.28s
+.                                                                        [100%]
+1 passed in 0.27s
+.                                                                        [100%]
+1 passed in 0.27s
+.                                                                        [100%]
+1 passed in 0.28s
+.                                                                        [100%]
+1 passed in 0.27s
+.                                                                        [100%]
+1 passed in 0.28s
+--- 전체 테스트(38개, 최종) ---
+============================= test session starts =============================
+platform win32 -- Python 3.12.7, pytest-9.1.1, pluggy-1.7.0 -- C:\Users\Jaewoo\드럼연습서비스\app\server\.venv\Scripts\python.exe
+cachedir: .pytest_cache
+rootdir: C:\Users\Jaewoo\드럼연습서비스\app\server
+configfile: pyproject.toml
+plugins: anyio-4.15.1
+collecting ... collected 38 items
+
+tests/test_auth.py::test_login_success_sets_httponly_cookie PASSED       [  2%]
+tests/test_auth.py::test_login_wrong_password_rejected PASSED            [  5%]
+tests/test_auth.py::test_login_inactive_account_rejected PASSED          [  7%]
+tests/test_auth.py::test_protected_endpoint_requires_login PASSED        [ 10%]
+tests/test_auth.py::test_cross_user_cannot_see_others_songs PASSED       [ 13%]
+tests/test_auth.py::test_logout_invalidates_session PASSED               [ 15%]
+tests/test_auth.py::test_suspend_existing_session_blocks_immediately PASSED [ 18%]
+tests/test_auth.py::test_expired_session_rejected PASSED                 [ 21%]
+tests/test_auth.py::test_admin_can_create_and_suspend_user PASSED        [ 23%]
+tests/test_auth.py::test_non_admin_cannot_access_admin_endpoints PASSED  [ 26%]
+tests/test_auth.py::test_login_failures_return_identical_response PASSED [ 28%]
+tests/test_auth.py::test_tampered_session_token_rejected PASSED          [ 31%]
+tests/test_auth.py::test_session_token_stored_only_as_hash PASSED        [ 34%]
+tests/test_health.py::test_health PASSED                                 [ 36%]
+tests/test_jobs_api.py::test_jobs_require_login PASSED                   [ 39%]
+tests/test_jobs_api.py::test_user_only_sees_own_jobs PASSED              [ 42%]
+tests/test_migrations.py::test_alembic_upgrade_head PASSED               [ 44%]
+tests/test_models.py::test_create_user PASSED                            [ 47%]
+tests/test_models.py::test_duplicate_username_rejected PASSED            [ 50%]
+tests/test_models.py::test_song_belongs_to_user PASSED                   [ 52%]
+tests/test_models.py::test_asset_cascade_delete_with_song PASSED         [ 55%]
+tests/test_models.py::test_enum_columns_store_lowercase_value_not_member_name PASSED [ 57%]
+tests/test_models.py::test_job_queue_per_user PASSED                     [ 60%]
+tests/test_models.py::test_job_cannot_reference_another_users_song PASSED [ 63%]
+tests/test_models.py::test_fk_violation_rejected_for_invalid_user PASSED [ 65%]
+tests/test_models.py::test_asset_file_path_rejects_path_traversal PASSED [ 68%]
+tests/test_models.py::test_asset_file_path_rejects_absolute_paths[/etc/passwd] PASSED [ 71%]
+tests/test_models.py::test_asset_file_path_rejects_absolute_paths[C:\\Windows\\System32\\config] PASSED [ 73%]
+tests/test_models.py::test_asset_file_path_rejects_absolute_paths[\\\\fileserver\\share\\secret.txt] PASSED [ 76%]
+tests/test_models.py::test_asset_file_path_accepts_relative_path PASSED  [ 78%]
+tests/test_models.py::test_practice_setting_one_to_one PASSED            [ 81%]
+tests/test_worker.py::test_jobs_processed_in_fifo_order PASSED           [ 84%]
+tests/test_worker.py::test_empty_queue_returns_none PASSED               [ 86%]
+tests/test_worker.py::test_job_without_registered_handler_fails_cleanly PASSED [ 89%]
+tests/test_worker.py::test_handler_exception_marks_job_failed_with_message PASSED [ 92%]
+tests/test_worker.py::test_recover_orphaned_jobs_marks_stuck_processing_as_failed PASSED [ 94%]
+tests/test_worker.py::test_recover_orphaned_jobs_does_not_touch_queued_or_completed PASSED [ 97%]
+tests/test_worker.py::test_concurrent_workers_cannot_claim_the_same_job PASSED [100%]
+
+============================= 38 passed in 2.55s ==============================
+--- ruff ---
+All checks passed!

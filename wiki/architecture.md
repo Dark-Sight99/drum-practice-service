@@ -58,8 +58,15 @@ python -m venv .venv   # 최초 1회
 - 엔드포인트: `POST /auth/login`·`/logout`, `GET /auth/me`, `POST /admin/users`·`PATCH /admin/users/{id}`(관리자 전용, 가입 화면 없음), `GET /songs`·`/songs/{id}`(로그인한 사용자 자신의 곡만 — 다른 사용자 곡은 403이 아니라 404).
 - 쿠키는 `httponly`+`secure`+`samesite=lax` — 로컬 테스트 시 `TestClient(app, base_url="https://testserver")`로 HTTPS를 시뮬레이션해야 쿠키가 왕복함(http://testserver 기본값으로는 secure 쿠키가 전송 안 됨).
 
+## 작업 큐 워커 (T1-4, 2026-10-23)
+- API 서버(uvicorn)와는 별개 프로세스: `cd app/server && ./.venv/Scripts/python.exe -m worker.runner`(무한 루프) 또는 `--once`(하나만 처리, 수동 QA용).
+- `worker/runner.py`: `_claim_next_job()`이 `UPDATE ... WHERE id=? AND status='queued'` 단일 문장으로 작업을 원자적으로 선점 — 워커 프로세스를 2개 이상 띄워도 같은 작업을 이중 처리하지 않음(Codex 모드A C-001, 실제 재현 후 수정). 시작 시 `recover_orphaned_jobs()`가 `PROCESSING`으로 멈춰있는 작업을 전부 `FAILED` 처리(재시작 복구) — 단, 워커 소유자를 구분하지 않아 **워커를 2개 이상 동시에 운영하면** 안전하지 않음(Q-17, 지금은 "워커 1개만 운영"이 전제).
+- `worker/handlers.py`: `JobType -> Callable[[Job], None]` 레지스트리, 지금은 비어 있음 — 등록된 핸들러가 없는 작업은 크래시 없이 "구현 안 됨"으로 FAILED 처리(실제 Demucs/ADTOF/Audiveris 연결은 Phase 3/4).
+- `db/session.py`의 `SessionLocal`은 `expire_on_commit=False` — 기본값(True)이면 세션을 닫은 뒤 ORM 객체 속성에 접근할 때 `DetachedInstanceError`가 남(실제로 `worker.runner --once`를 독립 서브프로세스로 돌리다 재현됨 — pytest의 `TestClient`/직접 세션 호출 방식은 이 패턴을 안 건드려서 못 잡았음).
+- 엔드포인트: `GET /jobs`(내 작업 목록), `GET /jobs/{id}`(다른 사용자 작업은 404 — songs.py와 동일 원칙). 큐에 작업을 **넣는** API는 아직 없음(업로드 플로우가 Phase 3 범위).
+
 ## 아직 없는 것 (다음 작업)
-- 작업 큐 워커 (T1-4)
+- 큐에 작업을 넣는 공개 API(업로드 트리거), 실제 처리 핸들러(Demucs/ADTOF/Audiveris) 등록 — Phase 3/4
 - DrumScore 타입·GM 매핑 (T1-5)
 - 실제 화면(연습·라이브러리·편집·믹서)은 Phase 2부터
 - 관리자 콘솔 UI 없음(API만) — 계정 생성은 지금은 API 직접 호출 필요

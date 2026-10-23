@@ -32,7 +32,8 @@
   - 완료(2026-10-23): SQLAlchemy 2.0 + Alembic. Codex 모드A/B 검수로 FK 미검사(C-001)·사용자간 곡 참조(C-002)·경로조작(C-003/007) 실제 버그 발견·수정 후 APPROVE. 테스트 16개. 증거: `qa-evidence/T1-2/`, 위키: `wiki/architecture.md`
 - [x] T1-3 로그인/세션, 비로그인 차단 테스트 (REQ-08)
   - 완료(2026-10-23): argon2+서버세션(HttpOnly/Secure 쿠키), 관리자 계정 생성/정지, REQ-08 수용기준 전부 테스트로 증명. Codex 모드A에서 계정 존재 노출(응답내용+타이밍 사이드채널) 발견·수정 후 APPROVE. 테스트 29개. Q-16(관리자가 관리자 생성 가능) 신규 등록. 증거: `qa-evidence/T1-3/`, 위키: `wiki/architecture.md`
-- [ ] T1-4 작업 큐 워커(별도 프로세스, 재시작 복구) (REQ-10)
+- [x] T1-4 작업 큐 워커(별도 프로세스, 재시작 복구) (REQ-10)
+  - 완료(2026-10-23): FIFO 작업 큐 워커(`worker/runner.py`, `--once`/무한루프), 핸들러 레지스트리(Phase3/4용, 지금은 비워둠), `GET /jobs`·`/jobs/{id}`(사용자간 격리). 수동 서브프로세스 QA로 `expire_on_commit` 버그 발견·수정. Codex 모드A에서 동시 워커 이중선점(C-001, 필수) 발견·원자적 claim으로 수정, 재시작복구 소유권 문제(C-002)는 스키마변경 필요해 판단 대기(Q-17). 모드B 3회(수치 동기화→회귀테스트 결정성→예외캡처) 끝에 APPROVE. 테스트 38개. 증거: `qa-evidence/T1-4/`, 위키: `wiki/architecture.md`
 - [ ] T1-5 DrumScore 타입·검증·GM 매핑 상수 + 단위 테스트 (REQ-02)
 
 ## Phase 2 — 디지털 악보로 연습 (첫 사용 가능 버전)

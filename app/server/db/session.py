@@ -39,7 +39,11 @@ def create_sqlite_engine(url: str, **kwargs) -> Engine:
 
 
 engine = create_sqlite_engine(get_database_url(), connect_args={"check_same_thread": False})
-SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+# expire_on_commit=False: 기본값(True)이면 commit() 직후 객체의 속성이 "만료"되고, 세션이
+# 닫힌 뒤 그 속성을 읽으면 DetachedInstanceError가 난다 — worker/runner.py의 run_once()가
+# 세션을 닫고 반환한 Job의 .id를 읽다가 실제로 재현됨(수동 QA 중 발견). commit 후에도 이미
+# 읽은 값은 그대로 메모리에 남겨두도록 끈다.
+SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False, expire_on_commit=False)
 
 
 def get_session() -> Session:
