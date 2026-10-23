@@ -1,0 +1,23 @@
+2026-10-23 실행 로그 — T0-4 alphaTab 드럼 트랙 추출 확인
+
+$ npm init -y && npm install @coderline/alphatab
+added 1 package, and audited 2 packages in 2s
+found 0 vulnerabilities
+
+$ node inspect_drum.mjs drum_test.musicxml
+title:
+tracks: 1
+--- track: Drum Test | percussionArticulations.length: 3
+playbackInfo: {"volume":15,"balance":8,"port":1,"program":0,"bank":0,"primaryChannel":9,"secondaryChannel":9,"isMute":false,"isSolo":false}
+  staff isPercussion: true
+    note: isPercussion= true percussionArticulation= 0 fret= -1 string= -1 realValue= 0
+    note: isPercussion= true percussionArticulation= 1 fret= -1 string= -1 realValue= 1
+    note: isPercussion= true percussionArticulation= 2 fret= -1 string= -1 realValue= 2
+    note: isPercussion= true percussionArticulation= 2 fret= -1 string= -1 realValue= 2
+
+$ node -e "...percussionArticulations 내용 출력..."
+{"id":36,"elementType":"","staffLine":7,"noteHeadDefault":-1,"noteHeadHalf":-1,"noteHeadWhole":-1,"techniqueSymbol":-1,"techniqueSymbolPlacement":1,"outputMidiNumber":36}
+{"id":38,"elementType":"","staffLine":3,"noteHeadDefault":-1,"noteHeadHalf":-1,"noteHeadWhole":-1,"techniqueSymbol":-1,"techniqueSymbolPlacement":1,"outputMidiNumber":38}
+{"id":42,"elementType":"","staffLine":-1,"noteHeadDefault":-1,"noteHeadHalf":-1,"noteHeadWhole":-1,"techniqueSymbol":-1,"techniqueSymbolPlacement":1,"outputMidiNumber":42}
+
+-> outputMidiNumber 36/38/42 = GM 표준 kick/snare/hihat_closed 피치와 정확히 일치.

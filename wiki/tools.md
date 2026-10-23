@@ -36,6 +36,20 @@ adtof --audio <입력.wav> --out <출력.mid> --device cuda
 - ⚠ **라이선스 미표시**: 저장소에 LICENSE 파일 없음, GitHub API `license: null`. 내부 테스트용으로만 사용 중, 실제 서비스(Phase 3 T3-2) 채택 전 재확인 필요 — Q-15 참고
 - F-measure 평가: `mir_eval.onset.f_measure(ref, est, window=0.05)` (mir_eval 기본값)
 
+## alphaTab Node.js 사용법 (T0-4) — 2026-10-23 확인
+```bash
+npm install @coderline/alphatab
+```
+```js
+import * as alphaTab from "@coderline/alphatab";
+import * as fs from "fs";
+const fileData = await fs.promises.readFile(filePath);
+const score = alphaTab.importer.ScoreLoader.loadScoreFromBytes(new Uint8Array(fileData), new alphaTab.Settings());
+```
+- 출처: https://alphatab.net/docs/guides/nodejs
+- 퍼커션 트랙 식별: `staff.isPercussion === true`, `note.isPercussion === true`
+- 타악기 종류: `note.percussionArticulation`을 인덱스로 `track.percussionArticulations[idx]` 조회 → `.outputMidiNumber`가 **GM 표준 피치**(kick=36, snare=38, hihat_closed=42 등)로 이미 정규화되어 나옴. 별도 변환 불필요(실제 실행으로 확인, 문서에 없던 내용).
+
 ## Tailscale Funnel 플랜 확인 (Q-13)
 공식 문서: https://tailscale.com/kb/1223/funnel — "Funnel is available for all plans"(무료 Personal 포함). 베타 단계, MagicDNS·HTTPS 인증서 필요.
 

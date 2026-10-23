@@ -14,7 +14,8 @@
   - 완료(2026-10-23): 원본 ADTOF는 madmom 빌드 블로커(MSVC/WSL 없음)로 **대안 ADTOF-pytorch** 채택(의뢰인 확인). MDB Drums 5트랙(Demucs 분리 후 채보, REQ-02 경로 A 재현)으로 F-measure 측정: KD 0.9487 / SD 0.8506 / HH 0.6980 / CY 0.8144 / TT 0.4810, macro 0.7585. ADTOF-pytorch 라이선스 미표시 이슈는 Q-15로 별도 기록. 증거: `qa-evidence/T0-2/`
 - [ ] T0-3 ∥ OMR 확인: Audiveris CLI로 의뢰인 종이 드럼 악보 사진 2~3장(`data/samples/sheets/`, 선생님이 초보자용으로 고친 악보 — **OMR 인식 테스트 전용, 음원 채보 정답지로 사용하지 않음**) → MusicXML. 드럼 노트가 얼마나 살아남는지 보고 (REQ-02)
   - **블록(2026-10-23)**: (1) 사진 아직 없음 (2) Audiveris MSI 설치에 관리자 권한 필요(이 세션엔 없음, Error 1925). 설치 파일은 `data/installers/`에 준비됨. 의뢰인이 직접 설치 실행 또는 사진 제공 필요. 상세: `qa-evidence/T0-3/result.md`
-- [ ] T0-4 ∥ GP/MusicXML 가져오기: alphaTab으로 드럼 트랙 노트 추출 가능 여부 (REQ-02)
+- [x] T0-4 ∥ GP/MusicXML 가져오기: alphaTab으로 드럼 트랙 노트 추출 가능 여부 (REQ-02)
+  - 완료(2026-10-23): 자체 작성 MusicXML 퍼커션 샘플로 확인 — `outputMidiNumber`가 GM 표준(36/38/42)으로 정확히 추출됨. GP 바이너리 파일 실측은 보류(실제 샘플 없음). 증거: `qa-evidence/T0-4/`
 - [ ] T0-5 ⏱ 음정 유지 속도 변경(측정 구간은 단독 실행): 후보 2개를 60%/130%로 3분 재생, 메트로놈과 어긋남(ms) 측정, 폰 포함 (REQ-04)
 - [ ] T0-6 라이선스 표 확정(03 문서 §4의 ⚠ 해소). 추가 확인:
   - PyMuPDF vs pypdfium2 라이선스 비교, 문제 없으면 pypdfium2 1순위 (Q-12)
