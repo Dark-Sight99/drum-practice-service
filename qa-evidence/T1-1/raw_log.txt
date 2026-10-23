@@ -47,6 +47,12 @@ tests/test_health.py::test_health PASSED                                 [100%]
 
 ============================== 1 passed in 0.20s ==============================
 
+=== Codex 모드 A 지적(C-001) 수정 후 재검증 ===
+web lint: PASS (지적 0건)
+web test: PASS (1/1)
+web build: PASS (tsc -b && vite build, dist/sw.js 생성 확인)
+web format: PASS (prettier --check)
+
 === git add --dry-run app/ work/ (커밋 대상 확인, .venv/node_modules/dist 제외됨) ===
 44개 파일 — __init__.py, api/main.py, pyproject.toml, requirements*.txt,
 tests/test_health.py, web쪽 package.json/vite.config.ts/src 전체 등

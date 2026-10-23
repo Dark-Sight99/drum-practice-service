@@ -33,3 +33,6 @@
 ## 남은 문제
 - `app/web`, `app/server` 둘 다 아직 실제 기능 없음(Phase 1 T1-2~T1-5, Phase 2에서 채움).
 - CI(자동 빌드/테스트) 파이프라인은 이번 범위 밖 — 필요 여부는 사용자와 별도 논의.
+
+## Codex 모드 A 검수 반영 (2026-10-23)
+- **C-001**(필수 수정): Vite 기본 템플릿의 `index.css`에 `--bg/--text/--border/--accent` 등이 `tokens.css`와 별도로 재정의돼 있어 `intent/08-design.md` §7("토큰은 tokens.css 한 곳에만")과 충돌 — **재현 확인, 수정함**. `index.css`를 최소 리셋 스타일만 남기도록 정리. lint/test/build/format 재검증 통과(`qa-evidence/T1-1/raw_log.txt` 추가분 참고).
