@@ -38,7 +38,8 @@
   - 완료(2026-10-23): `app/web/src/score/`에 DrumScore 타입(9종 분류)·GM 매핑(공식 표로 재확인)·검증 함수(예외 없이 에러 목록 반환) 구현. "모든 화면이 이 형식만 읽음" 원칙 + 경로C(MIDI/MusicXML/GP)가 브라우저 처리라 TypeScript로 한정, 경로A/B의 Python 생성은 Phase 3/4로 보류. Codex 모드A에서 검증 함수의 예외 전파 가능성(C-001, 필수) 발견·수정. 모드B 1회에서 바로 APPROVE. 테스트 20개. 증거: `qa-evidence/T1-5/`, 위키: `wiki/architecture.md`
 
 ## Phase 2 — 디지털 악보로 연습 (첫 사용 가능 버전)
-- [ ] T2-1 ∥ MIDI/MusicXML/GP → DrumScore 가져오기 (REQ-02 경로 C)
+- [x] T2-1 ∥ MIDI/MusicXML/GP → DrumScore 가져오기 (REQ-02 경로 C)
+  - 완료(2026-10-23): `app/web/src/score/import/`. alphaTab으로 MusicXML/.mxl/GP를 파싱해 자신의 MIDI 생성기로 표준 MIDI 바이너리를 뽑아낸 뒤 @tonejs/midi로 재파싱 — .mid 직접 가져오기와 같은 변환기로 합류시키는 단일 경로. `qa-evidence/T0-4/drum_test.musicxml`(Phase 0 실제 샘플)로 MusicXML 경로 검증, GP는 alphaTab 자신의 Gp7Exporter로 만든 실제 GP7 바이너리로 검증(Codex 모드A C-001 반영 — 사람이 만든 파일은 아니라 Q-18 부분 해소로 등록). 모드B 2회 끝에 APPROVE. 테스트 13개(전체 웹 33개). 증거: `qa-evidence/T2-1/`, 위키: `wiki/architecture.md`
 - [ ] T2-2 ∥ 오디오 엔진: 마스터 클록, MIDI 드럼 소리, 메트로놈, 카운트인 (REQ-04)
 - [ ] T2-3 ∥ 연습 화면 렌더러: 레인 + 킷 점등 + 마디선 (REQ-06). 구현은 병렬 가능, fps 측정(⏱)은 단독 실행
 - [ ] T2-4 BPM 변경·A-B 루프 (REQ-04)
