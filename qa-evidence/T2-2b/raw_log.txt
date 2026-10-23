@@ -52,3 +52,37 @@ ride         <- mid/ride/mid_ride_ride_vl3_rr1.flac
 2. 9종 순서대로 트리거(1.2초 간격): 콘솔 에러 없음
 3. 하이햇 6연타(0.15초 간격, Player 모노포닉 한계 때문에 트리거마다 새 Player
    생성하는 "발사 후 소멸" 패턴 검증): 콘솔 에러 없음(끊기지 않고 겹쳐 재생됨)
+
+=== Codex 모드A 지적(C-001, C-002) 반영 후 재검증 ===
+
+--- C-002(dispose()가 빈 함수 — Player·버퍼 안 지워짐) 재현/수정 확인 (실제 브라우저) ---
+정상 로드(9개) -> ride 트리거(7.77초 샘플) -> 1초 후 disposeDrumVoices() 호출
+로그: "dispose 완료, 예외 없음" — 재생 중이던 Player를 강제 정지·dispose, 공유
+버퍼도 dispose, 예외 없이 완료됨을 확인.
+
+--- C-001(일부 샘플 로드 실패 시 성공분 안 지워짐) 재현/수정 확인 (실제 브라우저) ---
+정상 URL 2개 + 존재하지 않는 URL 1개를 Promise.allSettled로 로드:
+로그: "로드 결과: 성공 2개, 실패 1개(기대: 성공2, 실패1)" — Promise.allSettled가
+의도대로 동작, 성공분(2개)에 dispose() 호출해도 예외 없음을 확인.
+(createDrumVoices()는 이 패턴을 그대로 써서 실패 시 성공분을 dispose하고
+에러를 던지도록 수정함 — 로직 자체는 코드 리뷰 + 위 기본 동작 검증으로 충분.)
+
+--- 최종 재검증(tsc/oxlint/prettier/vitest) ---
+--- tsc ---
+exit: 0
+--- oxlint ---
+exit: 0
+--- prettier(src/audio) ---
+Checking formatting...
+All matched files use Prettier code style!
+exit: 0
+--- vitest ---
+
+ RUN  v5.0.5 C:/Users/Jaewoo/드럼연습서비스/app/web
+
+
+ Test Files  8 passed (8)
+      Tests  50 passed (50)
+   Start at  23:40:34
+   Duration  1.64s (environment 81%, setup 12%, import 4%, tests 1%, transform 1%, worker 1%)
+

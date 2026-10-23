@@ -46,3 +46,9 @@ Claude Browser pane에서 Vite dev 서버로 임시 하니스(QA 후 삭제)를 
 - 벨로시티 레이어는 각 피스 1개(최대 벨로시티)만 사용 — 멀티벨로시티 샘플링은 범위 밖(`work/T2-2b/plan.md` §가정).
 - 마이크 포지션은 `mid`(기본 믹스) 1개만 사용 — 여러 마이크를 섞는 멀티마이킹은 범위 밖.
 - `createDrumVoices()`가 동기→비동기로 바뀜(`Promise<DrumVoiceMap>`) — 아직 소비하는 다른 코드가 없어(T2-3 미착수) 영향 없음.
+
+## Codex 모드A 검수 반영
+원문: `codex-modeA.md`. 판정: REQUEST_CHANGES.
+
+- **C-001**(필수): 샘플 일부 로드 실패 시 `Promise.all`이 즉시 reject해서 이미 로드된 나머지 버퍼가 안 지워진다는 지적 — **재현됨**(코드 구조상 명백). **자동 수정함**: `Promise.allSettled`로 바꿔 성공/실패를 전부 확인한 뒤, 실패가 하나라도 있으면 성공분 버퍼를 전부 `dispose()`하고 에러를 던지도록 수정(부분 완성된 `DrumVoiceMap`을 반환하지 않음). 실제 브라우저에서 정상 URL 2개+존재하지 않는 URL 1개를 `Promise.allSettled`로 로드해 "성공 2개, 실패 1개"가 정확히 나오고, 성공분 dispose가 예외 없이 끝나는 것을 확인.
+- **C-002**(필수): `sampleVoice()`의 `dispose()`가 빈 함수라 재생 중인 Player와 공유 버퍼가 명시적 폐기 후에도 안 지워진다는 지적 — **재현됨**(코드 그대로 확인). **자동 수정함**: 트리거마다 생성하는 Player를 `Set`으로 추적해 `dispose()` 시 전부 강제 정지·폐기하고, 공유 버퍼도 같이 `dispose()`. 실제 브라우저에서 7.77초짜리 ride 샘플을 트리거한 직후(1초 시점, 아직 재생 중) `disposeDrumVoices()`를 호출해 예외 없이 정리됨을 확인.

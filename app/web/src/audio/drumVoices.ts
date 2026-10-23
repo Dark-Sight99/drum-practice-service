@@ -31,20 +31,35 @@ export function velocityToDb(velocity: number): number {
 }
 
 function sampleVoice(buffer: Tone.ToneAudioBuffer): DrumVoice {
+  // Codex 모드A C-002(재현됨, 코드 검토): dispose()가 빈 함수라 버퍼·재생 중인
+  // Player가 명시적 폐기 후에도 안 지워짐 — 지금 울리고 있는 Player를 추적해
+  // dispose() 시 전부 멈추고, 버퍼도 같이 정리한다.
+  const activePlayers = new Set<Tone.Player>()
+
   return {
     trigger(time, velocity) {
-      // Codex 모드A 확인 필요: Tone.Player는 모노포닉(Source)이라 같은 소리가
-      // 빠르게 겹쳐 울리면(예: 8분음표 하이햇 연타) 이전 소리를 끊고 재시작함.
-      // 드럼 샘플은 매번 새 Player를 만들어 "발사 후 소멸" 방식으로 자연스러운
-      // 겹침(디케이)을 허용함 — Tone.js 커뮤니티에서 권장하는 one-shot 패턴.
+      // Tone.Player는 모노포닉(Source)이라 같은 소리가 빠르게 겹쳐 울리면
+      // (예: 8분음표 하이햇 연타) 이전 소리를 끊고 재시작함. 드럼 샘플은 매번
+      // 새 Player를 만들어 "발사 후 소멸" 방식으로 자연스러운 겹침(디케이)을
+      // 허용함 — Tone.js 커뮤니티에서 권장하는 one-shot 패턴.
       const player = new Tone.Player(buffer).toDestination()
       player.volume.value = velocityToDb(velocity)
-      player.onstop = () => player.dispose()
+      activePlayers.add(player)
+      player.onstop = () => {
+        activePlayers.delete(player)
+        player.dispose()
+      }
       player.start(time)
     },
     dispose() {
-      // 버퍼 자체는 createDrumVoices가 소유 — 여기선 트리거마다 생성한
-      // Player만 각자 onstop에서 정리한다.
+      // onstop이 dispose() 중에 다시 끼어들어 Set을 건드리지 않도록 먼저
+      // 핸들러를 떼어낸 뒤(onstop을 no-op으로) 정리한다(이중 dispose 방지).
+      for (const player of activePlayers) {
+        player.onstop = () => {}
+        player.dispose()
+      }
+      activePlayers.clear()
+      buffer.dispose()
     },
   }
 }
@@ -56,9 +71,26 @@ export type DrumVoiceMap = Record<DrumPiece, DrumVoice>
  * (jsdom은 Web Audio API가 없어 디코딩이 실패함, work/T2-2/plan.md 동일 사유). */
 export async function createDrumVoices(): Promise<DrumVoiceMap> {
   const pieces = Object.keys(SAMPLE_URLS) as DrumPiece[]
-  const buffers = await Promise.all(
+  const results = await Promise.allSettled(
     pieces.map((piece) => new Tone.ToneAudioBuffer().load(SAMPLE_URLS[piece])),
   )
+
+  const failed = results.filter((r): r is PromiseRejectedResult => r.status === 'rejected')
+  if (failed.length > 0) {
+    // Codex 모드A C-001(재현됨): 일부만 로드 실패해도 이미 로드된 나머지
+    // 버퍼를 안 지우면 메모리에 남음 — 실패 시 성공분을 전부 폐기하고 에러를
+    // 던진다(부분적으로 완성된 DrumVoiceMap을 반환하지 않음).
+    for (const r of results) {
+      if (r.status === 'fulfilled') r.value.dispose()
+    }
+    throw new Error(
+      `드럼 샘플 로드 실패(${failed.length}/${pieces.length}개): ${failed
+        .map((r) => String(r.reason))
+        .join('; ')}`,
+    )
+  }
+
+  const buffers = (results as PromiseFulfilledResult<Tone.ToneAudioBuffer>[]).map((r) => r.value)
   const entries = pieces.map((piece, i) => [piece, sampleVoice(buffers[i])] as const)
   return Object.fromEntries(entries) as DrumVoiceMap
 }
