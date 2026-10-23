@@ -15,6 +15,7 @@
    - intent/04-ui-ux.md            (화면 설계)
    - intent/08-design.md           (디자인 가이드: 색·폰트·킷 피스 표현)
    - intent/06-pipeline.md         (4단계 파이프라인·오케스트레이션·증거 규칙)
+   - intent/09-agent-roles.md      (에이전트 역할 정의 — Phase 1에서 .claude/agents/로 변환)
    - intent/07-open-questions.md   (미결정·검증 필요 항목)
    - intent/05-todo.md             (작업 목록 — 이 순서대로 진행)
    - intent/planning-log.md        (기획 대화 기록)
