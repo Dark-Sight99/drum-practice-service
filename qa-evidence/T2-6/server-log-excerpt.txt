@@ -1,9 +1,0 @@
-INFO:     127.0.0.1:58632 - "GET /songs/2/drumscore HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56920 - "GET /songs/2/drumscore HTTP/1.1" 200 OK
-INFO:     127.0.0.1:54850 - "PUT /songs/2/drumscore HTTP/1.1" 204 No Content
-INFO:     127.0.0.1:52196 - "GET /songs/2/drumscore HTTP/1.1" 200 OK
-INFO:     127.0.0.1:59371 - "GET /songs/2/drumscore HTTP/1.1" 200 OK
-INFO:     127.0.0.1:55173 - "GET /songs/2/drumscore HTTP/1.1" 200 OK
-INFO:     127.0.0.1:61831 - "GET /songs/2/drumscore HTTP/1.1" 200 OK
-INFO:     127.0.0.1:61578 - "PUT /songs/2/drumscore HTTP/1.1" 204 No Content
-INFO:     127.0.0.1:53300 - "GET /songs/2/drumscore HTTP/1.1" 200 OK

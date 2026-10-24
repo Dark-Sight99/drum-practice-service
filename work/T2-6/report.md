@@ -32,10 +32,14 @@
 ## Codex 모드A(독립 코드 검수) 반영
 `qa-evidence/T2-6/codex-modeA.md` — P1 1건: `ticksPerGridUnit`이 ppq를 격자 분할 수(8분음표 셋잇단=3)로 나누는데, MIDI ppq가 3으로 나누어떨어지지 않으면(예: ppq=100) 결과가 정수가 아니게 되고, 이게 `snapTick`을 거쳐 `DrumScore.notes[i].tick`까지 전파되면 `score/validate.ts`의 정수 검증에 걸려 저장이 거부될 수 있음을 지적. 직접 계산으로 재현 확인(`snapTick(50, '8nt', 100) = 66.666…`). 코드를 더 살펴보니 방향키 이동(`moveSelected`)은 `snapTick`조차 거치지 않고 직접 덧셈만 해서 같은 종류의 문제가 하나 더 있었음을 추가로 발견. `snapTick`의 최종 결과를 반올림하고, `moveSelected`가 `snapTick`을 거치도록 수정 후 회귀 테스트 2개(그리드 단위 1개, EditorScreen RTL 1개) 추가 — 107/107 재통과.
 
-## Codex 모드B(보고서 대조) 반영
-판정: needs-attention — (1) result.md/report.md의 수동 브라우저 QA·PUT 요청 횟수 주장이 그때는 `raw_log.txt`(자동 명령 출력만 있었음)로 교차검증할 수 없었음(medium), (2) vitest 신규 테스트의 파일별 개수 분해가 raw_log의 요약 출력만으로는 확인 불가(low). 둘 다 반영: 수동 QA 중 받은 실제 서버 접근 로그를 `server-log-excerpt.txt`로 커밋해 PUT 2건·204 성공을 직접 근거로 남기고 result.md에서 참조하도록 수정, `npx vitest run --reporter=verbose` 출력을 `raw_log.txt`에 추가해 파일별 테스트 개수(grid 7·editHistory 6·velocity 3·EditorScreen RTL 10)를 실행 로그로 직접 확인 가능하게 했다.
+## Codex 모드B(보고서 대조) 반영 — 2회
+**1회차: needs-attention.** (1) result.md/report.md의 수동 브라우저 QA·PUT 요청 횟수 주장이 그때는 `raw_log.txt`(자동 명령 출력만 있었음)로 교차검증할 수 없었음(medium), (2) vitest 신규 테스트의 파일별 개수 분해가 raw_log의 요약 출력만으로는 확인 불가(low).
+→ 수동 QA 중 받은 실제 서버 접근 로그에서 PUT/GET 줄만 추출해 `server-log-excerpt.txt`로 커밋, `npx vitest run --reporter=verbose` 출력을 `raw_log.txt`에 추가.
 
-원문: `qa-evidence/T2-6/codex-modeB.md`
+**2회차: needs-attention.** 1차에서 추가한 `server-log-excerpt.txt`가 grep으로 필터링된 발췌본이라 "PUT이 정확히 2건뿐"이라는 주장을 전체 세션 범위로 증명하지 못한다는 재지적(medium) — 발췌본은 PUT 2건이 "있었다"는 것만 보여줄 뿐 "그 외엔 없었다"는 건 증명 못 함.
+→ 필터링 없는 전체 서버 접근 로그(서버 기동~QA 종료, 42줄)를 `server-log-full.txt`로 교체 커밋.
+
+원문: `qa-evidence/T2-6/codex-modeB.md`, `-2.md`
 
 ## 실행한 검증
 `qa-evidence/T2-6/result.md`, `raw_log.txt` — 프론트 tsc/oxlint/vitest(107/107, Codex 모드A 수정 반영), 백엔드 ruff/pytest(77/77) 전부 PASS. 실제 FastAPI 서버+브라우저로 편집기 전체 조작(추가/선택/이동/악기변경/셈여림/undo-redo/삭제/저장), 저장→새로고침→재오픈 동일성(REQ-03 핵심 기준), PracticeCanvas가 편집본을 재생함을 확인. prettier CRLF 경고는 레포 전체의 기존 문제임을 `git stash` 비교로 확인(T2-6 범위 밖, result.md 참고).

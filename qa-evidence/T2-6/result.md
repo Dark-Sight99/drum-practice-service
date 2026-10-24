@@ -29,7 +29,7 @@
 - `write_song_file` 원자적 교체 — 두 번 써도 `.tmp` 잔재 없이 최신 내용만 남음
 
 ## 수동 QA(실제 브라우저 + 실제 FastAPI 서버)
-Claude Browser pane(Vite dev 5173 → `/api` 프록시 → 실제 `uvicorn` 127.0.0.1:8000, `data/db/app.db`에 직접 `alembic upgrade head` 적용 후 진행)로 확인. 테스트 대상은 실제 사용자 곡 "MusicDelta_Grunge"(의뢰인이 이미 업로드해 둔 실데이터) — 모든 편집은 검증 후 삭제해 원상복구했다. 서버 접근 로그 원문을 `server-log-excerpt.txt`로 남겼다 — `PUT /songs/2/drumscore`가 정확히 2건(추가 1건 + 원복 1건) 모두 `204 No Content`로 성공했고, `GET /songs/2/drumscore`가 그 사이사이 여러 번(재오픈·새로고침·PracticeCanvas 진입마다) 호출됨을 로그로 직접 확인했다.
+Claude Browser pane(Vite dev 5173 → `/api` 프록시 → 실제 `uvicorn` 127.0.0.1:8000, `data/db/app.db`에 직접 `alembic upgrade head` 적용 후 진행)로 확인. 테스트 대상은 실제 사용자 곡 "MusicDelta_Grunge"(의뢰인이 이미 업로드해 둔 실데이터) — 모든 편집은 검증 후 삭제해 원상복구했다. 서버 접근 로그 전체(발췌 아님 — 서버 기동부터 QA 종료까지)를 `server-log-full.txt`로 남겼다 — 로그 전체를 통틀어 `PUT` 요청이 정확히 2건(추가 1건 + 원복 1건) 존재하고 둘 다 `204 No Content`로 성공했으며, 그 외의 PUT이 없음을 로그 전체로 확인 가능하다. `GET /songs/2/drumscore`는 그 사이사이 여러 번(재오픈·새로고침·PracticeCanvas 진입마다) 호출됨도 같은 로그로 확인된다.
 
 1. **편집기 진입**: 라이브러리 "편집" 버튼 → 실제 저장된 DrumScore가 9개 행(HH닫힘/HH열림/CR/SN/T1/T2/FT/RD/KK) 그리드에 정확히 렌더링됨(HH/CR/SN/T2 행에 실데이터 노트 존재, 스크린샷 확인).
 2. **빈 칸 클릭 → 노트 추가**: KK 행 클릭 → 새 노트 생성, "선택됨: KK · 틱 1430 · 셈여림 mid" 표시.
