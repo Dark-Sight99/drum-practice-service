@@ -57,7 +57,7 @@ export interface PracticeCanvasProps {
   barsVisible?: number
 }
 
-export function PracticeCanvas({ score, barsVisible = 2 }: PracticeCanvasProps) {
+export function PracticeCanvas({ score, barsVisible: initialBarsVisible = 2 }: PracticeCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const rendererRef = useRef<LaneRenderer | null>(null)
   const rafIdRef = useRef<number | null>(null)
@@ -100,6 +100,15 @@ export function PracticeCanvas({ score, barsVisible = 2 }: PracticeCanvasProps) 
     if (Number.isNaN(value)) return playbackBpm
     return Math.min(maxBpm, Math.max(minBpm, Math.round(value)))
   }
+
+  // --- 보이는 마디 수(T3-2 게이트 피드백 1차 — 04-ui-ux.md "낙하 속도") ---
+  // layout.ts의 pixelsPerSecond()가 보이는 마디 수와 무관하게 BPM이 수식에서
+  // 상쇄되는 구조라(퀵 재생 BPM을 낮춰도 노트 사이 "픽셀 간격"은 안 바뀜),
+  // 빠른 곡에서 짧은 간격으로 몰린 타격(예: 16분음표 런)이 화면에서 뭉쳐
+  // 보이는 문제는 BPM이 아니라 이 값으로만 풀린다 — 의뢰인이 직접 겪은 문제라
+  // 재생 중에도 즉시 바꿀 수 있게 둔다(BPM/루프와 달리 Transport 스케줄에
+  // 영향 없는 순수 렌더링 파라미터이므로 재생 중 잠글 이유가 없음).
+  const [barsVisible, setBarsVisible] = useState(initialBarsVisible)
 
   // --- A-B 루프(REQ-04, 마디 단위, 1-기준으로 표시·내부는 0-기준) ---
   const totalBars = useMemo(() => {
@@ -340,6 +349,22 @@ export function PracticeCanvas({ score, barsVisible = 2 }: PracticeCanvasProps) 
           <span style={{ color: 'var(--text-muted)' }}>
             (원곡 {score.meta.bpm}, {bpmPercent}%)
           </span>
+        </label>
+
+        <label style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
+          보이는 마디 수
+          {/* REQ-04 "낙하 속도" — 값이 작을수록 노트 사이 간격이 넓어짐(빠른
+           * 곡의 촘촘한 타격을 구분하기 쉬워짐). 순수 렌더링 설정이라 BPM/루프와
+           * 달리 재생 중에도 바꿀 수 있게 둔다. */}
+          <select
+            value={barsVisible}
+            onChange={(e) => setBarsVisible(Number(e.target.value))}
+          >
+            <option value={1}>1</option>
+            <option value={2}>2</option>
+            <option value={3}>3</option>
+            <option value={4}>4</option>
+          </select>
         </label>
 
         <label style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
