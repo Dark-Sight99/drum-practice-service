@@ -30,8 +30,8 @@ T3-1(분리)이 끝나자마자 자동으로 채보까지 이어서 돌리지 �
 ## 설계
 
 ### 1. `app/server/modules/transcriber/adtof_transcriber.py`
-- `transcribe(input_path: Path, output_path: Path, device: str | None = None) -> None` — `[sys.executable, "-m", "adtof_pytorch.cli", "--audio", str(input_path), "--out", str(output_path), "--device", device]`를 서브프로세스로 실행(T3-1 `demucs_separator.py`와 완전히 같은 패턴: `encoding="utf-8", errors="replace"` 처음부터 적용 — T3-1에서 실제로 재현된 cp949 버그를 알고 있으니 이번엔 처음부터 반영).
-- `device=None`이면 `demucs_separator._pick_device()`와 **같은 로직**(cuda→mps→cpu)을 재사용 — 중복 구현 대신 `demucs_separator`에서 가져다 쓸지, 공용 유틸로 뺄지는 구현 중 판단(작은 함수라 과설계 방지 관점에서 그냥 import해서 쓰는 쪽으로 기움).
+- `transcribe(input_path: Path, output_path: Path, device: str | None = None) -> None` — **`device` 인자를 받은 즉시 `chosen_device = device or demucs_separator._pick_device()`로 실제 문자열("cuda"/"mps"/"cpu")로 먼저 확정한 뒤**(모드C C-008 명확화 — `None`이 서브프로세스 인자에 그대로 들어가는 일은 없음, `demucs_separator.separate()`의 기존 패턴과 완전히 동일), `[sys.executable, "-m", "adtof_pytorch.cli", "--audio", str(input_path), "--out", str(output_path), "--device", chosen_device]`를 서브프로세스로 실행(`encoding="utf-8", errors="replace"` 처음부터 적용 — T3-1에서 실제로 재현된 cp949 버그를 알고 있으니 이번엔 처음부터 반영).
+- device 자동 선택은 `demucs_separator._pick_device()`를 그대로 import해서 재사용(함수 하나뿐이라 공용 유틸 모듈로 미리 빼는 건 과설계로 판단).
 - 실패(returncode≠0)면 stderr 포함 예외.
 
 ### 2. `app/server/modules/transcriber/midi_to_drumscore.py` (순수 함수, 가장 중요한 설계 결정)
@@ -56,22 +56,27 @@ PITCH_TO_PIECE = {
 - `ppq`: `pretty_midi_obj.resolution`을 그대로 씀(실측 220) — 임의로 다른 값으로 재조정 안 함(원본 데이터 보존 원칙).
 
 ### 3. `app/server/modules/transcriber/handler.py`의 `transcribe_handler(job)`
-T3-1 `separate_handler`와 완전히 같은 뼈대(모드C 1~3차가 이미 정립해둔 패턴을 그대로 재사용 — 이번엔 처음부터 적용, 라운드를 또 거칠 필요 없게):
+T3-1 `separate_handler`와 같은 뼈대를 쓰되, 모드C가 지적한 "재채보" 고유 리스크(C-002/C-003)를 추가로 반영:
 - Song.PROCESSING 선언.
-- Song.PROCESSING 이후의 모든 실패(STEM_DRUMS 에셋 조회 실패·임시 파일 생성 실패·ADTOF 실패·MIDI 파싱 실패·DrumScore 검증 실패·파일 쓰기 실패)를 **하나의 try/except**로 묶어 Song.FAILED+재발생(T3-1 C-011 교훈 — 처음부터 전체를 감쌈, 나중에 발견해서 넓히지 않음).
-- 임시 파일(ADTOF 출력 .mid)은 `tempfile.mkstemp()` 하나뿐(Demucs처럼 디렉터리 트리가 아님 — 더 단순), `try/finally`로 정리.
-- 성공 시: MIDI를 `pretty_midi`로 파싱 → `midi_to_drumscore()`로 dict 생성 → `DrumScoreIn.model_validate(dict)`로 검증(실패하면 버그이지 사용자 탓이 아니므로 그대로 예외 전파, T1-5가 예정해둔 "Python 생성 로직 교차검증"이 바로 이 지점) → JSON 직렬화 → `write_song_file(song.id, "drumscore.json", content)` → `Asset(kind=DRUMSCORE_RAW, ...)` 생성 + `Song.status=COMPLETED` 커밋.
-- **기존 `DRUMSCORE_RAW` 에셋이 이미 있으면**(같은 곡에 채보를 다시 돌리는 경우 — 예: 나중에 악보를 추가로 올려 재채보) 덮어씀(T2-5 `write_song_file`이 이미 같은 파일명이면 원자적으로 교체하는 구조라 자연히 처리됨). `DRUMSCORE_EDITED`는 절대 안 건드림(사용자가 직접 편집한 결과, REQ-02 "원본 보존 + 편집본 별도 저장" — `GET drumscore`가 EDITED를 RAW보다 우선해서 돌려주므로 사용자 편집은 재채보에도 안 날아감).
+- Song.PROCESSING 이후의 모든 실패(STEM_DRUMS 에셋 조회·파일 존재 확인 실패·임시 파일 생성 실패·ADTOF 실패·MIDI 파싱 실패·DrumScore 검증 실패·파일 쓰기 실패·Asset 커밋 실패)를 **하나의 try/except**로 묶어 Song.FAILED+재발생(T3-1 C-011과 동일 원칙, 처음부터 전체를 감쌈).
+- **임시 파일 처리(모드C C-005 반영)**: `fd, tmp_path = tempfile.mkstemp(suffix=".mid")` → **`os.close(fd)`를 즉시 호출**(ADTOF 서브프로세스가 `--out`으로 그 경로에 직접 쓰므로 우리가 그 파일 디스크립터로 쓸 일이 없음 — 열어둔 채로 두면 Windows에서 서브프로세스가 같은 파일에 쓰려 할 때 충돌 가능). `try/finally`로 `Path(tmp_path).unlink(missing_ok=True)` — ADTOF 실패·MIDI 파싱 실패 등 어느 단계에서 끊기든 이 임시 .mid 파일은 항상 정리됨(T3-1 C-003과 같은 원칙, 디렉터리가 아니라 파일 하나라 더 단순).
+- 성공 시: MIDI를 `pretty_midi`로 파싱 → `midi_to_drumscore()`로 dict 생성 → `DrumScoreIn.model_validate(dict)`로 검증(실패하면 버그이지 사용자 탓이 아니므로 그대로 예외 전파, T1-5가 예정해둔 "Python 생성 로직 교차검증"이 바로 이 지점) → JSON 직렬화 → `write_song_file(song.id, "drumscore.json", content)`(검증을 먼저 통과한 내용만 쓰므로, 쓰는 시점엔 이미 유효한 DrumScore라는 게 보장됨 — 아래 C-003 대응의 전제).
+- **기존 `DRUMSCORE_RAW` 에셋 처리(모드C C-002/C-003 반영)**: T2-6의 `_find_edited_asset`과 같은 "조회 후 있으면 그대로 두고, 없으면 생성" 패턴을 `DRUMSCORE_RAW`에도 적용 — `file_path`가 애초에 항상 고정값(`f"{song.id}/drumscore.json"`)이라 기존 행이 있으면 **DB에 새로 쓸 내용이 없음**(파일 경로가 안 바뀌므로), 없으면 새로 `Asset(kind=DRUMSCORE_RAW, ...)` 1행만 생성. 이렇게 하면: (a) 재채보를 여러 번 돌려도 `DRUMSCORE_RAW` 행이 중복 생성되지 않고(C-002 해소), (b) 재채보(기존 행 있음) 케이스는 파일 쓰기 이후 DB 쪽에 커밋할 내용이 사실상 없어(행이 이미 있으므로) "파일은 새로 바뀌었는데 DB 커밋이 실패해 상태가 꼬이는" 윈도우 자체가 거의 사라짐(C-003 대부분 해소) — 유일하게 남는 위험은 **그 곡의 첫 채보**(신규 Asset INSERT 필요)인데, 이건 T3-1의 stem 쓰기와 완전히 같은 위험 등급이라 새로운 리스크가 아님(기존에 이미 수용한 범위).
+- 마지막으로 `Song.status=COMPLETED` 커밋.
+- **`DRUMSCORE_EDITED`는 절대 안 건드림**(사용자가 직접 편집한 결과). **모드C C-004 확인**: `GET /songs/{id}/drumscore`가 EDITED를 RAW보다 우선 반환하므로, 이미 편집본이 있는 곡을 재채보해도 사용자가 보는 화면은 안 바뀐다 — 이건 버그가 아니라 **의도된 동작으로 확정**한다(REQ-03 "편집 → 저장 → 재로드 시 동일" 원칙 연장, 자동 재채보가 수동 편집을 조용히 덮어쓰면 안 됨). 재채보 결과를 EDITED와 비교·병합하는 UI는 프런트엔드가 생길 때(범위 밖) 다룰 문제로 남김.
 
 ### 4. `POST /songs/{id}/transcribe` (`api/songs.py`에 추가)
 - 인증: `get_current_user`(기존 패턴, `get_owned_song` 의존성 재사용 — 다른 사용자 곡이면 404).
-- **사전 조건 검사**: `STEM_DRUMS` Asset이 없으면 400("먼저 음원 분리를 완료해야 합니다") — 분리 안 된 곡에 채보 작업을 큐에 넣어봐야 핸들러가 바로 실패할 걸 미리 걸러줌(빠른 실패, 불필요한 Job 안 만듦).
+- **사전 조건 검사(모드C C-006 반영)**: `STEM_DRUMS` Asset 행 존재 여부만 보지 않고, T3-1 `separate_handler._original_asset_path()`와 같은 패턴으로 **`resolve_asset_path()`로 실제 파일 경로를 구해 `.exists()`까지 확인** — 행은 있는데 파일이 지워졌거나 경로가 안전 범위 밖이면 400으로 바로 거부(불필요한 Job을 큐에 안 넣음). 파일이 존재해도 내용 자체가 손상된 경우(오디오 디코딩 실패 등)는 이 사전 검사로 못 거르고 핸들러 실행 시점에 실패 처리됨 — 이건 사전 검사의 한계로 인정하고 핸들러의 실패 경로(위 §3)가 책임진다.
 - `Job(job_type=TRANSCRIBE, status=QUEUED)` 생성, 응답 `{job_id: int}`.
 
 ### 5. `api/schemas.py` 확장
-`ScoreSourcePhase2 = Literal["midi","musicxml","gp"]` → `"audio"` 추가(이름도 `ScoreSourcePhase2`가 더 이상 정확하지 않으니 `ScoreSource`로 리네임하거나 주석만 갱신할지는 구현 중 판단 — 기능적으로는 Literal 값 추가가 핵심). `"omr"`은 아직 Phase 4 범위라 이번엔 안 넣음(과한 선확장 방지).
+`ScoreSourcePhase2 = Literal["midi","musicxml","gp"]` → `"audio"` 추가. **모드C C-007 확인(의도된 영향)**: 이 확장은 `PUT /songs/{id}/drumscore`(T2-6 편집기 저장)에도 적용되는데, 이건 부작용이 아니라 **필요한 전제조건**이다 — 이번 작업으로 오디오 기반 `DrumScore`가 생기면, 사용자가 기존 편집기(T2-6, 이미 구현됨)로 그 음표들을 수정해 저장할 때도 `meta.source="audio"`가 그대로 유지된 채 저장되므로, 이 값이 허용 목록에 없으면 편집 저장 자체가 422로 막혀버린다. 반대로 디지털 악보 업로드(`POST /songs`)는 확장자-소스 일치 검사(`ALLOWED_EXTENSIONS[ext] != parsed.meta.source`)가 별도로 있어 "audio"가 그 경로로 새어 들어올 길은 없음(교차 확인 완료). `"omr"`은 아직 Phase 4 범위라 이번엔 안 넣음(과한 선확장 방지).
 
-### 6. 의존성
+### 6. 프로덕션 핸들러 등록(모드C C-001 반영, 필수)
+`worker/runner.py`의 `register_production_handlers()`에 `register_handler(JobType.TRANSCRIBE, transcribe_handler)` 추가 — 이걸 빠뜨리면 큐에 쌓인 TRANSCRIBE 작업을 워커가 **영원히 "핸들러 없음"으로 실패 처리**(T3-1에서 이미 이 정확한 동작을 만들어놨다는 게 역설적으로 이 실수를 "조용한 버그"가 아니라 "바로 눈에 띄는 실패"로 만들어주긴 하지만, 그래도 빠뜨리면 안 됨). 실제 end-to-end QA에서 이 등록이 빠지지 않았는지 직접 확인.
+
+### 7. 의존성
 `app/server/.venv`에 `adtof-pytorch`(로컬 경로, `pip install -e ../../data/repos/ADTOF-pytorch`)+`pretty_midi` 추가 설치 필요(이미 이번 세션에서 설치·실측 완료). `requirements.txt`에 주석으로 설치 경로 기록(T3-1의 torch 주석과 같은 패턴) — PyPI 패키지가 아니라 `pip install -r requirements.txt`만으로는 안 깔림, `wiki/tools.md`의 clone 명령 참조.
 
 ## 위험 분류·Codex 검수
@@ -80,8 +85,9 @@ T3-1 `separate_handler`와 완전히 같은 뼈대(모드C 1~3차가 이미 정�
 ## 테스트 전략
 - `midi_to_drumscore.py`: 합성 `pretty_midi.PrettyMIDI` 객체(직접 노트 추가)로 피치 매핑·tick 변환·DrumScoreIn 검증 통과를 단위 테스트. 실제 ADTOF 출력 파일(`data/t0-2-work/MusicDelta_Grunge.mid`, 이미 레포에 있는 Phase 0 산출물은 아님 — `data/`라 git 추적 안 됨, 재현 시 다시 생성 필요)로도 한 번 변환해 258개 음표가 전부 유효한 DrumScore가 되는지 통합 확인.
 - `adtof_transcriber.py`: subprocess monkeypatch로 성공/실패 단위 테스트(T3-1 `demucs_separator` 테스트와 같은 패턴).
-- `handler.py`: 성공/실패/부분실패 경로(T3-1 `separate_handler` 테스트 세트를 그대로 변형).
-- `POST /songs/{id}/transcribe`: 인증 필요, STEM_DRUMS 없으면 400, 있으면 Job 생성, 다른 사용자 404.
+- `handler.py`: 성공/실패/부분실패 경로(T3-1 `separate_handler` 테스트 세트를 그대로 변형) + **재채보 시 `DRUMSCORE_RAW` 행이 중복 생성 안 됨**(모드C C-002 직접 회귀 테스트 — 같은 Job을 두 번 돌리거나 Asset을 미리 만들어둔 상태에서 핸들러 실행 후 `Asset` 행 개수가 여전히 1개인지 확인) + **`DRUMSCORE_EDITED`가 있으면 재채보 후에도 `GET drumscore`가 여전히 EDITED를 반환**(C-004 의도된 동작 확인).
+- `POST /songs/{id}/transcribe`: 인증 필요, STEM_DRUMS 에셋 행도 파일도 없으면 400(C-006), 둘 다 있으면 Job 생성, 다른 사용자 404.
+- `worker/runner.py`의 `register_production_handlers()`: `JobType.TRANSCRIBE`가 실제로 등록돼 `get_handler()`로 조회되는지 직접 검증(모드C C-001 회귀 테스트 — 이걸 빠뜨리면 테스트 없이는 "조용히" 안 걸리고 운영 중에만 드러날 뻔했음).
 - **실제 end-to-end**: T3-1로 이미 분리해둔 실제 음원(song id=7, `data/songs/7/stem_drums.wav`)으로 실제 ADTOF 돌려 DrumScore 생성 → 생성된 JSON이 `DrumScoreIn`을 통과하는지, 그리고 실제 브라우저 연습 화면이 코드 변경 없이 재생하는지까지 확인(REQ-02 수용 기준 "경로 A: 기준곡 생성 성공"을 진짜 end-to-end로 증명).
 
 ## 가정·확인 필요
