@@ -36,6 +36,18 @@
 
 원문: `qa-evidence/T2-8/codex-modeA.md`
 
+## Codex 모드B(보고서 대조) — 3회(최대)
+**1회차: needs-attention(medium×2).** 모드A 반박의 디버그 계측 수치가 원시 로그로 보존 안 돼 있음, 정지 화면만으로는 재생 중 동기화를 입증 못 함.
+→ 계측 원문을 `modeA-debug-measurements.md`로 커밋, 동기화 증거를 "코드 대칭성(1차)"과 "스크린샷(보조)"으로 구분.
+
+**2회차: needs-attention(medium×2).** 계측 JSON이 독립 재현 가능한 로그 출처가 아님, 코드 대칭성이 실제 재생 동기화까지 확정 못 함(오디오 `Transport.schedule` vs 화면 `requestAnimationFrame` 메커니즘이 다름).
+→ 이 세션의 브라우저 도구로는 독립 로그 export·오디오 실측이 구조적으로 불가능함을 인정, "확정" 대상을 "목표 시각 계산식 동일성" 하나로 좁힘.
+
+**3회차(최대 횟수): needs-attention(high)이지만 Codex가 "도구 한계 진단은 타당하다"고 인정.** 남은 간극은 REQ-04 ±30ms 공식 수용 기준 — 이건 T2-8이 새로 만든 문제가 아니라 T0-5부터 있던 기존 Q-05 그대로.
+→ `06-pipeline.md` §1-1 "재검수 최대 3회" 규칙에 따라 Codex 재호출 없이, `intent/07-open-questions.md` Q-05에 "T2-8에서 진전(초 단위 구조적 버그 제거)·여전히 미해소(ms 단위 측정)"를 추가해 T2-8의 완료 범위와 Q-05의 잔여 미해소를 문서상 명확히 분리.
+
+원문: `qa-evidence/T2-8/codex-modeB.md`, `-2.md`, `-3.md`
+
 ## 구현 근거 (실행 결과로 확인)
 - **근본 원인 특정**: `scorePlayer.ts`의 노트 스케줄 식(`schedule.songStartSeconds + ticksToSeconds(...)`)과 `laneRenderer.ts`의 `noteTimeOf`(수정 전: `ticksToSeconds(...) + audioOffsetMs/1000`)를 나란히 놓고 비교해 `songStartSeconds` 누락을 코드로 직접 확인(실행 로그가 아니라 코드 대조 자체가 증거 — 이 종류의 버그는 Canvas/Tone.js라 jsdom 단위 테스트로 재현 불가, work/T2-2·T2-3부터 이어진 제약).
 - **120bpm 4/4 1마디 = 2초**라는 구체적 수치로 "노트가 몇 초 일찍 보이는지" 계산 가능했고, 의뢰인이 보고한 "완전히 지나간 뒤 들림"(미세한 ms 단위가 아니라 뚜렷하게 체감되는 지연)이라는 증상 크기와 정확히 들어맞음 — 추측이 아니라 수치로 맞춰본 진단.
