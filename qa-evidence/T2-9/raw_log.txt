@@ -1,0 +1,36 @@
+===== app/web: npx tsc -b =====
+EXIT=0
+
+===== app/web: npx oxlint =====
+EXIT=0
+
+===== app/web: npx vitest run =====
+
+ RUN  v5.0.5 C:/Users/Jaewoo/드럼연습서비스/app/web
+
+
+ Test Files  15 passed (15)
+      Tests  131 passed (131)
+   Start at  20:44:20
+   Duration  2.88s (environment 77%, setup 10%, import 6%, tests 3%, transform 2%, worker 1%)
+
+Environment  jsdom was created 15 times · 15.82s total, 77% of tracked time
+             create it once per worker with pool: 'vmThreads' (keeps per-file isolation) or isolate: false (shares it across files)
+             learn more: https://vitest.dev/guide/improving-performance#test-environments
+
+EXIT=0
+
+===== MusicDelta_Grunge.mid 출처 확인 =====
+실행 명령: diff <(xxd data/t0-2-work/MusicDelta_Grunge.mid) <(xxd data/songs/2/original.mid)
+diff exit code: 0
+
+-rw-r--r-- 1 Jaewoo 197121 1607 Oct 24 14:35 data/songs/2/original.mid
+-rw-r--r-- 1 Jaewoo 197121 1607 Oct 23 11:27 data/t0-2-work/MusicDelta_Grunge.mid
+
+실행 명령: Get-FileHash -Algorithm SHA256 -LiteralPath 'data/t0-2-work/MusicDelta_Grunge.mid' | Select-Object -ExpandProperty Hash
+9C2154310B64F66F4C7A266671B187F4827534F42A363907CFF417BCBBB98E95
+exit code: 0
+
+실행 명령: Get-FileHash -Algorithm SHA256 -LiteralPath 'data/songs/2/original.mid' | Select-Object -ExpandProperty Hash
+9C2154310B64F66F4C7A266671B187F4827534F42A363907CFF417BCBBB98E95
+exit code: 0
