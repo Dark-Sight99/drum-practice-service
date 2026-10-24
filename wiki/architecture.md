@@ -117,6 +117,16 @@ python -m venv .venv   # 최초 1회
   - 재생 중엔 BPM·루프 입력을 `disabled={isPlaying}`로 잠금(Codex 모드B 권장) — 이미 시작한 재생은 재생 시작 시점 값으로만 스케줄돼 있어, 재생 중 바꿔도 지금 재생엔 반영 안 됨.
 - "오디오 트랙은 음정 유지 상태로 속도 변경"(REQ-04)은 Phase 2엔 분리된 원곡 오디오 트랙이 아직 없어(Demucs 분리는 Phase 3 T3-1) 범위 밖 — MIDI는 속도를 바꿔도 음정이 안 변해 적용 대상 자체가 없음. `preservesPitch` 채택(Q-04)은 실제 오디오 엘리먼트가 생기는 T3-3에서 적용 예정.
 
+## 라이브러리·업로드·로그인 (T2-5, 2026-10-24)
+이번 작업에서 프론트(`app/web`)와 백엔드(`app/server`)가 실제로 처음 통신하게 됐다 — T2-1~T2-4는 전부 프론트 단독 데모였다. "공개 API 변경"(위험 작업, `intent/06-pipeline.md` §1-1)이라 구현 전 Codex 모드C 설계 검수 3회를 거쳤다.
+
+- **파일 저장**: `app/server/file_storage.py` — `PROJECT_ROOT/data/songs/<song_id>/`(루트 `data/`, `intent/03-architecture-stack.md` §5 명시 경로, 이미 `.gitignore` 대상). `db/session.py`의 `PROJECT_ROOT` 계산 패턴을 그대로 따름(`Path(__file__).resolve()`로 cwd 무관). **업로드 원본 파일명은 신뢰하지 않음** — 서버가 고정 파일명(`original<ext>`, `drumscore.json`)을 생성해 디스크 경로 구성에 사용자 입력이 전혀 안 섞이게 함(Codex 모드C C-001). `Asset.file_path`를 실제 파일 경로로 바꿀 때(읽기)와 새 파일을 쓸 때(쓰기) 양쪽 다 `Path.is_relative_to()`로 저장소 루트 이탈을 재검증 — `db/models.py`의 Asset `CheckConstraint` 주석이 "DB 레벨 최소 방어선, 실제 파일 접근 시 재검증 필요"라고 요구한 바로 그 코드.
+- **DrumScore 업로드 검증**: `app/server/api/schemas.py`(Pydantic) — 구조뿐 아니라 핵심 수치 불변식도 검증(Codex 모드C C-002): `meta.bpm`(유한한 양수 — `audio/timing.ts`의 `secondsPerBeat(bpm)=60/bpm`이 나누기 때문에 0 이하·비유한이면 Infinity/NaN이 전파됨), `ppq`(양의 정수), `meta.timeSignature`(둘 다 양의 정수), `audioOffsetMs`(유한), `notes[].velocity`(0~127), `piece`(9종 `Literal`, TS 타입과 수동 동기화). **의미 검증 전체(T1-5 `validate.ts`의 모든 규칙)까지는 재구현 안 함** — 로그인한 소유자 1인만 자기 데이터를 올리는 비공개 서비스 규모에 맞춘 선. 업로드 핸들러는 파일을 1MB 청크로 읽으며 20MB 상한을 넘는 순간 즉시 멈춤(전체를 다 읽고 나서 거부하지 않음 — Codex 모드B 지적, `UploadFile.read()` 호출 횟수를 직접 세는 테스트로 조기 중단을 실측 증명).
+- **인증**: T1-3에서 이미 구현된 세션 쿠키 로그인(아이디/비밀번호)에 프론트 화면만 새로 연결(`features/auth/LoginScreen.tsx`). Google OAuth 전환은 Q-20으로 별도 작업 연기 — 이미 병합된 T1-3 구조를 바꾸는 작업이라 "라이브러리 화면" 범위 밖으로 판단.
+- **CORS 없이 Vite 프록시로 해결**: `vite.config.ts`의 `server.proxy`가 `/api`를 FastAPI로 전달 — 브라우저 입장에서 전부 동일 출처 요청이 되어 CORS 설정도, 크로스 포트 쿠키 문제도 생기지 않음. 로그인 쿠키가 `secure=True`인데, `http://localhost`는 W3C "potentially trustworthy origins" 예외로 Secure 쿠키를 지원한다는 전제로 이 설계를 채택 — 실제 브라우저에서 인증 호출 성공으로 검증. **비-localhost(Tailscale 등) 원격 접속에선 이 전제가 깨짐** — REQ-07 "폰에서 보임"은 이번엔 localhost 멀티세션+서버 프로세스 재시작(실제로 종료 후 재시작해 데이터가 디스크에 남아있는지 확인)으로만 검증, 진짜 원격 다중기기 검증은 Phase 5(Tailscale HTTPS 인프라) 게이트 항목으로 미룸.
+- **화면 전환**: 라우팅 라이브러리 없이 `App.tsx`가 `screen` 상태(`login`/`library`/`upload`/`practice`)로 전환 — 화면 4개뿐이고 URL 딥링크 요구사항이 없어 당장은 과한 설계라고 판단. 나중에 URL 공유·뒤로가기가 필요해지면 재검토 필요(Codex 모드C 리스크 의견으로 기록해둠).
+- **업로드→재생 연결**: 라이브러리에서 곡을 클릭하면 `GET /songs/{id}/drumscore`로 서버가 저장한 DrumScore를 가져와 T2-3/T2-4가 만든 `PracticeCanvas`에 그대로 넘긴다 — 이 연결로 T2-1(가져오기)·T2-2~T2-4(오디오 엔진·레인·BPM)가 비로소 실제 영속 데이터로 동작하는 것을 확인했다(실제 FastAPI 서버 재시작 전후로 재생까지 전체 플로우 확인).
+
 ## 아직 없는 것 (다음 작업)
 - 큐에 작업을 넣는 공개 API(업로드 트리거), 실제 처리 핸들러(Demucs/ADTOF/Audiveris) 등록 — Phase 3/4
 - 파일 선택 UI(input/드래그앤드롭), 가져온 DrumScore의 서버 저장(원본+편집본) — T2-5(라이브러리 화면)
