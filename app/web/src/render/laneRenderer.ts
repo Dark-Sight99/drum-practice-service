@@ -37,12 +37,18 @@ export interface LaneRenderResult {
 }
 
 export interface LaneRenderer {
-  /** `playbackBpm` 생략 시 `score.meta.bpm`(원곡 그대로) 사용 — 연습 BPM(T2-4,
+  /** `songStartSeconds`는 호출자가 `scorePlayer.ts`의 `computePlaybackSchedule()`과
+   * 똑같이 계산해 넘겨야 한다(카운트인 마디 길이) — 실제 오디오가 이 시각부터
+   * 노트를 트리거하므로, 화면도 같은 기준으로 그려야 판정선 통과 시점과 소리가
+   * 맞는다(T2-8, Phase 2 게이트 피드백으로 발견: 이 값을 빼먹어서 노트가 카운트인
+   * 길이만큼 일찍 보이고 소리는 늦게 들리는 버그가 있었음).
+   * `playbackBpm` 생략 시 `score.meta.bpm`(원곡 그대로) 사용 — 연습 BPM(T2-4,
    * REQ-04)으로 재생 중이면 낙하 속도·노트 위치가 그 속도를 따라가도록 넘긴다.
    * `showSticking`(REQ-12, 기본 true)이 꺼지면 노트 위 R/L 글자를 그리지 않는다. */
   render(
     score: DrumScore,
     currentTimeSeconds: number,
+    songStartSeconds: number,
     barsVisible: number,
     playbackBpm?: number,
     showSticking?: boolean,
@@ -135,6 +141,7 @@ export function createLaneRenderer(
     render(
       score,
       currentTimeSeconds,
+      songStartSeconds,
       barsVisible,
       playbackBpm = score.meta.bpm,
       showSticking = true,
@@ -153,7 +160,7 @@ export function createLaneRenderer(
       const lookaheadSeconds = hitLineY / speed
 
       const noteTimeOf = (note: DrumNote) =>
-        ticksToSeconds(note.tick, score.ppq, playbackBpm) + score.audioOffsetMs / 1000
+        songStartSeconds + ticksToSeconds(note.tick, score.ppq, playbackBpm) + score.audioOffsetMs / 1000
 
       // 레인 구분선
       ctx.strokeStyle = options.laneBorderColor

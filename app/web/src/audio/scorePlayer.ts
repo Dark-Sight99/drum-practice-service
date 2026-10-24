@@ -77,8 +77,13 @@ export function playDrumScore(
   }
 
   for (const note of score.notes) {
+    // T2-8(Codex 모드C 1차 C-001): laneRenderer.ts의 noteTimeOf와 같은 식이어야
+    // 화면·소리가 맞는다 — audioOffsetMs를 빼먹으면 그 값이 0이 아닐 때(Phase 3
+    // 전까지는 검증에서 항상 0으로 강제돼 있음, Q-23) 둘이 어긋난다.
     const timeSeconds =
-      schedule.songStartSeconds + ticksToSeconds(note.tick, score.ppq, playbackBpm)
+      schedule.songStartSeconds +
+      ticksToSeconds(note.tick, score.ppq, playbackBpm) +
+      score.audioOffsetMs / 1000
     scheduledIds.push(
       transport.schedule((time) => {
         voices[note.piece].trigger(time, note.velocity / 127)
