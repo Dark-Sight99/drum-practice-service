@@ -83,3 +83,18 @@ FastAPI 전달 확인.
 스크린샷: screenshot-library.jpg(업로드된 곡 2개), screenshot-upload-parsed.jpg
 (MIDI 파싱 성공 화면), screenshot-practice-from-server.jpg(서버에서 가져온
 DrumScore로 실제 재생 중).
+
+=== 재검증(2026-10-24, C-001 NaN 수정 후) ===
+
+=== ruff check ===
+All checks passed!
+exit: 0
+
+=== ruff format --check ===
+4 files already formatted
+exit: 0
+
+=== pytest ===
+.................................................................        [100%]
+65 passed in 4.86s
+exit: 0
