@@ -26,6 +26,12 @@ export interface LaneRendererOptions {
   hitLineColor: string
   /** 스티킹 R/L 글자 색(REQ-12, intent/08-design.md §3 "노트 위 R/L 글자(--text)"). */
   stickingTextColor: string
+  /** 레인 머리글(HH/CR/SN/...) 뒤에 까는 배경색 — 캔버스 배경과 같은 색을 넘기면
+   * 떨어지는 노트가 글자 뒤를 지나가도 가독성이 안 깨진다(T2-10, Phase 2 게이트
+   * 3차 피드백: "처음에 내려오는 노트가 어느 부분을 치라는건지 와닿지 않는다" —
+   * intent/04-ui-ux.md §3 와이어프레임엔 "HH CR SN T1 T2 FT RD KK ← 레인 머리글"이
+   * 명시돼 있었는데 T2-3 구현에서 빠뜨렸던 것을 뒤늦게 발견). */
+  laneHeaderBackgroundColor: string
   /** 판정선 근처 노트를 "히트"로 보는 허용범위(초) — work/T2-3/plan.md §가정. */
   hitWindowSeconds: number
 }
@@ -57,6 +63,7 @@ export interface LaneRenderer {
 }
 
 const LOOKBEHIND_SECONDS = 0.15
+const LANE_HEADER_HEIGHT = 20
 
 /** 도형 중심에서 실제로 그려지는 가장 아래쪽 픽셀까지의 거리 — `drawNoteShape`가
  * 그리는 도형마다 다르다(예: `x-ring`은 `half*1.5` 반지름 원까지 그려 다른
@@ -248,7 +255,10 @@ export function createLaneRenderer(
               const prevAlpha = ctx.globalAlpha
               ctx.globalAlpha = note.handSource === 'user' ? 1 : 0.5
               ctx.fillStyle = options.stickingTextColor
-              ctx.font = `${Math.max(10, noteSize * 0.5)}px sans-serif`
+              // T2-10(Phase 2 게이트 3차 피드백 "RL이 잘 안보임") — 최소 크기를
+              // 10px→13px로 키움. 투명도(auto=50%)는 intent/08-design.md §3의
+              // 의뢰인 결정 수치라 임의로 안 건드림(바꾸려면 별도 확인 필요).
+              ctx.font = `bold ${Math.max(13, noteSize * 0.55)}px sans-serif`
               ctx.textAlign = 'center'
               ctx.textBaseline = 'bottom'
               ctx.fillText(label, laneCenterX, y - shapeBottomExtent(shape, noteSize) - 2)
@@ -265,6 +275,21 @@ export function createLaneRenderer(
       ctx.moveTo(0, hitLineY)
       ctx.lineTo(width, hitLineY)
       ctx.stroke()
+
+      // 레인 머리글(HH/CR/SN/...) — 맨 마지막에 그려 낙하하는 노트가 뒤로
+      // 지나가도 항상 위에 보이게 한다. 뒤에 배경 띠를 깔아 노트와 겹쳐도
+      // 글자가 묻히지 않게 함(T2-10, Phase 2 게이트 3차 피드백).
+      ctx.fillStyle = options.laneHeaderBackgroundColor
+      ctx.fillRect(0, 0, width, LANE_HEADER_HEIGHT)
+      ctx.fillStyle = options.stickingTextColor
+      ctx.font = 'bold 14px sans-serif' // intent/08-design.md §4 "레인 머리글 18px 700" 기준에서,
+      // 레인 폭이 좁을 수 있어 14px로 축소(가로 겹침 방지) — 폭이 넓으면 자동으로 여유 생김.
+      ctx.textAlign = 'center'
+      ctx.textBaseline = 'middle'
+      for (let laneIndex = 0; laneIndex < LANES.length; laneIndex++) {
+        const laneCenterX = laneIndex * laneWidth + laneWidth / 2
+        ctx.fillText(LANES[laneIndex].label, laneCenterX, LANE_HEADER_HEIGHT / 2)
+      }
 
       return {
         activePieces: activePieces(score.notes, noteTimeOf, currentTimeSeconds, options.hitWindowSeconds),

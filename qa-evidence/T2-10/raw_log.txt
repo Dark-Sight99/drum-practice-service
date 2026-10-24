@@ -1,0 +1,48 @@
+===== app/web: npx tsc -b =====
+EXIT=0
+
+===== app/web: npx oxlint =====
+EXIT=0
+
+===== app/web: npx vitest run =====
+
+ RUN  v5.0.5 C:/Users/Jaewoo/드럼연습서비스/app/web
+
+
+ Test Files  15 passed (15)
+      Tests  131 passed (131)
+   Start at  20:59:31
+   Duration  2.54s (environment 77%, setup 10%, import 5%, tests 3%, transform 2%, worker 1%)
+
+Environment  jsdom was created 15 times · 13.90s total, 77% of tracked time
+             create it once per worker with pool: 'vmThreads' (keeps per-file isolation) or isolate: false (shares it across files)
+             learn more: https://vitest.dev/guide/improving-performance#test-environments
+
+EXIT=0
+
+===== 레인 머리글 누락 확인(수정 전 기준, main 브랜치) =====
+명령: git show main:app/web/src/render/laneRenderer.ts | grep -n "lane.label\|LANES\[.*\]\.label"
+grep exit code: 1(1=매치 없음=머리글을 그리는 코드가 없었음을 의미)
+
+===== 수정 후 확인(현재 브랜치) =====
+명령: grep -n "LANES\[laneIndex\]\.label" app/web/src/render/laneRenderer.ts
+291:        ctx.fillText(LANES[laneIndex].label, laneCenterX, LANE_HEADER_HEIGHT / 2)
+grep exit code: 0
+
+===== 레인 머리글 관련 전수 검사(Codex 모드B 2차 지적 반영 — 더 넓은 패턴) =====
+명령: git show main:app/web/src/render/laneRenderer.ts | grep -n "fillText"
+254:              ctx.fillText(label, laneCenterX, y - shapeBottomExtent(shape, noteSize) - 2)
+grep exit code: 0
+
+명령: git show main:app/web/src/render/laneRenderer.ts | wc -l (전체 줄 수 — 함수 전체를 다 봤다는 근거로)
+283
+
+===== Codex 모드B 3차 지적 반영 — strokeText도 함께 검사 =====
+명령: git show main:app/web/src/render/laneRenderer.ts | grep -n "fillText\|strokeText"
+254:              ctx.fillText(label, laneCenterX, y - shapeBottomExtent(shape, noteSize) - 2)
+grep exit code: 0
+
+명령: grep -n "fillText\|strokeText" app/web/src/render/laneRenderer.ts (수정 후, 현재 브랜치)
+264:              ctx.fillText(label, laneCenterX, y - shapeBottomExtent(shape, noteSize) - 2)
+291:        ctx.fillText(LANES[laneIndex].label, laneCenterX, LANE_HEADER_HEIGHT / 2)
+grep exit code: 0
