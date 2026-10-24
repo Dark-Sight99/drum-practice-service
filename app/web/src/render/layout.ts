@@ -19,7 +19,7 @@ export interface LaneDef {
   shapeByPiece: Partial<Record<DrumPiece, NoteShape>>
 }
 
-/** 레인 순서(좌→우, 오른손잡이 기준): 하이햇, 크래시, 스네어, 탐1, 탐2, 플로어탐,
+/** 레인 순서(좌→우, 오른손잡이 기준): 하이햇, 크래시, 스네어, 하이탐, 미드탐, 플로어탐,
  * 라이드, 킥 — intent/04-ui-ux.md §3. */
 export const LANES: readonly LaneDef[] = [
   {
@@ -29,8 +29,8 @@ export const LANES: readonly LaneDef[] = [
   },
   { pieces: ['crash'], label: 'CR', shapeByPiece: { crash: 'x-large' } },
   { pieces: ['snare'], label: 'SN', shapeByPiece: { snare: 'rounded-rect' } },
-  { pieces: ['tom_high'], label: 'T1', shapeByPiece: { tom_high: 'circle' } },
-  { pieces: ['tom_mid'], label: 'T2', shapeByPiece: { tom_mid: 'circle' } },
+  { pieces: ['tom_high'], label: 'HT', shapeByPiece: { tom_high: 'circle' } },
+  { pieces: ['tom_mid'], label: 'MT', shapeByPiece: { tom_mid: 'circle' } },
   { pieces: ['tom_floor'], label: 'FT', shapeByPiece: { tom_floor: 'circle-large' } },
   { pieces: ['ride'], label: 'RD', shapeByPiece: { ride: 'diamond' } },
   { pieces: ['kick'], label: 'KK', shapeByPiece: { kick: 'bar' } },
