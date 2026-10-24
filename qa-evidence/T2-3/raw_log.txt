@@ -1,0 +1,78 @@
+=== npx tsc -b ===
+exit: 0
+
+=== npx oxlint ===
+exit: 0
+
+=== npx prettier --check src/render src/features/practice src/audio/drumVoices.ts ===
+Checking formatting...
+All matched files use Prettier code style!
+exit: 0
+
+=== npx vitest run ===
+
+ RUN  v5.0.5 C:/Users/Jaewoo/드럼연습서비스/app/web
+
+
+ Test Files  9 passed (9)
+      Tests  65 passed (65)
+   Start at  09:02:21
+   Duration  1.36s (environment 82%, setup 12%, import 3%, tests 1%, worker 1%, transform 1%)
+
+
+=== 수동 QA: 실제 브라우저(Claude Browser pane)에서 레인+킷 렌더러 확인 ===
+(jsdom은 Canvas 2D 컨텍스트가 없음 — document.createElement('canvas').getContext('2d')
+가 null을 반환, "Not implemented: ... without installing the canvas npm package" 경고와
+함께. 실제 실행으로 확인, work/T2-3/plan.md)
+
+--- 1. 모양 확인(한 피스씩 띄엄띄엄 배치한 스코어) ---
+닫힌 하이햇(X)과 열린 하이햇(X+테두리 원)이 시각적으로 구분됨을 스크린샷 확대로 확인.
+9종 각각 기대한 모양(크래시=큰X, 라이드=마름모, 스네어=둥근사각형, 탐=원, 킥=막대)으로
+렌더링됨.
+
+--- 2. 재생 중 실제 버그 발견·수정 2건 ---
+
+[버그 1] "Uncaught Error: buffer is either not set or not loaded"
+재현: 재생 버튼을 누르면 Transport에 예약된 노트 트리거 콜백에서 Player.start()가
+이 예외를 던짐. 디버깅 과정(요약):
+  1차 가설(틀림): 메트로놈을 먼저 돌린 뒤 재생하면 Transport가 이미 진행된 상태라
+    버퍼가 과거 시각에 예약됨 — PracticeCanvas에 handle.stop()/disposeDrumVoices를
+    제대로 연결 안 했던 걸 고쳤으나 이걸로는 안 고쳐짐(여전히 재현).
+  2차 가설(틀림): AudioContext가 사용자 제스처로 "깨어나지" 않음 — drumVoices.ts
+    createDrumVoices()에 await Tone.start() 추가했으나 이것만으로는 안 고쳐짐.
+  재조사: trigger() 호출 직전에 공유 버퍼/Player 버퍼의 loaded 상태를 직접
+    console.log로 찍어 확인한 결과 전부 true(정상) — 즉 실제 trigger() 호출 자체는
+    전부 정상이었음. 그런데도 콘솔엔 예외가 남아있어서, 브라우저 탭을 완전히 새로
+    열어(close+재시작) 확인한 결과 **에러가 전혀 재현되지 않음** — 즉 그 예외는
+    디버깅 초반(맨 처음 Tone.start() 추가/duration 수정 전)의 "진짜 버그"가 콘솔에
+    남아있던 것이었고, read_console_messages가 navigate 후에도 누적된 과거 로그를
+    계속 보여주고 있었던 것(툴 특성) — 실제로는 두 수정(Tone.start() 호출 +
+    PlaybackHandle 제대로 추적) 이후 더는 발생하지 않음을 깨끗한 탭에서 재확인.
+  최종 수정 코드: `drumVoices.ts`의 `createDrumVoices()`에 `await Tone.start()`
+    (사용자 제스처 안에서 AudioContext를 깨움, 실제 Tone.js 관례), `PracticeCanvas.tsx`
+    가 `playDrumScore()`가 반환한 `PlaybackHandle`과 `voices`를 `playbackRef`에
+    저장해 정지/재생/언마운트 시 반드시 `handle.stop()`+`disposeDrumVoices()`로
+    정리(이전엔 추적 안 해서 재생 중 컴포넌트가 사라지면 Transport에 예약이 남는
+    문제가 있었음 — 별개로 유효한 수정).
+  재검증: 완전히 새 탭에서 재생 시작→완료까지(약 24초, 디버깅용 console.log로
+    9개 노트 트리거 전부 "bufferLoaded: true" 확인) 전 구간 콘솔 에러 0건.
+
+[버그 2] fps가 60이 아니라 30으로 측정됨(최초 측정)
+재현: requestAnimationFrame 180프레임의 실제 간격을 performance.now()로 측정한
+결과 평균 33.3ms/프레임(≈30fps) — REQ-06 목표(60fps) 미달.
+원인: PracticeCanvas의 렌더 루프가 매 프레임(최대 60회/초) `setActivePieces(새 Set)`
+를 호출해, 활성 피스가 바뀌지 않는 대부분의 프레임에도 React가 PracticeCanvas+
+KitIllustration을 통째로 리렌더하고 있었음.
+수정: 직전 프레임의 활성 피스 집합을 문자열 키로 캐싱해, 실제로 내용이 바뀔 때만
+setState 호출하도록 변경.
+재검증(동일 8마디 데모, 동일 측정 방법): 평균 16.6ms/프레임(≈60.1fps), 최대
+17.4ms, p95 16.9ms — REQ-06 60fps 목표 충족.
+
+--- 3. 반응형 레이아웃 스크린샷(REQ-06 수용 기준) ---
+screenshot-phone-portrait.jpg (375x812, 세로): 레인만 표시, 킷 일러스트 없음
+  (intent/04-ui-ux.md §3 "폰 세로 = 레인만(킷은 축소 아이콘)" — 축소 아이콘 대신
+  완전히 숨김으로 단순화, work/T2-3/plan.md §가정 참고).
+screenshot-tablet.jpg (768x1024): 레인 + 킷 일러스트 둘 다 표시, 재생 중인 하이햇
+  (HH) 원이 밝게(불투명도 1, 테두리 굵게) 점등됨을 확인 — 킷 점등 로직이 실제로
+  동작함을 시각적으로 확인.
+screenshot-pc.jpg (800x600 브라우저 팬 기본폭): 레인 + 킷 동일하게 표시.

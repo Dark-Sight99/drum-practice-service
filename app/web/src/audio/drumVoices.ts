@@ -68,8 +68,16 @@ export type DrumVoiceMap = Record<DrumPiece, DrumVoice>
 
 /** 9종 분류 각각의 샘플을 불러와 재생 가능한 보이스를 만든다. fetch+디코딩이
  * 필요해 비동기 — AudioContext가 있는 환경(실제 브라우저)에서만 정상 동작한다
- * (jsdom은 Web Audio API가 없어 디코딩이 실패함, work/T2-2/plan.md 동일 사유). */
+ * (jsdom은 Web Audio API가 없어 디코딩이 실패함, work/T2-2/plan.md 동일 사유).
+ *
+ * 맨 처음에 `Tone.start()`를 호출한다 — 브라우저 자동재생 정책 때문에 사용자
+ * 제스처(클릭 등) 응답 안에서 AudioContext를 "깨워야" 하는데, 이걸 빼먹으면
+ * 버퍼 로드 자체는 되지만 나중에 `Player.start()`가 "buffer is either not set
+ * or not loaded"라는 다른 증상의 예외를 던지는 걸 실제 브라우저로 재현 확인함
+ * (T2-3 PracticeCanvas 연동 중 실제로 겪음 — qa-evidence/T2-3/result.md). 이
+ * 함수가 오디오 엔진을 쓰는 사실상 유일한 진입점이라 여기서 한 번만 호출. */
 export async function createDrumVoices(): Promise<DrumVoiceMap> {
+  await Tone.start()
   const pieces = Object.keys(SAMPLE_URLS) as DrumPiece[]
   const results = await Promise.allSettled(
     pieces.map((piece) => new Tone.ToneAudioBuffer().load(SAMPLE_URLS[piece])),
