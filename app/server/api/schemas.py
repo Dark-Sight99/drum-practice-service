@@ -33,8 +33,14 @@ DrumPiece = Literal[
 ]
 Hand = Literal["R", "L", "RF", "LF", None]
 HandSource = Literal["auto", "user"]
-# Phase 2는 디지털 악보(경로 C)만 다룬다 — audio/omr은 Phase 3/4라 여기선 거부.
-ScoreSourcePhase2 = Literal["midi", "musicxml", "gp"]
+# T3-2(REQ-02 경로 A)에서 "audio" 추가 — app/web/src/score/types.ts의
+# ScoreSource(`'audio'|'omr'|'midi'|'musicxml'|'gp'`)와 점진적으로 동기화하는
+# 중. "omr"은 아직 Phase 4 범위라 안 넣음(과한 선확장 방지, work/T3-2/plan.md §5).
+# 이 확장은 PUT /songs/{id}/drumscore(편집 저장)에도 적용됨 — 의도된 전제조건
+# (오디오 기반 DrumScore를 기존 편집기로 수정·저장하려면 "audio"가 허용돼야
+# 함). POST /songs(디지털 악보 업로드)는 확장자-소스 일치 검사가 별도로 있어
+# "audio"가 그 경로로 새어 들어올 수 없음(work/T3-2/plan.md §5 교차 확인).
+ScoreSourcePhase2 = Literal["midi", "musicxml", "gp", "audio"]
 
 
 class DrumNoteIn(BaseModel):

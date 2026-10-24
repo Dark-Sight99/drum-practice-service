@@ -14,11 +14,15 @@ class SeparationError(Exception):
     """Demucs 서브프로세스가 실패했을 때."""
 
 
-def _pick_device() -> str:
+def pick_device() -> str:
     """intent/03-architecture-stack.md §2: "device 자동 선택 cuda→mps→cpu" 그대로.
 
     torch 임포트는 여기 안에서만 한다 — 이 모듈을 쓰지 않는 테스트(예: API 단위
     테스트)가 무거운 torch 임포트 비용을 치르지 않게 하기 위함.
+
+    T3-2(work/T3-2/plan.md §1)가 `modules/transcriber/adtof_transcriber.py`에서
+    그대로 가져다 쓴다 — Demucs·ADTOF 둘 다 같은 device 선택 로직이 필요해서
+    (과한 공용 유틸 모듈을 새로 만들기엔 함수 하나뿐이라) 공개 이름으로 둠.
     """
     import torch
 
@@ -42,7 +46,7 @@ def separate(
     (T0-1 벤치마크·이번 세션 mp4 스파이크로 실제 확인된 구조, `qa-evidence/T0-1/`,
     `qa-evidence/T3-1/demucs_mp4_spike.md`).
     """
-    chosen_device = device or _pick_device()
+    chosen_device = device or pick_device()
     cmd = [
         sys.executable,
         "-m",

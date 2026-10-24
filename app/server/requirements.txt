@@ -11,3 +11,10 @@ python-multipart
 # 그 다음에 아래를 설치(demucs가 이미 깔린 torch를 그대로 씀).
 demucs
 numpy
+
+# T3-2(REQ-02 경로 A) ADTOF-pytorch 드럼 채보 — PyPI 패키지가 아니라 이 파일로는
+# 안 깔림. 먼저 저장소를 받아서(data/ 아래, git 추적 안 됨) 편집 가능 설치:
+#   git clone https://github.com/xavriley/ADTOF-pytorch.git ../../data/repos/ADTOF-pytorch
+#   pip install -e ../../data/repos/ADTOF-pytorch
+# (torch는 위 Demucs 설치로 이미 있어야 함, wiki/tools.md "ADTOF-pytorch" 절 참조)
+pretty_midi

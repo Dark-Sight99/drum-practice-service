@@ -77,7 +77,7 @@ def test_separate_raises_if_expected_stem_missing(tmp_path, monkeypatch):
 def test_separate_device_auto_uses_pick_device(tmp_path, monkeypatch):
     import modules.separator.demucs_separator as sep_module
 
-    monkeypatch.setattr(sep_module, "_pick_device", lambda: "mps")
+    monkeypatch.setattr(sep_module, "pick_device", lambda: "mps")
     captured_cmd = {}
 
     def fake_run(cmd, capture_output, text, encoding=None, errors=None):

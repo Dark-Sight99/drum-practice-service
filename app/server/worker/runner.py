@@ -120,14 +120,22 @@ def _sync_song_status_with_job(db: Session, job: Job) -> None:
     있다고 보장할 수 없어 COMPLETED로 낙관하지 않는다.
 
     정상 흐름에서는 핸들러가 이미 Song.status를 맞춰놨으므로 이 함수는 항상 no-op
-    (song.status != PROCESSING 조건에서 바로 반환)이다. recover_orphaned_jobs()와
+    (song.status가 이미 종료 상태라 바로 반환)이다. recover_orphaned_jobs()와
     역할이 겹치지 않음 — 그쪽은 "워커 강제종료로 Job이 PROCESSING에 멈춘" 경우,
     이쪽은 "Job은 정상적으로 끝났는데 핸들러의 Song 커밋만 실패한" 경우를 커버한다.
-    job_type과 무관한 범용 로직이라 향후 다른 핸들러도 자동으로 이 보호를 받는다."""
+    job_type과 무관한 범용 로직이라 향후 다른 핸들러도 자동으로 이 보호를 받는다.
+
+    T3-2 모드A 지적(C-003): 핸들러가 맨 처음 "Song.PROCESSING" 커밋 자체에
+    실패하면(극히 드문 DB 오류), Song은 PROCESSING에도 못 가보고 이전 상태
+    (보통 PENDING)에 그대로 머문다 — `song.status != PROCESSING`만 보면 이
+    경우를 놓친다. 그래서 "아직 종료 상태(COMPLETED/FAILED)가 아닌 모든 경우"를
+    대상으로 넓혔다 — 정상 흐름에서 Job이 끝나는 시점엔 Song이 이미 PROCESSING
+    이어야 하므로(해당 핸들러가 가장 먼저 하는 일), PENDING까지 포함해도 정상
+    흐름에서 잘못 발동할 일은 없다."""
     if job.status not in (JobStatus.COMPLETED, JobStatus.FAILED):
         return
     song = db.get(Song, job.song_id)
-    if song is None or song.status != SongStatus.PROCESSING:
+    if song is None or song.status in (SongStatus.COMPLETED, SongStatus.FAILED):
         return
     song.status = SongStatus.FAILED
     db.commit()
@@ -171,13 +179,15 @@ def register_production_handlers() -> None:
     진입점에서만 호출한다 — `run_once()`/`run_forever()` 안에서 자동 등록하면
     `tests/test_worker.py`의 `clear_handlers()` 기반 테스트 격리가 깨진다.
 
-    REQ-01(T3-1): Demucs 분리. Phase 3/4의 다른 작업(채보·OMR)은 핸들러가 생기면
-    여기 추가한다."""
+    REQ-01(T3-1): Demucs 분리. REQ-02 경로 A(T3-2): ADTOF 채보. OMR(Phase 4)은
+    핸들러가 생기면 여기 추가한다."""
     from db.models import JobType
     from modules.separator.handler import separate_handler
+    from modules.transcriber.handler import transcribe_handler
     from worker.handlers import register_handler
 
     register_handler(JobType.SEPARATE, separate_handler)
+    register_handler(JobType.TRANSCRIBE, transcribe_handler)
 
 
 if __name__ == "__main__":

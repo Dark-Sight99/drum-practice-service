@@ -30,7 +30,17 @@ from sqlalchemy.orm import Session
 
 from api.deps import get_current_user, get_db
 from api.schemas import DrumScoreIn
-from db.models import Asset, AssetKind, Job, JobType, Song, SongSourceType, SongStatus, User
+from db.models import (
+    Asset,
+    AssetKind,
+    Job,
+    JobStatus,
+    JobType,
+    Song,
+    SongSourceType,
+    SongStatus,
+    User,
+)
 from file_storage import (
     UploadTooLargeError,
     delete_song_files,
@@ -264,6 +274,63 @@ async def upload_audio(
     db.refresh(song)
     db.refresh(job)
     return AudioUploadOut(song=SongOut.model_validate(song), job_id=job.id)
+
+
+class TranscribeOut(BaseModel):
+    job_id: int
+
+
+@router.post(
+    "/{song_id}/transcribe", response_model=TranscribeOut, status_code=status.HTTP_201_CREATED
+)
+def transcribe_song(
+    song: Song = Depends(get_owned_song),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> TranscribeOut:
+    """REQ-02 경로 A(T3-2) — 이미 분리된(T3-1) 곡의 drums 스템으로 자동 채보
+    작업을 큐에 넣는다. T3-1과 자동 연결 안 함(명시적 트리거, work/T3-2/plan.md
+    "T3-1과의 관계" 참조) — 프런트엔드가 생기면 "분리 완료" 버튼으로 이걸 호출.
+    """
+    stem_asset = (
+        db.query(Asset)
+        .filter(Asset.song_id == song.id, Asset.kind == AssetKind.STEM_DRUMS)
+        .first()
+    )
+    if stem_asset is None:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST, "먼저 음원 분리를 완료해야 합니다"
+        )
+    # 모드C C-006: 에셋 행 존재만 보지 않고 실제 파일도 확인(행은 있는데 파일이
+    # 지워졌거나 경로가 안전 범위 밖이면 Job을 큐에 넣지 않고 바로 거부).
+    stem_path = resolve_asset_path(stem_asset.file_path)
+    if stem_path is None or not stem_path.exists():
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST, "드럼 스템 파일을 찾을 수 없습니다"
+        )
+
+    # 모드A 지적 C-001: 같은 곡에 아직 안 끝난 TRANSCRIBE 작업이 있으면 새로
+    # 만들지 않고 그 Job을 그대로 돌려준다 — 중복 클릭으로 같은 곡에 작업이
+    # 여러 개 쌓이는 걸 막는다(Q-17 "워커 1개만 운영" 전제에서 핸들러의
+    # find-or-create가 순차 재채보는 이미 안전하게 처리하지만, 큐에 여러 개가
+    # 쌓이는 것 자체는 막는 게 더 안전함).
+    pending_job = (
+        db.query(Job)
+        .filter(
+            Job.song_id == song.id,
+            Job.job_type == JobType.TRANSCRIBE,
+            Job.status.in_((JobStatus.QUEUED, JobStatus.PROCESSING)),
+        )
+        .first()
+    )
+    if pending_job is not None:
+        return TranscribeOut(job_id=pending_job.id)
+
+    job = Job(user_id=user.id, song_id=song.id, job_type=JobType.TRANSCRIBE)
+    db.add(job)
+    db.commit()
+    db.refresh(job)
+    return TranscribeOut(job_id=job.id)
 
 
 @router.patch("/{song_id}", response_model=SongOut)

@@ -228,6 +228,25 @@ def test_sync_song_status_with_job_rescues_song_stuck_processing_after_job_compl
     assert song.status == SongStatus.FAILED
 
 
+def test_sync_song_status_with_job_rescues_song_stuck_pending(db) -> None:
+    """T3-2 모드A 지적(C-003) — 핸들러의 맨 처음 "Song.PROCESSING" 커밋 자체가
+    실패하면 Song은 PENDING에 머문 채 Job만 끝날 수 있다. 안전망이
+    PROCESSING뿐 아니라 PENDING도 커버해야 한다."""
+    user, song = _make_user_and_song(db)
+    assert song.status == SongStatus.PENDING  # 핸들러가 PROCESSING 커밋을 아예 못 한 상황을 흉내
+
+    register_handler(JobType.SEPARATE, lambda job: None)
+    job = Job(user_id=user.id, song_id=song.id, job_type=JobType.SEPARATE)
+    db.add(job)
+    db.commit()
+
+    result = process_next_job(db)
+
+    assert result.status == JobStatus.COMPLETED
+    db.refresh(song)
+    assert song.status == SongStatus.FAILED  # COMPLETED로 낙관하지 않음(C-003 반영)
+
+
 def test_recover_orphaned_jobs_does_not_touch_queued_or_completed(db) -> None:
     user, song = _make_user_and_song(db)
     queued = Job(user_id=user.id, song_id=song.id, job_type=JobType.SEPARATE)
@@ -301,3 +320,20 @@ def test_concurrent_workers_cannot_claim_the_same_job(tmp_path, monkeypatch) -> 
     # 동작"과 "한쪽이 깨짐"을 구분 못할 수 있음 — 예외를 모아 명시적으로 검증한다.
     assert errors == []
     assert claimed == [job_id]  # 둘 중 정확히 하나만 작업을 가져가야 함
+
+
+def test_register_production_handlers_registers_separate_and_transcribe() -> None:
+    """T3-1/T3-2 모드C C-001류 지적에 대한 회귀 테스트 — 프로덕션 등록 함수가
+    실제로 두 작업 유형 모두에 핸들러를 연결하는지 직접 확인. 이게 빠지면
+    `worker/handlers.get_handler()`가 None을 반환해 큐가 "핸들러 없음"으로
+    영원히 실패 처리한다(조용한 버그가 아니라 바로 드러나긴 하지만, 그래도
+    배포 전에 테스트로 잡는 게 맞음)."""
+    from worker.handlers import get_handler
+    from worker.runner import register_production_handlers
+
+    register_production_handlers()
+    try:
+        assert get_handler(JobType.SEPARATE) is not None
+        assert get_handler(JobType.TRANSCRIBE) is not None
+    finally:
+        clear_handlers()
