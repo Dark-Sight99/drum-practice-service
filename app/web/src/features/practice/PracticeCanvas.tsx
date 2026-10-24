@@ -111,6 +111,13 @@ export function PracticeCanvas({ score, barsVisible = 2 }: PracticeCanvasProps) 
     return Math.min(totalBars, Math.max(1, Math.round(value)))
   }
 
+  // rAF 루프(아래)가 리렌더 없이 매 프레임 최신 루프 설정을 읽도록 ref로도
+  // 들고 있는다(playbackBpmRef와 같은 이유 — oxlint react(refs)).
+  const loopRef = useRef<LoopBars | null>(null)
+  useEffect(() => {
+    loopRef.current = loopEnabled ? { startBar: loopStartBar1 - 1, endBar: loopEndBar1 } : null
+  }, [loopEnabled, loopStartBar1, loopEndBar1])
+
   useEffect(() => {
     if (!canvasRef.current) return
     rendererRef.current = createLaneRenderer(canvasRef.current, {
@@ -166,10 +173,30 @@ export function PracticeCanvas({ score, barsVisible = 2 }: PracticeCanvasProps) 
       // 마디 진행바 — activePieces와 같은 이유로, 정수 % 단위로 반올림해 실제로
       // 바뀔 때만 setState한다(그렇지 않으면 이 역시 매 프레임 리렌더를 유발해
       // T2-3에서 발견한 fps 저하가 재발함).
+      //
+      // Codex 모드A C-001(재현됨): 루프 중에도 "곡 전체 대비 진행률"로 계산하면,
+      // 루프 구간이 긴 곡의 일부(예: 32마디 중 2마디)일 때 진행바가 한쪽 끝
+      // 근처의 좁은 구간 안에서만 아주 조금 움직여 사실상 멈춘 것처럼 보임
+      // (루프가 꺼져 있을 때만 "곡 전체 대비"가 의미 있는 지표). 루프 중엔 루프
+      // 구간 자체를 0~100%로 삼아 "그 구간 안에서 어디까지 왔는지"를 보여준다.
       const barSeconds = barDurationSeconds(score.meta.timeSignature, playbackBpmRef.current)
       const songStartSeconds = barSeconds * COUNT_IN_BARS
-      const songElapsedSeconds = isPlayingRef.current ? positionSeconds - songStartSeconds : 0
-      const rawPercent = totalBars > 0 ? (songElapsedSeconds / (barSeconds * totalBars)) * 100 : 0
+      const activeLoop = loopRef.current
+      let rawPercent = 0
+      if (isPlayingRef.current) {
+        if (activeLoop) {
+          const loopStartSeconds = songStartSeconds + barSeconds * activeLoop.startBar
+          const loopEndSeconds = songStartSeconds + barSeconds * activeLoop.endBar
+          const loopDurationSeconds = loopEndSeconds - loopStartSeconds
+          rawPercent =
+            loopDurationSeconds > 0
+              ? ((positionSeconds - loopStartSeconds) / loopDurationSeconds) * 100
+              : 0
+        } else {
+          const songElapsedSeconds = positionSeconds - songStartSeconds
+          rawPercent = totalBars > 0 ? (songElapsedSeconds / (barSeconds * totalBars)) * 100 : 0
+        }
+      }
       const nextPercent = Math.min(100, Math.max(0, Math.round(rawPercent)))
       if (nextPercent !== lastProgressKeyRef.current) {
         lastProgressKeyRef.current = nextPercent
@@ -235,9 +262,6 @@ export function PracticeCanvas({ score, barsVisible = 2 }: PracticeCanvasProps) 
 
   // 컴포넌트가 사라질 때(곡 전환, 화면 이탈)도 재생 중이었다면 정리.
   useEffect(() => stopPlayback, [])
-
-  const loopStartPercent = ((loopStartBar1 - 1) / totalBars) * 100
-  const loopEndPercent = (loopEndBar1 / totalBars) * 100
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
@@ -327,6 +351,11 @@ export function PracticeCanvas({ score, barsVisible = 2 }: PracticeCanvasProps) 
         </div>
       )}
 
+      {loopEnabled && (
+        <span style={{ color: 'var(--text-muted)', fontSize: '0.9em' }}>
+          ⟲ 마디 {loopStartBar1}~{loopEndBar1} 반복 중 — 아래 진행바는 이 구간 안에서의 위치
+        </span>
+      )}
       <div
         style={{
           position: 'relative',
@@ -336,24 +365,11 @@ export function PracticeCanvas({ score, barsVisible = 2 }: PracticeCanvasProps) 
           overflow: 'hidden',
         }}
       >
-        {loopEnabled && (
-          <div
-            style={{
-              position: 'absolute',
-              left: `${loopStartPercent}%`,
-              width: `${loopEndPercent - loopStartPercent}%`,
-              top: 0,
-              bottom: 0,
-              background: 'var(--warning)',
-              opacity: 0.35,
-            }}
-          />
-        )}
         <div
           style={{
             height: '100%',
             width: `${progressPercent}%`,
-            background: 'var(--accent)',
+            background: loopEnabled ? 'var(--warning)' : 'var(--accent)',
           }}
         />
       </div>

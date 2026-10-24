@@ -1,0 +1,24 @@
+=== 재검증(2026-10-24, C-001 수정 + prettier --write 후) ===
+
+=== npx tsc -b ===
+exit: 0
+
+=== npx oxlint ===
+exit: 0
+
+=== npx prettier --check(T2-4가 실제로 바꾼 파일) ===
+Checking formatting...
+All matched files use Prettier code style!
+exit: 0
+
+=== npx vitest run ===
+
+ RUN  v5.0.5 C:/Users/Jaewoo/드럼연습서비스/app/web
+
+
+ Test Files  9 passed (9)
+      Tests  74 passed (74)
+   Start at  09:41:21
+   Duration  1.42s (environment 81%, setup 12%, import 3%, tests 2%, worker 1%, transform 1%)
+
+exit: 0
