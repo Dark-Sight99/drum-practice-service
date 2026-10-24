@@ -73,3 +73,61 @@ Environment  jsdom was created 14 times · 14.16s total, 77% of tracked time
              learn more: https://vitest.dev/guide/improving-performance#test-environments
 
 EXIT=0
+
+===== app/web: npx vitest run --reporter=verbose (T2-6 신규 테스트 파일만 발췄 — 전체는 위 'Tests 107 passed' 참고) =====
+ ✓ src/features/editor/editHistory.test.ts > editHistory > starts with no undo/redo available 2ms
+ ✓ src/features/editor/editHistory.test.ts > editHistory > undo restores the previous state, redo moves forward again 0ms
+ ✓ src/features/editor/editHistory.test.ts > editHistory > pushing a new state after undo clears the redo stack 0ms
+ ✓ src/features/editor/editHistory.test.ts > editHistory > undo/redo on an empty stack is a no-op, not a crash 0ms
+ ✓ src/features/editor/editHistory.test.ts > editHistory > supports at least 20 consecutive undos (REQ-03 수용 기준) 0ms
+ ✓ src/features/editor/editHistory.test.ts > editHistory > caps the past stack at MAX_HISTORY, dropping the oldest snapshot 1ms
+ ✓ src/features/editor/grid.test.ts > ticksPerGridUnit > computes ticks for each grid unit at ppq=480 2ms
+ ✓ src/features/editor/grid.test.ts > snapTick > snaps to the nearest grid line 0ms
+ ✓ src/features/editor/grid.test.ts > snapTick > leaves an already-aligned tick unchanged 0ms
+ ✓ src/features/editor/grid.test.ts > snapTick > always returns an integer tick even when ppq is not evenly divisible by the grid divisor (Codex 모드A 지적) 0ms
+ ✓ src/features/editor/grid.test.ts > EDITOR_ROWS / editorRowIndexForPiece > covers every DrumPiece exactly once (Codex 모드C C-009) 1ms
+ ✓ src/features/editor/grid.test.ts > EDITOR_ROWS / editorRowIndexForPiece > finds the correct row index for a piece 0ms
+ ✓ src/features/editor/grid.test.ts > EDITOR_ROWS / editorRowIndexForPiece > returns -1 for an unknown piece (type-cast to simulate bad data) 0ms
+stdout | src/features/editor/EditorScreen.test.tsx
+ ✓ src/features/editor/EditorScreen.test.tsx > EditorScreen > adds a note when an empty grid cell is clicked 118ms
+ ✓ src/features/editor/EditorScreen.test.tsx > EditorScreen > selects an existing note when clicked, without adding a duplicate 12ms
+ ✓ src/features/editor/EditorScreen.test.tsx > EditorScreen > deletes the selected note with the Delete key 19ms
+ ✓ src/features/editor/EditorScreen.test.tsx > EditorScreen > moves the selected note in time with ArrowRight (grid-snapped) 13ms
+ ✓ src/features/editor/EditorScreen.test.tsx > EditorScreen > keeps moved notes on an integer tick even when ppq is not divisible by the grid divisor (Codex 모드A 지적) 14ms
+ ✓ src/features/editor/EditorScreen.test.tsx > EditorScreen > changes the selected note piece with ArrowUp/ArrowDown 14ms
+ ✓ src/features/editor/EditorScreen.test.tsx > EditorScreen > supports undo/redo via the toolbar buttons 17ms
+ ✓ src/features/editor/EditorScreen.test.tsx > EditorScreen > does not let grid shortcuts interfere with the BPM input 12ms
+ ✓ src/features/editor/EditorScreen.test.tsx > EditorScreen > calls saveSongDrumScore with the edited score on save 28ms
+ ✓ src/features/editor/EditorScreen.test.tsx > EditorScreen > shows an error message and does not call onSaved when the save request fails 31ms
+ ✓ src/features/editor/velocity.test.ts > velocityTierOf > returns the exact tier for its own defined value 1ms
+ ✓ src/features/editor/velocity.test.ts > velocityTierOf > picks the nearest tier for in-between values 0ms
+ ✓ src/features/editor/velocity.test.ts > velocityTierOf > clamps sensibly at the extremes of the MIDI range 0ms
+ ✓ src/features/editor/grid.test.ts > ticksPerGridUnit > computes ticks for each grid unit at ppq=480 2ms
+ ✓ src/features/editor/grid.test.ts > snapTick > snaps to the nearest grid line 0ms
+ ✓ src/features/editor/grid.test.ts > snapTick > leaves an already-aligned tick unchanged 0ms
+ ✓ src/features/editor/grid.test.ts > snapTick > always returns an integer tick even when ppq is not evenly divisible by the grid divisor (Codex 모드A 지적) 0ms
+ ✓ src/features/editor/grid.test.ts > EDITOR_ROWS / editorRowIndexForPiece > covers every DrumPiece exactly once (Codex 모드C C-009) 1ms
+ ✓ src/features/editor/grid.test.ts > EDITOR_ROWS / editorRowIndexForPiece > finds the correct row index for a piece 0ms
+ ✓ src/features/editor/grid.test.ts > EDITOR_ROWS / editorRowIndexForPiece > returns -1 for an unknown piece (type-cast to simulate bad data) 0ms
+ ✓ src/features/editor/editHistory.test.ts > editHistory > starts with no undo/redo available 1ms
+ ✓ src/features/editor/editHistory.test.ts > editHistory > undo restores the previous state, redo moves forward again 0ms
+ ✓ src/features/editor/editHistory.test.ts > editHistory > pushing a new state after undo clears the redo stack 0ms
+ ✓ src/features/editor/editHistory.test.ts > editHistory > undo/redo on an empty stack is a no-op, not a crash 0ms
+ ✓ src/features/editor/editHistory.test.ts > editHistory > supports at least 20 consecutive undos (REQ-03 수용 기준) 0ms
+ ✓ src/features/editor/editHistory.test.ts > editHistory > caps the past stack at MAX_HISTORY, dropping the oldest snapshot 1ms
+stdout | src/features/editor/EditorScreen.test.tsx
+ ✓ src/features/editor/EditorScreen.test.tsx > EditorScreen > adds a note when an empty grid cell is clicked 107ms
+ ✓ src/features/editor/EditorScreen.test.tsx > EditorScreen > selects an existing note when clicked, without adding a duplicate 12ms
+ ✓ src/features/editor/EditorScreen.test.tsx > EditorScreen > deletes the selected note with the Delete key 21ms
+ ✓ src/features/editor/EditorScreen.test.tsx > EditorScreen > moves the selected note in time with ArrowRight (grid-snapped) 17ms
+ ✓ src/features/editor/EditorScreen.test.tsx > EditorScreen > keeps moved notes on an integer tick even when ppq is not divisible by the grid divisor (Codex 모드A 지적) 21ms
+ ✓ src/features/editor/EditorScreen.test.tsx > EditorScreen > changes the selected note piece with ArrowUp/ArrowDown 13ms
+ ✓ src/features/editor/EditorScreen.test.tsx > EditorScreen > supports undo/redo via the toolbar buttons 14ms
+ ✓ src/features/editor/EditorScreen.test.tsx > EditorScreen > does not let grid shortcuts interfere with the BPM input 8ms
+ ✓ src/features/editor/EditorScreen.test.tsx > EditorScreen > calls saveSongDrumScore with the edited score on save 22ms
+ ✓ src/features/editor/EditorScreen.test.tsx > EditorScreen > shows an error message and does not call onSaved when the save request fails 31ms
+ ✓ src/features/editor/velocity.test.ts > velocityTierOf > returns the exact tier for its own defined value 1ms
+ ✓ src/features/editor/velocity.test.ts > velocityTierOf > picks the nearest tier for in-between values 0ms
+ ✓ src/features/editor/velocity.test.ts > velocityTierOf > clamps sensibly at the extremes of the MIDI range 0ms
+ Test Files  14 passed (14)
+      Tests  107 passed (107)
