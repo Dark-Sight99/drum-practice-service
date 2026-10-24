@@ -8,10 +8,13 @@ export { playDrumScore } from './scorePlayer'
 export type { PlaybackHandle, PlayDrumScoreOptions } from './scorePlayer'
 export {
   barDurationSeconds,
+  barIndexForTick,
   beatsPerBar,
+  computePlaybackSchedule,
   metronomeBeatTimes,
   secondsPerBeat,
   secondsPerClick,
+  ticksPerBar,
   ticksToSeconds,
 } from './timing'
-export type { MetronomeBeat, TimeSignature } from './timing'
+export type { LoopBars, MetronomeBeat, PlaybackSchedule, TimeSignature } from './timing'

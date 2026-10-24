@@ -39,6 +39,17 @@ export function barDurationSeconds(
   )
 }
 
+/** 한 마디의 틱 수(DrumScore 자신의 ppq 기준). 곡 전체 마디 수 계산 등에 씀. */
+export function ticksPerBar(timeSignature: TimeSignature, ppq: number): number {
+  return beatsPerBar(timeSignature, 4) * ppq
+}
+
+/** 틱이 속한 마디 번호(0-기준) — 곡 전체 마디 수(마지막 노트 기준)·A-B 루프
+ * 입력 범위 제한에 씀(T2-4, REQ-04). */
+export function barIndexForTick(tick: number, timeSignature: TimeSignature, ppq: number): number {
+  return Math.floor(tick / ticksPerBar(timeSignature, ppq))
+}
+
 export interface MetronomeBeat {
   timeSeconds: number
   accent: boolean
@@ -63,4 +74,50 @@ export function metronomeBeatTimes(
     })
   }
   return beats
+}
+
+/** A-B 구간 반복 경계(0-기준 마디 번호, 반열림 구간 [startBar, endBar)). */
+export interface LoopBars {
+  startBar: number
+  endBar: number
+}
+
+export interface PlaybackSchedule {
+  /** "마디 0 시작" 절대 시각(초) — 노트는 루프 여부와 무관하게 항상 이 기준으로 스케줄. */
+  songStartSeconds: number
+  /** 재생이 실제로 시작되는 위치(초). 카운트인 클릭도 이 시각부터 스케줄한다. */
+  playbackStartSeconds: number
+  loopStartSeconds: number | null
+  loopEndSeconds: number | null
+}
+
+/** BPM·카운트인·A-B 루프 설정을 실제 Transport 스케줄링에 필요한 절대 초 값으로
+ * 변환한다(REQ-04, work/T2-4/plan.md §설계). 루프가 있으면 카운트인을 곡 맨
+ * 앞이 아니라 "루프 시작 바로 앞"에 둬서, 루프 밖 구간을 처음부터 재생하지
+ * 않고 곧장 루프 구간으로 진입한다 — `loop.startBar===0`이면 결과가 루프 없음과
+ * 동일해진다(별도 분기 불필요, 아래 식 그대로 성립). */
+export function computePlaybackSchedule(
+  timeSignature: TimeSignature,
+  bpm: number,
+  countInBars: number,
+  loop?: LoopBars,
+): PlaybackSchedule {
+  const barSeconds = barDurationSeconds(timeSignature, bpm)
+  const songStartSeconds = barSeconds * countInBars
+  if (!loop) {
+    return {
+      songStartSeconds,
+      playbackStartSeconds: 0,
+      loopStartSeconds: null,
+      loopEndSeconds: null,
+    }
+  }
+  const loopStartSeconds = songStartSeconds + barSeconds * loop.startBar
+  const loopEndSeconds = songStartSeconds + barSeconds * loop.endBar
+  return {
+    songStartSeconds,
+    playbackStartSeconds: loopStartSeconds - songStartSeconds,
+    loopStartSeconds,
+    loopEndSeconds,
+  }
 }

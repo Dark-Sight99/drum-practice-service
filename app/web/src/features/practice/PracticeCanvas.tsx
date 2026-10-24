@@ -1,19 +1,25 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   barDurationSeconds,
+  barIndexForTick,
   createDrumVoices,
   disposeDrumVoices,
   getMasterClock,
   playDrumScore,
   type DrumVoiceMap,
+  type LoopBars,
   type PlaybackHandle,
 } from '../../audio'
 import type { DrumPiece, DrumScore } from '../../score/types'
 import { createLaneRenderer, type LaneRenderer } from '../../render/laneRenderer'
 import { KitIllustration } from '../../render/KitIllustration'
 
-// 연습 화면의 레인+킷 렌더러를 실제로 돌려보는 최소 데모 컴포넌트. BPM/루프
-// UI(T2-4)·라이브러리 연동(T2-5)은 범위 밖 — 재생/정지 버튼만(work/T2-3/plan.md §범위).
+// 연습 화면의 레인+킷 렌더러 + BPM 변경·A-B 루프(T2-4, REQ-04) 컨트롤을 실제로
+// 돌려보는 데모 컴포넌트. 라이브러리 연동(T2-5)은 범위 밖(work/T2-4/plan.md §범위).
+
+/** REQ-04 "카운트인: 재생 전 1마디" — 진행바 계산(아래 rAF 루프)과 실제 재생
+ * 호출(handlePlay)이 같은 값을 써야 하므로 상수로 공유한다. */
+const COUNT_IN_BARS = 1
 
 function readPieceColor(piece: DrumPiece): string {
   const varName =
@@ -70,6 +76,41 @@ export function PracticeCanvas({ score, barsVisible = 2 }: PracticeCanvasProps) 
   // isPlaying을 ref로도 들고 있어 루프 안에서 "재생 중일 때만" 점등을 계산한다.
   const isPlayingRef = useRef(false)
 
+  // --- BPM(REQ-04: 원곡 대비 50%~150%) ---
+  const minBpm = Math.max(1, Math.round(score.meta.bpm * 0.5))
+  const maxBpm = Math.round(score.meta.bpm * 1.5)
+  const [playbackBpm, setPlaybackBpm] = useState(score.meta.bpm)
+  // rAF 루프(아래)는 리렌더를 거치지 않고 매 프레임 최신 BPM을 읽어야 해서 ref로도
+  // 들고 있는다 — oxlint react(refs)가 렌더 중 ref 쓰기를 금지해 effect에서 동기화.
+  const playbackBpmRef = useRef(playbackBpm)
+  useEffect(() => {
+    playbackBpmRef.current = playbackBpm
+  }, [playbackBpm])
+  const bpmPercent = Math.round((playbackBpm / score.meta.bpm) * 100)
+
+  function clampBpm(value: number): number {
+    if (Number.isNaN(value)) return playbackBpm
+    return Math.min(maxBpm, Math.max(minBpm, Math.round(value)))
+  }
+
+  // --- A-B 루프(REQ-04, 마디 단위, 1-기준으로 표시·내부는 0-기준) ---
+  const totalBars = useMemo(() => {
+    const lastTick = Math.max(0, ...score.notes.map((n) => n.tick))
+    return barIndexForTick(lastTick, score.meta.timeSignature, score.ppq) + 1
+  }, [score])
+  const [loopEnabled, setLoopEnabled] = useState(false)
+  const [loopStartBar1, setLoopStartBar1] = useState(1)
+  const [loopEndBar1, setLoopEndBar1] = useState(Math.min(totalBars, 4))
+
+  function clampLoopStart(value: number): number {
+    if (Number.isNaN(value)) return loopStartBar1
+    return Math.min(totalBars, Math.max(1, Math.round(value)))
+  }
+  function clampLoopEnd(value: number): number {
+    if (Number.isNaN(value)) return loopEndBar1
+    return Math.min(totalBars, Math.max(1, Math.round(value)))
+  }
+
   useEffect(() => {
     if (!canvasRef.current) return
     rendererRef.current = createLaneRenderer(canvasRef.current, {
@@ -91,13 +132,21 @@ export function PracticeCanvas({ score, barsVisible = 2 }: PracticeCanvasProps) 
   }, [])
 
   const lastActiveKeyRef = useRef('')
+  const [progressPercent, setProgressPercent] = useState(0)
+  const lastProgressKeyRef = useRef(-1)
 
   useEffect(() => {
     function loop() {
       const clock = getMasterClock()
       const renderer = rendererRef.current
+      const positionSeconds = clock.getPositionSeconds()
       if (renderer) {
-        const rendered = renderer.render(score, clock.getPositionSeconds(), barsVisible)
+        const rendered = renderer.render(
+          score,
+          positionSeconds,
+          barsVisible,
+          playbackBpmRef.current,
+        )
         // 정지 중에는 마스터 클록 위치가 고정돼 있어, 그 고정 위치 근처에 노트가
         // 있으면 계속 "히트"로 잡혀 킷이 켜진 채 남는다 — 재생 중일 때만 점등
         // 계산을 반영한다(Codex 모드A C-001).
@@ -114,13 +163,25 @@ export function PracticeCanvas({ score, barsVisible = 2 }: PracticeCanvasProps) 
           setActivePieces(active)
         }
       }
+      // 마디 진행바 — activePieces와 같은 이유로, 정수 % 단위로 반올림해 실제로
+      // 바뀔 때만 setState한다(그렇지 않으면 이 역시 매 프레임 리렌더를 유발해
+      // T2-3에서 발견한 fps 저하가 재발함).
+      const barSeconds = barDurationSeconds(score.meta.timeSignature, playbackBpmRef.current)
+      const songStartSeconds = barSeconds * COUNT_IN_BARS
+      const songElapsedSeconds = isPlayingRef.current ? positionSeconds - songStartSeconds : 0
+      const rawPercent = totalBars > 0 ? (songElapsedSeconds / (barSeconds * totalBars)) * 100 : 0
+      const nextPercent = Math.min(100, Math.max(0, Math.round(rawPercent)))
+      if (nextPercent !== lastProgressKeyRef.current) {
+        lastProgressKeyRef.current = nextPercent
+        setProgressPercent(nextPercent)
+      }
       rafIdRef.current = requestAnimationFrame(loop)
     }
     rafIdRef.current = requestAnimationFrame(loop)
     return () => {
       if (rafIdRef.current !== null) cancelAnimationFrame(rafIdRef.current)
     }
-  }, [score, barsVisible])
+  }, [score, barsVisible, totalBars])
 
   function stopPlayback() {
     if (!playbackRef.current) return
@@ -129,26 +190,38 @@ export function PracticeCanvas({ score, barsVisible = 2 }: PracticeCanvasProps) 
     playbackRef.current = null
     isPlayingRef.current = false
     lastActiveKeyRef.current = ''
+    lastProgressKeyRef.current = -1
     setActivePieces(new Set())
+    setProgressPercent(0)
     setIsPlaying(false)
   }
 
   async function handlePlay() {
     stopPlayback() // 혹시 이전 재생이 안 끝났으면 먼저 정리(이중 재생 방지)
     const voices = await createDrumVoices()
-    const handle = playDrumScore(score, voices, { countInBars: 1 })
+    const loop: LoopBars | undefined = loopEnabled
+      ? { startBar: loopStartBar1 - 1, endBar: loopEndBar1 }
+      : undefined
+    const handle = playDrumScore(score, voices, {
+      countInBars: COUNT_IN_BARS,
+      playbackBpm,
+      loop,
+    })
     playbackRef.current = { handle, voices }
     isPlayingRef.current = true
     setIsPlaying(true)
+    // 루프가 켜져 있으면 사용자가 직접 정지할 때까지 계속 반복돼야 하므로
+    // 자동 정지 타이머를 걸지 않는다(work/T2-4/plan.md §설계).
+    if (loop) return
     // 재생 종료(마지막 노트 이후) 자동 정지 — 정확한 종료 이벤트 연결은 범위 밖,
     // 데모용 최소 구현(work/T2-3/plan.md). playDrumScore가 카운트인만큼 모든
     // 노트 시각을 뒤로 미루는데 처음엔 그걸 안 더해서, 마지막 노트가 아직 Transport에
     // 예약돼 있는 도중에 타이머가 먼저 발동해 disposeDrumVoices가 버퍼를 지워버리는
     // 경쟁 상태를 실제 브라우저로 재현함("buffer is either not set or not loaded"
     // 예외) — qa-evidence/T2-3/result.md. 카운트인 길이를 더하고 여유도 넉넉히 둠.
-    const countInSeconds = barDurationSeconds(score.meta.timeSignature, score.meta.bpm)
+    const countInSeconds = barDurationSeconds(score.meta.timeSignature, playbackBpm)
     const lastTick = Math.max(0, ...score.notes.map((n) => n.tick))
-    const lastNoteSeconds = (lastTick / score.ppq) * (60 / score.meta.bpm)
+    const lastNoteSeconds = (lastTick / score.ppq) * (60 / playbackBpm)
     const safetyMarginSeconds = 4 // 크래시/라이드 등 길게 울리는 샘플이 다 끝날 시간
     const totalMs = (countInSeconds + lastNoteSeconds + safetyMarginSeconds) * 1000
     setTimeout(() => {
@@ -163,22 +236,127 @@ export function PracticeCanvas({ score, barsVisible = 2 }: PracticeCanvasProps) 
   // 컴포넌트가 사라질 때(곡 전환, 화면 이탈)도 재생 중이었다면 정리.
   useEffect(() => stopPlayback, [])
 
+  const loopStartPercent = ((loopStartBar1 - 1) / totalBars) * 100
+  const loopEndPercent = (loopEndBar1 / totalBars) * 100
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
-      <div style={{ display: 'flex', gap: 'var(--space-2)' }}>
-        <button onClick={handlePlay} disabled={isPlaying}>
-          ▶ 재생
-        </button>
-        <button onClick={handleStop} disabled={!isPlaying}>
-          ⏹ 정지
-        </button>
+      <div
+        style={{
+          display: 'flex',
+          flexWrap: 'wrap',
+          alignItems: 'center',
+          gap: 'var(--space-4)',
+        }}
+      >
+        <div style={{ display: 'flex', gap: 'var(--space-2)' }}>
+          <button onClick={handlePlay} disabled={isPlaying}>
+            ▶ 재생
+          </button>
+          <button onClick={handleStop} disabled={!isPlaying}>
+            ⏹ 정지
+          </button>
+        </div>
+
+        <label style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
+          BPM
+          <input
+            type="range"
+            min={minBpm}
+            max={maxBpm}
+            value={playbackBpm}
+            onChange={(e) => setPlaybackBpm(clampBpm(Number(e.target.value)))}
+          />
+          <input
+            type="number"
+            min={minBpm}
+            max={maxBpm}
+            value={playbackBpm}
+            onChange={(e) => setPlaybackBpm(clampBpm(Number(e.target.value)))}
+            style={{ width: 56 }}
+          />
+          <span style={{ color: 'var(--text-muted)' }}>
+            (원곡 {score.meta.bpm}, {bpmPercent}%)
+          </span>
+        </label>
+
+        <label style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
+          <input
+            type="checkbox"
+            checked={loopEnabled}
+            onChange={(e) => setLoopEnabled(e.target.checked)}
+          />
+          ⟲ A-B 루프
+        </label>
+        {loopEnabled && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
+            <span>마디</span>
+            <input
+              type="number"
+              min={1}
+              max={totalBars}
+              value={loopStartBar1}
+              onChange={(e) => {
+                const next = clampLoopStart(Number(e.target.value))
+                setLoopStartBar1(next)
+                if (next >= loopEndBar1) setLoopEndBar1(Math.min(totalBars, next + 1))
+              }}
+              style={{ width: 48 }}
+            />
+            <span>~</span>
+            <input
+              type="number"
+              min={1}
+              max={totalBars}
+              value={loopEndBar1}
+              onChange={(e) => {
+                const next = clampLoopEnd(Number(e.target.value))
+                setLoopEndBar1(next)
+                if (next <= loopStartBar1) setLoopStartBar1(Math.max(1, next - 1))
+              }}
+              style={{ width: 48 }}
+            />
+          </div>
+        )}
       </div>
+
       <canvas ref={canvasRef} style={{ width: '100%', height: 400, background: 'var(--bg)' }} />
       {!isPortraitPhone && (
         <div style={{ maxWidth: 320 }}>
           <KitIllustration activePieces={activePieces} pieceColor={readPieceColor} />
         </div>
       )}
+
+      <div
+        style={{
+          position: 'relative',
+          height: 8,
+          borderRadius: 4,
+          background: 'var(--surface-2)',
+          overflow: 'hidden',
+        }}
+      >
+        {loopEnabled && (
+          <div
+            style={{
+              position: 'absolute',
+              left: `${loopStartPercent}%`,
+              width: `${loopEndPercent - loopStartPercent}%`,
+              top: 0,
+              bottom: 0,
+              background: 'var(--warning)',
+              opacity: 0.35,
+            }}
+          />
+        )}
+        <div
+          style={{
+            height: '100%',
+            width: `${progressPercent}%`,
+            background: 'var(--accent)',
+          }}
+        />
+      </div>
     </div>
   )
 }
