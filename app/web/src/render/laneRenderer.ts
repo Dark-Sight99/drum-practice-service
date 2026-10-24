@@ -58,6 +58,34 @@ export interface LaneRenderer {
 
 const LOOKBEHIND_SECONDS = 0.15
 
+/** 도형 중심에서 실제로 그려지는 가장 아래쪽 픽셀까지의 거리 — `drawNoteShape`가
+ * 그리는 도형마다 다르다(예: `x-ring`은 `half*1.5` 반지름 원까지 그려 다른
+ * 도형보다 더 아래까지 내려감). 판정 순간(하단 모서리가 판정선에 닿는 시각)을
+ * 모든 도형에서 똑같이 맞추려면 이 값으로 그리는 위치를 올려야 한다(T2-9,
+ * Codex 모드A P2 지적 — 처음엔 모든 도형에 `noteSize/2`를 똑같이 썼는데
+ * `x-ring`만 그보다 더 아래까지 그려져 판정 순간이 더 일찍 보였음). */
+function shapeBottomExtent(shape: NoteShape, size: number): number {
+  const half = size / 2
+  switch (shape) {
+    case 'x':
+      return half
+    case 'x-large':
+      return half * 1.3
+    case 'x-ring':
+      return half * 1.5 // 링(half*1.5 반지름)이 X(half)보다 더 아래까지 그려짐
+    case 'diamond':
+      return half
+    case 'rounded-rect':
+      return (size * 0.7) / 2
+    case 'circle':
+      return half
+    case 'circle-large':
+      return half * 1.2
+    case 'bar':
+      return (size * 0.4) / 2
+  }
+}
+
 function drawNoteShape(
   ctx: CanvasRenderingContext2D,
   shape: NoteShape,
@@ -206,9 +234,10 @@ export function createLaneRenderer(
           // T2-9(Phase 2 게이트 피드백) — 노트는 위→아래로 떨어지므로 "닿는" 순간은
           // 도형의 하단 모서리가 판정선에 닿는 순간이어야 소리와 맞는다(리듬게임
           // 관례). `noteYPosition`은 도형 "중심"이 판정선에 오는 시각을 기준으로
-          // 계산하므로, 그리는 위치를 반 칸(noteSize/2) 위로 올려 하단이 정확히
-          // 그 시각에 판정선에 닿게 한다.
-          const y = yCenter - noteSize / 2
+          // 계산하므로, 그리는 위치를 도형별 실제 하단 돌출 거리만큼 위로 올려
+          // 하단이 정확히 그 시각에 판정선에 닿게 한다 — 도형마다 그려지는 범위가
+          // 달라(예: x-ring은 더 아래까지) `noteSize/2` 하나로 통일하면 안 됨.
+          const y = yCenter - shapeBottomExtent(shape, noteSize)
           drawNoteShape(ctx, shape, laneCenterX, y, noteSize, options.pieceColor(note.piece))
 
           // REQ-12 — 노트 위 R/L(/RF/LF) 글자. 자동 추천 값은 반투명
@@ -222,7 +251,7 @@ export function createLaneRenderer(
               ctx.font = `${Math.max(10, noteSize * 0.5)}px sans-serif`
               ctx.textAlign = 'center'
               ctx.textBaseline = 'bottom'
-              ctx.fillText(label, laneCenterX, y - noteSize / 2 - 2)
+              ctx.fillText(label, laneCenterX, y - shapeBottomExtent(shape, noteSize) - 2)
               ctx.globalAlpha = prevAlpha
             }
           }
