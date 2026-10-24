@@ -28,13 +28,17 @@
 - `python-multipart` 패키지가 설치돼 있지 않아(`pip list`로 직접 확인) `requirements.txt`에 추가하고 설치.
 
 ## 실행한 검증
-`qa-evidence/T2-5/result.md`, `raw_log.txt` — 프론트 tsc/oxlint/prettier/vitest(81/81), 백엔드 ruff/pytest(64/64) 전부 PASS. 실제 FastAPI 서버+브라우저로 MIDI/MusicXML/GP 3종 업로드, 서버 프로세스 재시작 후 영속성 확인, 실제 재생, 이름변경, 검색, 삭제(파일 실제 제거 확인), 로그아웃/비로그인 차단 확인.
+`qa-evidence/T2-5/result.md`, `raw_log.txt` — 프론트 tsc/oxlint/prettier/vitest(81/81), 백엔드 ruff/pytest(65/65, C-001 NaN 검증 추가 반영) 전부 PASS. 실제 FastAPI 서버+브라우저로 MIDI/MusicXML/GP 3종 업로드, 서버 프로세스 재시작 후 영속성 확인, 실제 재생, 이름변경, 검색, 삭제(파일 실제 제거 확인), 로그아웃/비로그인 차단 확인.
 
 ## Codex 모드A 검수 반영
 `qa-evidence/T2-5/codex-modeA.md` — 판정 REQUEST_CHANGES, 필수 수정 1건(C-001).
 
 - **C-001(재현됨, 수정 완료)**: `schemas.py`의 `audioOffsetMs` 검증이 `value in (inf, -inf)` 비교를 썼는데, 이 비교는 NaN을 못 거른다(NaN은 IEEE 754 특성상 어떤 값과도 `==`/`in`이 성립 안 함). 실제로 pydantic-core의 JSON 파서가 `NaN` 리터럴 토큰을 파싱해 필드 값으로 통과시킴을 직접 실행으로 확인 — 실제 버그. `bpm`·`audioOffsetMs` 둘 다 `math.isfinite()`로 통일해 수정.
 - 재검증: NaN `audioOffsetMs`를 실제로 보내는 pytest 추가(`test_upload_rejects_nan_audio_offset`) — 422 거부 확인. 수정 후 ruff/pytest 재실행 — 전부 클린, 65/65 통과.
+
+## Codex 모드B 검수 반영
+1차 REQUEST_CHANGES: report.md/result.md가 64/64라 적었지만 raw_log.txt엔 C-001(NaN) 수정 후 65/65가 추가돼 있어 불일치(C-001, 필수). 2차에서 문서의 다른 곳(요약 줄·결과 표)에 남아있던 64 표기를 전부 65로 수정.
+권장 C-002(반영 완료): 업로드 핸들러가 `file.read()`를 인자 없이 호출해 20MB 제한을 검사하기 전에 파일 전체를 메모리로 읽고 있었음 — 1MB 청크 단위로 읽으며 상한 초과 시 즉시 중단하도록 수정.
 
 ## 가정
 - 업로드 화면은 디지털 악보 파일 선택기 하나만(음원/사진 선택 UI는 Phase 3/4).

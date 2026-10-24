@@ -88,9 +88,22 @@ async def upload_song(
             status.HTTP_400_BAD_REQUEST, f"지원하지 않는 파일 형식: {ext or '(확장자 없음)'}"
         )
 
-    content = await file.read()
-    if len(content) > MAX_UPLOAD_BYTES:
-        raise HTTPException(status.HTTP_413_CONTENT_TOO_LARGE, "파일이 너무 큽니다(20MB 제한)")
+    # Codex 모드B 권장 C-002: file.read()를 인자 없이 호출하면 크기 제한 검사 전에
+    # 파일 전체를 먼저 읽어버려(UploadFile 공식 타입 정의 — read(size=-1)) 20MB
+    # 제한이 메모리 사용량을 못 막는다. 청크 단위로 읽으며 누적 크기가 상한을
+    # 넘는 순간 바로 멈춘다(전체를 다 읽지 않음).
+    chunks: list[bytes] = []
+    total_bytes = 0
+    chunk_size = 1024 * 1024
+    while True:
+        chunk = await file.read(chunk_size)
+        if not chunk:
+            break
+        total_bytes += len(chunk)
+        if total_bytes > MAX_UPLOAD_BYTES:
+            raise HTTPException(status.HTTP_413_CONTENT_TOO_LARGE, "파일이 너무 큽니다(20MB 제한)")
+        chunks.append(chunk)
+    content = b"".join(chunks)
 
     try:
         parsed = DrumScoreIn.model_validate_json(drumscore)
