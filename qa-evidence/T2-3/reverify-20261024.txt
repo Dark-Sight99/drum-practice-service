@@ -1,0 +1,24 @@
+=== 재검증(2026-10-24, C-001 수정 후, App.tsx 원복 후) ===
+
+=== npx tsc -b ===
+exit: 0
+
+=== npx oxlint ===
+exit: 0
+
+=== npx prettier --check src/render src/features/practice src/audio/drumVoices.ts src/App.tsx ===
+Checking formatting...
+All matched files use Prettier code style!
+exit: 0
+
+=== npx vitest run ===
+
+ RUN  v5.0.5 C:/Users/Jaewoo/드럼연습서비스/app/web
+
+
+ Test Files  9 passed (9)
+      Tests  65 passed (65)
+   Start at  09:14:50
+   Duration  1.25s (environment 80%, setup 12%, import 4%, tests 1%, transform 1%, worker 1%)
+
+exit: 0

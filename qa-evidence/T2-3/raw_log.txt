@@ -93,4 +93,24 @@ isPlayingRef.current일 때만 activePieces를 반영(정지 중엔 항상 빈 S
 isPlaying/activePieces 상태 갱신은 (oxlint react(set-state-in-effect) 경고에
 따라) useEffect가 아니라 handlePlay/stopPlayback 이벤트 핸들러 안에서 직접 수행.
 재검증 후 tsc -b / oxlint / prettier --check / vitest run 재실행 — 전부 클린,
-65/65 통과(App.tsx를 검증 하니스에서 원래 최소 상태로 되돌린 뒤 재실행).
+65/65 통과(App.tsx를 검증 하니스에서 원래 최소 상태로 되돌린 뒤 재실행). 전체
+원자료: reverify-20261024.txt.
+
+--- 5. Codex 모드B 지적 반영 — fps 재측정 원자료 ---
+모드B(codex-modeB.md) 지적: fps 60.1 등 수치가 raw_log.txt에 원자료(프레임
+간격 측정값) 없이 요약만 있어 대조 불가. 아래는 2026-10-24 재측정한 실제
+원자료다(8마디 밀도 패턴 — 8분음표 하이햇 전체 + 마디당 킥/스네어 1개씩,
+120bpm, Claude Browser pane, javascript_tool로 requestAnimationFrame
+180프레임 간격을 직접 측정, window.__fpsResult에 기록 후 조회):
+
+{
+  "frameCount": 180,
+  "avgMs": 16.683333333333323,
+  "maxMs": 16.80000000000291,
+  "p95Ms": 16.799999999999272,
+  "fps": 59.940059940059975
+}
+
+재생 2초 후부터 측정 시작(레이아웃/초기화 비용 제외), 측정 중
+read_console_messages(onlyErrors: true) — "No console logs."(에러 0건).
+REQ-06 60fps 목표 충족(평균 59.94fps, 목표 대비 오차 0.1% 이내).

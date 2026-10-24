@@ -39,6 +39,13 @@
 - **C-001(재현됨, 수정 완료)**: `PracticeCanvas.tsx`의 렌더 루프가 재생 여부와 무관하게 매 프레임 `activePieces`를 계산해, 정지 중에도(마스터 클록 위치가 고정된 상태) 그 위치 근처에 노트가 있으면 킷이 계속 켜진 채로 남아있을 수 있었음(예: tick=0 노트 + 클록 초기 위치 0초). `isPlayingRef`를 도입해 재생 중일 때만 점등을 반영하고, 정지 시 즉시 `activePieces`를 비우도록 수정. `isPlaying` 상태 전환은 (oxlint `react(set-state-in-effect)` 경고에 따라) `useEffect`가 아니라 `handlePlay()`/`stopPlayback()` 이벤트 핸들러 안에서 직접 수행.
 - 재검증: 2노트(tick:0 kick, tick:PPQ*4 snare) 전용 하니스로 실제 브라우저에서 "재생 전 고정 점등 없음" + "재생 후 정지 시 즉시 소등" 둘 다 스크린샷으로 확인(`qa-evidence/T2-3/result.md` §Codex 모드A 검수 반영). 수정 후 tsc/oxlint/prettier/vitest 재실행 — 전부 클린, 65/65 통과.
 
+## Codex 모드B 검수 반영
+`qa-evidence/T2-3/codex-modeB.md` — 1차 판정 REQUEST_CHANGES, 필수 수정 2건(C-001, C-002).
+
+- **C-001(확인됨)**: fps 60.1 등 수치가 `raw_log.txt`에 원자료 없이 요약만 있어 대조 불가. → Claude Browser pane에서 8마디 밀도 패턴으로 fps 재측정, `requestAnimationFrame` 180프레임 간격 원자료(JSON)를 `raw_log.txt` §5에 보존(평균 59.94fps, 목표 충족).
+- **C-002(확인됨)**: 65/65 테스트 통과가 C-001 수정 이전의 과거 실행 기록이었음. → C-001 수정 후 `tsc -b`/`oxlint`/`prettier --check`/`vitest run`을 다시 실행해 실제 명령 출력을 `reverify-20261024.txt`에 저장(65/65 재확인).
+- 권장 사항 C-004(폰 세로 "축소 아이콘" 미구현)는 이미 `work/T2-3/plan.md`·`qa-evidence/T2-3/result.md` §가정에 명시된 의도적 범위 축소(Q-09 의뢰인 디자인 승인 대기) — 추가 수정 없음.
+
 ## 남은 문제
 - T2-4가 BPM 슬라이더·A-B 루프를 이 렌더러에 연결.
 - T2-5(라이브러리)가 실제 곡 데이터를 `PracticeCanvas`에 공급.

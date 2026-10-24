@@ -66,7 +66,14 @@ Codex 모드A(독립 코드 검수, `codex-modeA.md`)가 REQUEST_CHANGES로 지�
 1. 재생 전 스크린샷: 모든 킷 서클이 흐린 상태(opacity 0.55)로, kick이 고정 점등되지 않음 확인.
 2. 재생 → 6초 후 정지 버튼 클릭 → 스크린샷 재확인: 모든 킷 서클이 다시 흐린 상태로 복귀, 켜진 채 남은 피스 없음.
 
-수정 후 `App.tsx`를 원래 최소 상태로 되돌리고 `tsc -b`/`oxlint`/`prettier --check`/`vitest run`을 재실행 — 전부 클린, 65/65 통과(`raw_log.txt` §4).
+수정 후 `App.tsx`를 원래 최소 상태로 되돌리고 `tsc -b`/`oxlint`/`prettier --check`/`vitest run`을 재실행 — 전부 클린, 65/65 통과. 원자료(명령 출력 그대로): `reverify-20261024.txt`, `raw_log.txt` §4.
+
+## Codex 모드B 검수 반영 — fps 원자료 부족(지적 확인, 보강 완료)
+Codex 모드B(`codex-modeB.md`)가 REQUEST_CHANGES로 지적: report.md/result.md의 fps 60.1·테스트 65/65 수치가 `raw_log.txt`에 원자료(프레임 간격 측정값, 최신 명령 실행 로그) 없이 요약만 있어 대조 불가.
+
+**확인**: 지적이 맞음 — 기존 fps 수치는 측정 당시 텍스트 요약만 기록했고, 65/65 테스트 결과도 C-001 수정 이전 실행 로그였음.
+
+**보강**: (1) C-001 수정 후 `tsc -b`/`oxlint`/`prettier --check`/`vitest run`을 다시 실행해 실제 명령 출력을 `reverify-20261024.txt`에 그대로 저장(65/65 재확인). (2) fps를 Claude Browser pane에서 8마디 밀도 패턴(8분음표 하이햇 전체+마디당 킥/스네어)으로 재측정 — `requestAnimationFrame` 180프레임 간격 실측값을 `window.__fpsResult`에 기록 후 그대로 조회해 `raw_log.txt` §5에 원자료(JSON)로 보존: 평균 16.68ms(≈59.94fps), 최대 16.80ms, p95 16.80ms. 측정 중 콘솔 에러 0건(`read_console_messages`로 확인).
 
 ## 가정/한계
 - 드럼킷 일러스트는 정밀 그래픽이 아닌 단순 도형(원+글자) — `intent/07-open-questions.md` Q-09(의뢰인 디자인 승인 필요)에 따라 이번엔 기능만.
