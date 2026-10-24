@@ -29,7 +29,9 @@
 - `write_song_file` 원자적 교체 — 두 번 써도 `.tmp` 잔재 없이 최신 내용만 남음
 
 ## 수동 QA(실제 브라우저 + 실제 FastAPI 서버)
-Claude Browser pane(Vite dev 5173 → `/api` 프록시 → 실제 `uvicorn` 127.0.0.1:8000, `data/db/app.db`에 직접 `alembic upgrade head` 적용 후 진행)로 확인. 테스트 대상은 실제 사용자 곡 "MusicDelta_Grunge"(의뢰인이 이미 업로드해 둔 실데이터) — 모든 편집은 검증 후 삭제해 원상복구했다. 서버 접근 로그 전체(발췌 아님 — 서버 기동부터 QA 종료까지)를 `server-log-full.txt`로 남겼다 — 로그 전체를 통틀어 `PUT` 요청이 정확히 2건(추가 1건 + 원복 1건) 존재하고 둘 다 `204 No Content`로 성공했으며, 그 외의 PUT이 없음을 로그 전체로 확인 가능하다. `GET /songs/2/drumscore`는 그 사이사이 여러 번(재오픈·새로고침·PracticeCanvas 진입마다) 호출됨도 같은 로그로 확인된다.
+Claude Browser pane(Vite dev 5173 → `/api` 프록시 → 실제 `uvicorn` 127.0.0.1:8000, `data/db/app.db`에 직접 `alembic upgrade head` 적용 후 진행)로 확인. 테스트 대상은 실제 사용자 곡 "MusicDelta_Grunge"(의뢰인이 이미 업로드해 둔 실데이터) — 모든 편집은 검증 후 삭제해 원상복구했다. 서버 접근 로그 전체(발췌 아님 — 서버 프로세스 기동부터 **QA 종료 후 해당 프로세스를 실제로 종료(`Stop-Process`)할 때까지**, 47줄)를 `server-log-full.txt`로 남겼다 — 로그 전체를 통틀어 `PUT` 요청이 정확히 2건(추가 1건 + 원복 1건) 존재하고 둘 다 `204 No Content`로 성공했으며, 그 외의 PUT이 없음을 확인 가능하다. 프로세스를 직접 종료했기 때문에("post-shutdown status: 000", 더 이상 응답 없음을 확인) 이 로그 이후에는 어떤 요청도 있을 수 없다 — 로그의 끝이 곧 QA 세션의 끝과 일치함을 보장한다.
+
+**저장→재오픈 동일성(REQ-03 핵심)의 1차 근거는 수동 브라우저 관찰이 아니라 자동화 테스트다**: `app/server/tests/test_songs_editor_api.py::test_save_then_reload_matches`가 저장한 JSON과 재조회한 JSON의 바이트 단위 동일성을 코드로 직접 단언(assert)한다(실행 로그: `raw_log.txt`의 pytest 77/77 PASS에 포함). 수동 브라우저 QA(항목 8)는 이 API 레벨 보장이 실제 프론트 화면에서도 체감대로 동작하는지 보여주는 보조 확인이지, 유일한 증거가 아니다. QA 정리(원복) 뒤 `GET /songs/2/drumscore`의 실제 응답 본문을 `response-body-after-cleanup.json`으로 남겼다 — 테스트용으로 추가했던 KK 틱 1430 노트("1430" 문자열)가 전혀 없음을 `grep`으로 확인(0건), 원상복구가 실제로 됐음을 응답 본문 자체로 증명한다.
 
 1. **편집기 진입**: 라이브러리 "편집" 버튼 → 실제 저장된 DrumScore가 9개 행(HH닫힘/HH열림/CR/SN/T1/T2/FT/RD/KK) 그리드에 정확히 렌더링됨(HH/CR/SN/T2 행에 실데이터 노트 존재, 스크린샷 확인).
 2. **빈 칸 클릭 → 노트 추가**: KK 행 클릭 → 새 노트 생성, "선택됨: KK · 틱 1430 · 셈여림 mid" 표시.
@@ -39,7 +41,7 @@ Claude Browser pane(Vite dev 5173 → `/api` 프록시 → 실제 `uvicorn` 127.
 6. **삭제(키보드 포커스 범위 확인 포함)**: 툴바의 실행취소/다시실행/강 버튼을 클릭한 직후에는 포커스가 그리드 밖으로 이동해 Delete 키가 무반응이었음 — 이는 Codex 모드C C-004 설계대로 키보드 단축키를 그리드 컨테이너에만 바인딩한 **의도된 동작**(노트를 다시 클릭해 포커스를 그리드로 되돌리면 Delete가 정상 동작함을 확인). 버그 아님, 설계 의도 확인.
 7. **BPM 입력창 포커스 격리**: 노트를 선택한 뒤 BPM 입력창을 클릭해 포커스를 옮기고 →를 누름 → 선택된 노트의 틱이 그대로 유지됨(그리드로 이벤트가 버블링되지 않음, Codex C-004 검증).
 8. **REQ-03 핵심 — 저장→새로고침→재오픈 동일성**: KK 틱 1430 노트를 추가해 저장(204 응답, 라이브러리로 복귀) → 같은 탭에서 "편집" 재클릭 → 노트 존재 확인 → **브라우저 전체 새로고침(새 앱 인스턴스, 서버에서 새로 fetch)** 후 다시 "편집" 클릭 → 노트가 여전히 존재함을 확인. 서버 로그에도 `PUT /songs/2/drumscore → 204`가 정확히 1건 기록됨.
-9. **PracticeCanvas 연동 확인**(T2-5↔T2-6 end-to-end 최초 확인): 저장한 편집본 상태로 라이브러리에서 곡 제목 클릭(연습 화면 진입) → PracticeCanvas가 정상 렌더링됨(레인·킷 일러스트 모두 표시) — `GET /songs/{id}/drumscore`가 T2-5에서 구현한 DRUMSCORE_EDITED 우선 로직을 그대로 타므로, 방금 편집·저장한 내용이 연습 화면에도 반영된다.
+9. **PracticeCanvas 연동 확인**(T2-5↔T2-6 end-to-end 최초 확인, 범위를 명확히 하면): 저장한 편집본 상태로 라이브러리에서 곡 제목 클릭(연습 화면 진입) → PracticeCanvas가 정상 렌더링됨(레인·킷 일러스트 모두 표시, `screenshot-practicecanvas-with-edit.jpg`). 이 화면이 쓰는 `fetchSongDrumScore()`는 편집기가 쓰는 것과 **동일한 함수**(`api/songs.ts`)이고 `GET /songs/{id}/drumscore`는 T2-5에서 구현한 DRUMSCORE_EDITED 우선 로직을 코드 레벨로 그대로 타므로(같은 엔드포인트, 같은 코드 경로), 편집·저장한 내용이 연습 화면에도 반영된다는 것은 코드 경로가 하나로 합쳐짐을 눈으로 확인한 것이지, 화면에 그려진 특정 노트 하나하나를 픽셀 단위로 대조한 것은 아니다 — 그 수준의 바이트 동일성 보장은 위 `test_save_then_reload_matches`가 이미 API 레벨에서 맡고 있다.
 10. **정리**: 테스트용 KK 노트를 삭제 후 재저장해 원본 데이터로 복원, 재오픈으로 복원 확인.
 
 ## Codex 모드A(독립 코드 검수) 반영

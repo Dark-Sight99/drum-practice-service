@@ -40,3 +40,8 @@ INFO:     127.0.0.1:54399 - "GET /songs HTTP/1.1" 200 OK
 INFO:     127.0.0.1:53300 - "GET /songs/2/drumscore HTTP/1.1" 200 OK
 INFO:     127.0.0.1:62792 - "GET /songs HTTP/1.1" 200 OK
 INFO:     127.0.0.1:64647 - "GET /songs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55410 - "GET /auth/me HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55412 - "GET /auth/me HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61254 - "GET /songs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57501 - "GET /songs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49855 - "GET /songs/2/drumscore HTTP/1.1" 200 OK
