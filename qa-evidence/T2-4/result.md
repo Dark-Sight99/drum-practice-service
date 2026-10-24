@@ -62,6 +62,18 @@ Codex 모드A(독립 코드 검수, `codex-modeA.md`)가 REQUEST_CHANGES로 지�
 
 수정 후 `App.tsx`를 원래 최소 상태로 되돌리고 `tsc -b`/`oxlint`/`prettier --check`/`vitest run`을 재실행 — 전부 클린, 74/74 통과. 원자료: `reverify-20261024.txt`.
 
+## Codex 모드B 검수 반영 — C-002(권장, 반영 완료)
+Codex 모드B(`codex-modeB.md`, 1차 APPROVE) 권장 사항:
+> `PracticeCanvas.tsx:107-112, 173-180` 재생 중에도 루프 설정 입력이 활성화되어 있습니다. 입력을 바꾸면 `loopRef`와 진행률 표시는 갱신되지만, 이미 시작한 `playDrumScore`의 Transport 루프 설정은 바뀌지 않습니다.
+
+**확인**: 맞는 지적 — BPM·루프 설정은 재생 시작 시점에 `playDrumScore` 호출 인자로 한 번만 전달되고(`handlePlay`), Transport에 이미 스케줄된 재생 중엔 반영되지 않음. 재생 중 입력을 그대로 둘 수 있게 하면 "바꿨는데 왜 안 들리지" 하는 혼란을 줄 수 있음.
+
+**반영**: BPM 슬라이더·숫자 입력, A-B 루프 체크박스·마디 입력 5개 모두 `disabled={isPlaying}` 추가 — 재생 중엔 잠기고 정지 후에만 바꿀 수 있게 함.
+
+**재검증(실제 브라우저)**: 재생 버튼 클릭 → BPM 슬라이더·숫자 입력·A-B 루프 체크박스가 모두 흐리게(비활성) 표시됨을 스크린샷으로 확인. 정지 후 콘솔 에러 0건.
+
+수정 후 `App.tsx`를 원래 최소 상태로 되돌리고 `tsc -b`/`oxlint`/`prettier --check`/`vitest run`을 재실행 — 전부 클린, 74/74 통과. 원자료: `reverify-20261024.txt`(갱신).
+
 ## 가정/한계
 - BPM 슬라이더는 정수 단위(소수점 BPM 입력 불필요).
 - A-B 루프 마디 범위는 UI에서 1-기준 표시, 내부는 0-기준(반열림).

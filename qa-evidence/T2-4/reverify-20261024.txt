@@ -1,4 +1,4 @@
-=== 재검증(2026-10-24, C-001 수정 + prettier --write 후) ===
+=== 재검증(2026-10-24, C-002 수정 후, App.tsx 원복 후) ===
 
 === npx tsc -b ===
 exit: 0
@@ -18,7 +18,7 @@ exit: 0
 
  Test Files  9 passed (9)
       Tests  74 passed (74)
-   Start at  09:41:21
-   Duration  1.42s (environment 81%, setup 12%, import 3%, tests 2%, worker 1%, transform 1%)
+   Start at  09:44:09
+   Duration  1.43s (environment 82%, setup 12%, import 3%, tests 2%, transform 1%, worker 1%)
 
 exit: 0

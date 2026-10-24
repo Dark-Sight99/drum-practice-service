@@ -284,12 +284,16 @@ export function PracticeCanvas({ score, barsVisible = 2 }: PracticeCanvasProps) 
 
         <label style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
           BPM
+          {/* 재생 시작 시점의 BPM/루프 설정으로 Transport가 이미 스케줄돼 있어,
+           * 재생 중 바꿔도 지금 재생엔 반영 안 됨(다음 재생부터 적용) — 혼란을
+           * 막기 위해 재생 중엔 잠금(Codex 모드B 권장 C-002). */}
           <input
             type="range"
             min={minBpm}
             max={maxBpm}
             value={playbackBpm}
             onChange={(e) => setPlaybackBpm(clampBpm(Number(e.target.value)))}
+            disabled={isPlaying}
           />
           <input
             type="number"
@@ -297,6 +301,7 @@ export function PracticeCanvas({ score, barsVisible = 2 }: PracticeCanvasProps) 
             max={maxBpm}
             value={playbackBpm}
             onChange={(e) => setPlaybackBpm(clampBpm(Number(e.target.value)))}
+            disabled={isPlaying}
             style={{ width: 56 }}
           />
           <span style={{ color: 'var(--text-muted)' }}>
@@ -309,6 +314,7 @@ export function PracticeCanvas({ score, barsVisible = 2 }: PracticeCanvasProps) 
             type="checkbox"
             checked={loopEnabled}
             onChange={(e) => setLoopEnabled(e.target.checked)}
+            disabled={isPlaying}
           />
           ⟲ A-B 루프
         </label>
@@ -325,6 +331,7 @@ export function PracticeCanvas({ score, barsVisible = 2 }: PracticeCanvasProps) 
                 setLoopStartBar1(next)
                 if (next >= loopEndBar1) setLoopEndBar1(Math.min(totalBars, next + 1))
               }}
+              disabled={isPlaying}
               style={{ width: 48 }}
             />
             <span>~</span>
@@ -338,6 +345,7 @@ export function PracticeCanvas({ score, barsVisible = 2 }: PracticeCanvasProps) 
                 setLoopEndBar1(next)
                 if (next <= loopStartBar1) setLoopStartBar1(Math.max(1, next - 1))
               }}
+              disabled={isPlaying}
               style={{ width: 48 }}
             />
           </div>
