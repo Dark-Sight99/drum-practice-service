@@ -4,3 +4,10 @@ sqlalchemy
 alembic
 argon2-cffi
 python-multipart
+
+# T3-1(REQ-01) Demucs 분리 — torch/torchaudio는 이 파일로 설치하지 않는다.
+# CUDA 빌드가 필요해 별도 index-url로 먼저 설치해야 함(qa-evidence/T0-1/INSTALL.md
+# 참조: `pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu128`).
+# 그 다음에 아래를 설치(demucs가 이미 깔린 torch를 그대로 씀).
+demucs
+numpy
