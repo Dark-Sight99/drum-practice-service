@@ -28,3 +28,11 @@ grep exit code: 1(1=매치 없음=머리글을 그리는 코드가 없었음을 
 명령: grep -n "LANES\[laneIndex\]\.label" app/web/src/render/laneRenderer.ts
 291:        ctx.fillText(LANES[laneIndex].label, laneCenterX, LANE_HEADER_HEIGHT / 2)
 grep exit code: 0
+
+===== 레인 머리글 관련 전수 검사(Codex 모드B 2차 지적 반영 — 더 넓은 패턴) =====
+명령: git show main:app/web/src/render/laneRenderer.ts | grep -n "fillText"
+254:              ctx.fillText(label, laneCenterX, y - shapeBottomExtent(shape, noteSize) - 2)
+grep exit code: 0
+
+명령: git show main:app/web/src/render/laneRenderer.ts | wc -l (전체 줄 수 — 함수 전체를 다 봤다는 근거로)
+283
