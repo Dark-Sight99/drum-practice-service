@@ -1,4 +1,4 @@
-> 한 줄 요약: 연습 화면 레인(노트 낙하)+드럼킷 점등+마디/박선 렌더러 구현. Canvas 2D, 순수 좌표계산은 단위 테스트, 실제 그리기·fps는 실제 브라우저로 검증 — 실측 60.1fps 달성, 실제 버그 2건(오디오 재생 예외, fps 저하 원인) 발견·수정. Codex 모드A 지적 C-001(정지 중 킷 점등 고정)도 수정·재검증 완료.
+> 한 줄 요약: 연습 화면 레인(노트 낙하)+드럼킷 점등+마디/박선 렌더러 구현. Canvas 2D, 순수 좌표계산은 단위 테스트, 실제 그리기·fps는 실제 브라우저로 검증 — 실측 약 60fps(원자료 포함 재측정 59.94fps) 달성, 실제 버그 2건(오디오 재생 예외, fps 저하 원인) 발견·수정. Codex 모드A 지적 C-001(정지 중 킷 점등 고정)·모드B 지적(QA 원자료 부족)도 수정·보강·재검증 완료.
 
 # T2-3 보고
 
@@ -18,11 +18,11 @@
 ## 구현 근거 (실행 결과로 확인)
 - jsdom에서 `document.createElement('canvas').getContext('2d')`가 `null`을 반환함(실제 실행으로 확인) — T2-2와 같은 사유로 순수 계산만 단위 테스트, Canvas 그리기·fps는 실제 브라우저 수동 QA.
 - **실제 버그 1(재생 시 예외)**: `Uncaught Error: buffer is either not set or not loaded`가 Transport 예약 콜백에서 발생 — 디버깅 중 두 가지 잘못된 가설(메트로놈 선행 실행 문제, 단순 AudioContext 미시작)을 거친 끝에, (1) `createDrumVoices()`에 `await Tone.start()` 누락, (2) `PracticeCanvas`가 `playDrumScore()`의 `PlaybackHandle`을 추적 안 해 정지/언마운트 시 제대로 정리 못함 — 두 가지를 모두 수정. 완전히 새 브라우저 탭에서 전 구간(카운트인+9개 노트) 재생해 콘솔 에러 0건 재확인(`qa-evidence/T2-3/result.md`).
-- **실제 버그 2(fps 30)**: `requestAnimationFrame` 180프레임 실측 결과 평균 33.3ms/프레임(≈30fps, REQ-06 목표 60fps 미달). 원인: 렌더 루프가 매 프레임 `setActivePieces(새 Set)`을 호출해 활성 피스가 안 바뀌는 프레임에도 React가 전체 리렌더. 직전 프레임과 내용이 같으면 `setState`를 스킵하도록 수정 — 재검증 결과 평균 16.6ms/프레임(**60.1fps**).
+- **실제 버그 2(fps 30)**: `requestAnimationFrame` 180프레임 실측 결과 평균 33.3ms/프레임(≈30fps, REQ-06 목표 60fps 미달). 원인: 렌더 루프가 매 프레임 `setActivePieces(새 Set)`을 호출해 활성 피스가 안 바뀌는 프레임에도 React가 전체 리렌더. 직전 프레임과 내용이 같으면 `setState`를 스킵하도록 수정 — 재검증 결과 평균 16.6ms/프레임(**약 60fps**; 이후 모드B 지적으로 원자료와 함께 재측정한 값은 평균 16.68ms/59.94fps, 아래 "Codex 모드B 검수 반영" 참고).
 - `pixelsPerSecond`·`barBeatLines` 설계 오류 2건을 단위 테스트 작성 중(실행 결과로) 발견·정정 — `qa-evidence/T2-3/result.md` §발견한 설계 오류.
 
 ## 실행한 검증
-`qa-evidence/T2-3/result.md`, `raw_log.txt` — tsc/oxlint/prettier/vitest(65/65) PASS. 실제 브라우저로 모양 확인, 재생 전체 구간 에러 0건, fps 실측(60.1), 반응형 스크린샷 3종(`screenshot-phone-portrait.jpg`, `screenshot-tablet.jpg`, `screenshot-pc.jpg`).
+`qa-evidence/T2-3/result.md`, `raw_log.txt`, `reverify-20261024.txt` — tsc/oxlint/prettier/vitest(65/65) PASS. 실제 브라우저로 모양 확인, 재생 전체 구간 에러 0건, fps 실측(원자료 포함, 평균 59.94fps), 반응형 스크린샷 3종(`screenshot-phone-portrait.jpg`, `screenshot-tablet.jpg`, `screenshot-pc.jpg`).
 
 ## 가정
 - 드럼킷 일러스트는 단순 도형(Q-09 의뢰인 승인 대기).
@@ -45,6 +45,7 @@
 - **C-001(확인됨)**: fps 60.1 등 수치가 `raw_log.txt`에 원자료 없이 요약만 있어 대조 불가. → Claude Browser pane에서 8마디 밀도 패턴으로 fps 재측정, `requestAnimationFrame` 180프레임 간격 원자료(JSON)를 `raw_log.txt` §5에 보존(평균 59.94fps, 목표 충족).
 - **C-002(확인됨)**: 65/65 테스트 통과가 C-001 수정 이전의 과거 실행 기록이었음. → C-001 수정 후 `tsc -b`/`oxlint`/`prettier --check`/`vitest run`을 다시 실행해 실제 명령 출력을 `reverify-20261024.txt`에 저장(65/65 재확인).
 - 권장 사항 C-004(폰 세로 "축소 아이콘" 미구현)는 이미 `work/T2-3/plan.md`·`qa-evidence/T2-3/result.md` §가정에 명시된 의도적 범위 축소(Q-09 의뢰인 디자인 승인 대기) — 추가 수정 없음.
+- 2차 재검수(`codex-modeB-2.md`) 판정: **APPROVE**. 권장 사항 C-003(보고서 앞부분 fps 수치가 60.1로 남아 일관성 없음)을 반영해 이 문서의 fps 수치를 원자료 기준(59.94fps)으로 통일.
 
 ## 남은 문제
 - T2-4가 BPM 슬라이더·A-B 루프를 이 렌더러에 연결.
