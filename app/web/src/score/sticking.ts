@@ -20,14 +20,28 @@ export const STICKING_PIECE_RULES: Partial<Record<DrumPiece, 'R' | 'RF'>> = {
 const COINCIDENCE_TRIGGER_PIECES: readonly DrumPiece[] = ['hihat_closed', 'hihat_open', 'ride']
 const FILL_PIECES: readonly DrumPiece[] = ['snare', 'tom_high', 'tom_mid', 'tom_floor']
 
-/** 고정 'R' 배정 피스들의 우선순위(앞쪽이 높음) — 같은 틱에 둘 이상이 겹치면
- * 우선순위가 낮은 쪽을 'L'로 보낸다. 한 손이 같은 순간 두 악기를 칠 수 없다는
- * 물리적 제약을 반영(T2-11, Phase 2 게이트 4차 피드백 "HH 계속 치면서 SN을 R/L
- * 번갈아 치는 게 물리적으로 가능한가" 질문을 조사하다가, 실제 곡 데이터에서
- * 하이햇·크래시가 같은 틱에 둘 다 'R'로 배정된 사례를 발견해 등록). 하이햇/라이드는
- * 통상 타임키핑을 담당해 손을 유지하고, 크래시는 액센트라 손을 비켜주는 쪽이 더
- * 자연스럽다고 판단했지만 전문 검증은 안 된 휴리스틱(Q-11에 포함). */
+/** 고정 'R' 배정 피스들의 우선순위(앞쪽이 높음) — 같은 틱(또는 "거의 동시"로 볼
+ * 허용폭 이내)에 둘 이상이 겹치면 우선순위가 낮은 쪽을 'L'로 보낸다. 한 손이
+ * 같은 순간 두 악기를 칠 수 없다는 물리적 제약을 반영(T2-11, Phase 2 게이트 4차
+ * 피드백 "HH 계속 치면서 SN을 R/L 번갈아 치는 게 물리적으로 가능한가" 질문을
+ * 조사하다가, 실제 곡 데이터에서 하이햇·크래시가 같은 틱에 둘 다 'R'로 배정된
+ * 사례를 발견해 등록). 하이햇/라이드는 통상 타임키핑을 담당해 손을 유지하고,
+ * 크래시는 액센트라 손을 비켜주는 쪽이 더 자연스럽다고 판단했지만 전문 검증은
+ * 안 된 휴리스틱(Q-11에 포함). */
 const FIXED_HAND_PRIORITY: readonly DrumPiece[] = ['hihat_closed', 'hihat_open', 'ride', 'crash']
+
+/** "거의 동시"로 볼 틱 허용폭 — ppq를 이 값으로 나눔. T2-11에선 정확히 같은 틱만
+ * 검사했는데, 의뢰인이 제공한 실제 화면에서 하이햇·크래시가 겨우 4틱(이 곡
+ * 기준 약 9ms) 떨어진 서로 다른 틱인데도 둘 다 'R'로 남아있는 사례를 지적
+ * (T2-12, Phase 2 게이트 5차 피드백) — "정확히 같은 틱"이라는 조건이 너무 좁아
+ * 사실상 동시인 근접 틱을 놓쳤다. ppq/16(120bpm·ppq=220 기준 약 31ms)은
+ * REQ-04의 ±30ms 동기 허용 오차와 비슷한 크기로 골랐지만, 초당 틱 수는 BPM에
+ * 따라 달라져 정확히 고정된 ms값은 아니다 — 전문 검증 안 된 휴리스틱(Q-11). */
+const SIMULTANEOUS_TICK_TOLERANCE_DIVISOR = 16
+
+function simultaneousToleranceTicks(ppq: number): number {
+  return ppq / SIMULTANEOUS_TICK_TOLERANCE_DIVISOR
+}
 
 function otherHand(hand: 'R' | 'L'): 'R' | 'L' {
   return hand === 'R' ? 'L' : 'R'
@@ -54,34 +68,35 @@ export function recommendSticking(
 ): DrumNote[] {
   const order = orderByTick(notes)
   const maxGap = fillRunMaxGapTicks(ppq)
+  const simulTol = simultaneousToleranceTicks(ppq)
 
-  // 같은 틱에 하이햇/라이드가 있는지 빠르게 찾기 위한 보조 맵.
-  const coincidenceTicks = new Set<number>()
-  for (const note of notes) {
-    if (COINCIDENCE_TRIGGER_PIECES.includes(note.piece)) coincidenceTicks.add(note.tick)
+  // 하이햇/라이드가 있는 틱들(정확히 같은 틱이 아니라도 허용폭 이내면 "동시"로
+  // 본다 — T2-12, 아래 SIMULTANEOUS_TICK_TOLERANCE_DIVISOR 설명 참조) 정렬된
+  // 배열로 보관해 이분 탐색으로 빠르게 찾는다.
+  const coincidenceTicksSorted = notes
+    .filter((n) => COINCIDENCE_TRIGGER_PIECES.includes(n.piece))
+    .map((n) => n.tick)
+    .sort((a, b) => a - b)
+  function hasCoincidenceWithinTolerance(tick: number): boolean {
+    return coincidenceTicksSorted.some((t) => Math.abs(t - tick) <= simulTol)
   }
 
-  // 같은 틱에 고정 'R' 피스가 둘 이상 겹치는지 빠르게 찾기 위한 보조 맵(틱 →
-  // 그 틱에 실제로 'R'을 쥐고 있는 고정 피스 집합) — T2-11, 위 FIXED_HAND_PRIORITY
-  // 설명 참조. 사용자가 직접 'R'이 아닌 손으로 지정한 노트는 그 틱에서 'R'을 쥐고
-  // 있지 않으므로 제외한다 — 안 그러면(Codex 모드A 지적) 사용자가 하이햇을 'L'로
-  // 직접 바꿔놔도 그 틱의 크래시가 "하이햇이 R을 쥐고 있다"고 잘못 보고 'L'로
-  // 밀려나, 실제로는 비어 있는 'R' 대신 하이햇과 크래시가 둘 다 'L'로 겹치는
-  // 새 충돌을 만들 수 있었다.
-  const fixedHandTicks = new Map<number, Set<DrumPiece>>()
-  for (const note of notes) {
-    if (!FIXED_HAND_PRIORITY.includes(note.piece)) continue
-    if (note.handSource === 'user' && note.hand !== 'R') continue
-    const set = fixedHandTicks.get(note.tick) ?? new Set<DrumPiece>()
-    set.add(note.piece)
-    fixedHandTicks.set(note.tick, set)
-  }
-  function hasHigherPriorityAtSameTick(piece: DrumPiece, tick: number): boolean {
-    const set = fixedHandTicks.get(tick)
-    if (!set) return false
+  // 고정 'R' 피스가 둘 이상 "거의 동시"에 겹치는지 찾기 위한 보조 배열(틱 오름차순
+  // {tick, piece} 목록) — T2-11, 위 FIXED_HAND_PRIORITY 설명 참조. 사용자가 직접
+  // 'R'이 아닌 손으로 지정한 노트는 그 틱에서 'R'을 쥐고 있지 않으므로 제외한다 —
+  // 안 그러면(Codex 모드A 지적) 사용자가 하이햇을 'L'로 직접 바꿔놔도 그 틱의
+  // 크래시가 "하이햇이 R을 쥐고 있다"고 잘못 보고 'L'로 밀려나, 실제로는 비어
+  // 있는 'R' 대신 하이햇과 크래시가 둘 다 'L'로 겹치는 새 충돌을 만들 수 있었다.
+  const fixedHandNotes = notes
+    .filter((n) => FIXED_HAND_PRIORITY.includes(n.piece) && !(n.handSource === 'user' && n.hand !== 'R'))
+    .map((n) => ({ tick: n.tick, piece: n.piece }))
+    .sort((a, b) => a.tick - b.tick)
+  function hasHigherPriorityWithinTolerance(piece: DrumPiece, tick: number): boolean {
     const myRank = FIXED_HAND_PRIORITY.indexOf(piece)
-    for (const other of set) {
-      if (other !== piece && FIXED_HAND_PRIORITY.indexOf(other) < myRank) return true
+    for (const entry of fixedHandNotes) {
+      if (entry.tick < tick - simulTol) continue
+      if (entry.tick > tick + simulTol) break
+      if (entry.piece !== piece && FIXED_HAND_PRIORITY.indexOf(entry.piece) < myRank) return true
     }
     return false
   }
@@ -112,12 +127,12 @@ export function recommendSticking(
       // 동시에 두 악기를 칠 수 없으므로 우선순위가 낮은 쪽을 'L'로 보낸다
       // (T2-11 — 'RF'인 킥은 발이라 손 충돌과 무관, 검사 대상 아님).
       const hand =
-        pieceRule === 'R' && hasHigherPriorityAtSameTick(note.piece, note.tick) ? 'L' : pieceRule
+        pieceRule === 'R' && hasHigherPriorityWithinTolerance(note.piece, note.tick) ? 'L' : pieceRule
       result[i] = { ...note, hand, handSource: 'auto' }
       continue
     }
 
-    if (note.piece === 'snare' && coincidenceTicks.has(note.tick)) {
+    if (note.piece === 'snare' && hasCoincidenceWithinTolerance(note.tick)) {
       result[i] = { ...note, hand: 'L', handSource: 'auto' }
       if (FILL_PIECES.includes(note.piece)) {
         fillPosition = prevFillTick !== null && note.tick - prevFillTick <= maxGap ? fillPosition + 1 : 0
