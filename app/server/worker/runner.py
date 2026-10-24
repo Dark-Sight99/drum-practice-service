@@ -89,20 +89,21 @@ def _race_window_hook() -> None:
 
 
 def _run_job(db: Session, job: Job) -> None:
+    # 모드A 지적(C-001): "핸들러 없음" 분기가 _sync_song_status_with_job() 호출
+    # 전에 조기 return하면, 이 Job의 Song이 PROCESSING이었을 경우(다른 핸들러가
+    # 이미 그렇게 맞춰놓고 죽은 뒤 이 Job이 재시도되는 등) 안전망을 영영 못 받는다.
+    # 두 분기 다 끝에서 같은 안전망을 거치도록 공통 경로로 합친다.
     handler = get_handler(job.job_type)
     if handler is None:
         job.status = JobStatus.FAILED
         job.error_message = f"'{job.job_type.value}' 처리 로직이 아직 구현되지 않았습니다"
-        job.completed_at = utcnow_naive()
-        db.commit()
-        return
-
-    try:
-        handler(job)
-        job.status = JobStatus.COMPLETED
-    except Exception as exc:  # noqa: BLE001 — 작업 핸들러가 뭘 던지든 큐가 멈추면 안 된다
-        job.status = JobStatus.FAILED
-        job.error_message = str(exc)[:2000]
+    else:
+        try:
+            handler(job)
+            job.status = JobStatus.COMPLETED
+        except Exception as exc:  # noqa: BLE001 — 핸들러가 뭘 던지든 큐가 멈추면 안 된다
+            job.status = JobStatus.FAILED
+            job.error_message = str(exc)[:2000]
     job.completed_at = utcnow_naive()
     db.commit()
     _sync_song_status_with_job(db, job)

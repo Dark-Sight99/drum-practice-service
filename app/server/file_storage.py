@@ -14,7 +14,7 @@ Codex 모드C C-001: 업로드 원본 파일명은 신뢰하지 않는다 — �
 
 import os
 import uuid
-from collections.abc import Iterable
+from collections.abc import AsyncIterable
 from pathlib import Path
 
 SERVER_ROOT = Path(__file__).resolve().parent
@@ -68,25 +68,38 @@ def write_song_file(song_id: int, fixed_filename: str, content: bytes) -> str:
     return f"{song_id}/{fixed_filename}"
 
 
-def write_song_file_streaming(
-    song_id: int, fixed_filename: str, chunks: Iterable[bytes]
+class UploadTooLargeError(Exception):
+    """write_song_file_streaming 도중 누적 바이트 수가 max_bytes를 넘었을 때."""
+
+
+async def write_song_file_streaming(
+    song_id: int,
+    fixed_filename: str,
+    chunks: AsyncIterable[bytes],
+    max_bytes: int | None = None,
 ) -> str:
     """`write_song_file()`과 같은 보장(요청별 고유 임시 파일 → 전체를 다 쓴 뒤에만
     `Path.replace()`로 원자적 교체 → 예외 시 임시 파일 정리)을 그대로 따르되,
-    `content: bytes` 하나를 받는 대신 청크 이터러블을 받아 메모리에 전체를 모으지
-    않고 임시 파일에 순차적으로 쓴다(T3-1 REQ-01, 100MB 음원 업로드가 메모리에
-    두 번(청크 리스트+join) 안 올라가게 하기 위함 — work/T3-1/plan.md 모드C C-005).
-
-    업로드가 중간에(예: 크기 상한 초과) 중단돼 호출자가 예외를 던지면, 이 함수는
-    아직 `replace()`하기 전이므로 `fixed_filename`엔 아무 영향이 없고 임시 파일만
-    `finally`에서 지워진다 — 불완전한 최종 파일이 남지 않는다(모드C C-012).
+    `content: bytes` 하나를 받는 대신 **비동기** 청크 이터러블을 받아 청크가
+    도착하는 대로 임시 파일에 바로 쓴다 — 호출자가 청크를 리스트로 전부 모았다가
+    넘기면(T3-1 1차 구현의 실수) 결국 파일 크기만큼 메모리에 다 올라가 있는
+    상태라 "스트리밍"이 이름뿐이게 된다(Codex 모드A 지적 C-002, 실제 구현 리뷰로
+    발견). `max_bytes`를 주면 누적 크기가 넘는 순간 `UploadTooLargeError`를 던지고
+    임시 파일을 즉시 지운다 — 아직 `replace()` 전이라 불완전한 최종 파일이
+    안 남는다(work/T3-1/plan.md 모드C C-012의 원자성 보장 그대로 유지).
     """
     directory = song_storage_dir(song_id)
     target = _ensure_within_songs_root(directory / fixed_filename)
     tmp_target = _ensure_within_songs_root(directory / f"{fixed_filename}.{uuid.uuid4().hex}.tmp")
+    total = 0
     try:
         with tmp_target.open("wb") as f:
-            for chunk in chunks:
+            async for chunk in chunks:
+                total += len(chunk)
+                if max_bytes is not None and total > max_bytes:
+                    raise UploadTooLargeError(
+                        f"업로드 크기가 상한({max_bytes}바이트)을 넘었습니다"
+                    )
                 f.write(chunk)
         tmp_target.replace(target)
     finally:

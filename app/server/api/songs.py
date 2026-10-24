@@ -10,6 +10,7 @@ JSON을 저장만 한다(T1-5 결정: 경로 C 파싱은 브라우저 전담).
 원본만 저장하고 Demucs 분리 작업을 큐에 넣는다(실제 분리는 worker가 비동기 처리).
 """
 
+from collections.abc import AsyncIterator
 from pathlib import Path
 
 from fastapi import (
@@ -31,6 +32,7 @@ from api.deps import get_current_user, get_db
 from api.schemas import DrumScoreIn
 from db.models import Asset, AssetKind, Job, JobType, Song, SongSourceType, SongStatus, User
 from file_storage import (
+    UploadTooLargeError,
     delete_song_files,
     resolve_asset_path,
     write_song_file,
@@ -183,6 +185,19 @@ class AudioUploadOut(BaseModel):
     job_id: int
 
 
+async def _iter_upload_chunks(
+    file: UploadFile, chunk_size: int = 1024 * 1024
+) -> AsyncIterator[bytes]:
+    """`UploadFile.read()`를 청크 단위 비동기 이터레이터로 감싼다 — 호출자가
+    청크를 리스트에 모으지 않고 `write_song_file_streaming`에 그대로 넘겨
+    도착하는 즉시 디스크에 쓸 수 있게 한다(모드A C-002)."""
+    while True:
+        chunk = await file.read(chunk_size)
+        if not chunk:
+            break
+        yield chunk
+
+
 @router.post("/audio", response_model=AudioUploadOut, status_code=status.HTTP_201_CREATED)
 async def upload_audio(
     file: UploadFile = File(...),
@@ -202,23 +217,6 @@ async def upload_audio(
             status.HTTP_400_BAD_REQUEST, f"지원하지 않는 음원 형식: {ext or '(확장자 없음)'}"
         )
 
-    # work/T3-1/plan.md 모드C C-005: 청크를 리스트에 모았다 b"".join()으로 다시
-    # 합치지 않고(메모리 2배), 모은 청크를 그대로 write_song_file_streaming에
-    # 넘겨 임시 파일에 순차적으로만 쓴다(결합된 사본을 따로 안 만듦).
-    chunks: list[bytes] = []
-    total_bytes = 0
-    chunk_size = 1024 * 1024
-    while True:
-        chunk = await file.read(chunk_size)
-        if not chunk:
-            break
-        total_bytes += len(chunk)
-        if total_bytes > MAX_AUDIO_UPLOAD_BYTES:
-            raise HTTPException(
-                status.HTTP_413_CONTENT_TOO_LARGE, "파일이 너무 큽니다(100MB 제한)"
-            )
-        chunks.append(chunk)
-
     song = Song(
         user_id=user.id,
         title=title,
@@ -231,11 +229,29 @@ async def upload_audio(
     db.refresh(song)
 
     try:
-        original_path = write_song_file_streaming(song.id, f"original{ext}", chunks)
+        # 모드A 지적 C-002: 이전 버전은 청크를 리스트에 전부 모았다가 넘겨서
+        # write_song_file_streaming이 받기 전에 이미 파일 크기만큼 메모리에
+        # 올라가 있었다(스트리밍이 이름뿐이었음) — 이제 file.read()를 그대로
+        # 비동기 제너레이터로 감싸 청크가 도착하는 즉시 디스크에 쓰고, 크기
+        # 초과 검사도 write_song_file_streaming 내부에서 같은 루프 중에 한다.
+        original_path = await write_song_file_streaming(
+            song.id,
+            f"original{ext}",
+            _iter_upload_chunks(file),
+            max_bytes=MAX_AUDIO_UPLOAD_BYTES,
+        )
         db.add(Asset(song_id=song.id, kind=AssetKind.ORIGINAL, file_path=original_path))
         job = Job(user_id=user.id, song_id=song.id, job_type=JobType.SEPARATE)
         db.add(job)
         db.commit()
+    except UploadTooLargeError:
+        db.rollback()
+        delete_song_files(song.id)
+        db.query(Song).filter(Song.id == song.id).delete()
+        db.commit()
+        raise HTTPException(
+            status.HTTP_413_CONTENT_TOO_LARGE, "파일이 너무 큽니다(100MB 제한)"
+        ) from None
     except Exception as exc:
         db.rollback()
         delete_song_files(song.id)

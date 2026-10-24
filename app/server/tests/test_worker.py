@@ -80,6 +80,24 @@ def test_job_without_registered_handler_fails_cleanly(db) -> None:
     assert result.completed_at is not None
 
 
+def test_job_without_registered_handler_also_rescues_song_stuck_processing(db) -> None:
+    """모드A 지적(C-001) — "핸들러 없음" 분기도 _sync_song_status_with_job을 거쳐야
+    한다. 핸들러가 없는 작업이라도 그 Song이 PROCESSING으로 남아있으면 FAILED로
+    맞춰야 사용자 눈에 "영원히 처리중"으로 안 보인다."""
+    user, song = _make_user_and_song(db)
+    song.status = SongStatus.PROCESSING
+    db.commit()
+    job = Job(user_id=user.id, song_id=song.id, job_type=JobType.TRANSCRIBE)
+    db.add(job)
+    db.commit()
+
+    result = process_next_job(db)
+
+    assert result.status == JobStatus.FAILED
+    db.refresh(song)
+    assert song.status == SongStatus.FAILED
+
+
 def test_handler_exception_marks_job_failed_with_message(db) -> None:
     user, song = _make_user_and_song(db)
 

@@ -19,10 +19,15 @@ REQ-01 오디오 분리 — mp3/wav/m4a/flac 업로드 → Demucs로 drums/bass/
 2차 "수정 후 진행"(필수 1건: Asset 커밋 실패도 정리 대상에 포함) → 반영.
 3차 BLOCKING(Asset 커밋 실패가 의사코드에 안 보임, Song 실패 커밋 자체가 실패하는 경우 복구 안 됨) — `intent/06-pipeline.md` 최대 3회 규칙에 따라 마스터가 직접 판단: §3을 확정 의사코드로 재작성 + `_run_job()` 레벨 공용 안전망(`_sync_song_status_with_job`) 신규 설계로 간극을 구조적으로 닫음(plan.md "마스터 최종 판단" 절에 사유 기록).
 
+## Codex 모드A(코드 검수) 지적·반영
+REQUEST_CHANGES 1회 — 둘 다 반영:
+- **C-001(필수)**: `worker/runner.py`의 `_run_job()`에서 "핸들러 없음" 분기가 `_sync_song_status_with_job()` 호출 전에 조기 `return`해, 그 경로에선 안전망이 전혀 작동 안 했음 — 두 분기(핸들러 없음/핸들러 실행)를 하나의 공통 종료 경로로 합쳐 항상 안전망을 거치도록 수정. 회귀 테스트(`test_job_without_registered_handler_also_rescues_song_stuck_processing`) 추가.
+- **C-002(권장)**: `write_song_file_streaming()`이 "청크 이터러블을 받는다"고만 해놓고, 실제 호출부(`api/songs.py`)는 업로드를 리스트에 전부 모은 뒤에야 넘겨서 사실상 스트리밍이 아니었음(100MB까지 메모리에 그대로 쌓임) — `write_song_file_streaming`을 `async def`+`AsyncIterable[bytes]`로 바꾸고 크기 상한(`max_bytes`)도 내부에서 같은 루프 중에 검사(`UploadTooLargeError`)하도록 재설계, `api/songs.py`는 `UploadFile.read()`를 그대로 비동기 제너레이터(`_iter_upload_chunks`)로 감싸 넘기기만 함 — 이제 한 번에 메모리에 있는 건 청크 하나(1MB)뿐. 전용 단위 테스트(`test_file_storage_streaming.py`, 3개) 신규 추가.
+
 ## QA 증거
 
 ### 자동 테스트
-- `pytest`: **103개 전부 통과**(`pytest_output.txt`, 기존 81개 + 신규 22개).
+- `pytest`: **107개 전부 통과**(`pytest_output.txt`, 기존 81개 + 신규 26개 — 모드A 반영 후 재집계).
   - `test_demucs_separator.py`(4개): 커맨드 조립, 비정상 종료 처리, stem 누락 처리, device auto 선택 — subprocess monkeypatch.
   - `test_separate_handler.py`(4개): 성공 시 Asset 4개+Song.COMPLETED, Demucs 실패 시 Song.FAILED+재발생, **부분 stem 쓰기 실패 시 이번 시도분만 정리**(C-002/C-011 직접 재현), **ORIGINAL 에셋 누락 시에도 Song.FAILED**(단위 테스트 작성 중 직접 발견한 간극 — 최초 구현은 이 경로가 Song.PROCESSING에 멈추는 버그였음, 즉시 수정).
   - `test_worker.py`(+6개): `recover_orphaned_jobs`가 Song도 복구, 안전망이 정상 흐름에선 no-op, Job 실패/성공 양쪽에서 Song이 PROCESSING에 멈춰있으면 안전망이 FAILED로 맞춤.
