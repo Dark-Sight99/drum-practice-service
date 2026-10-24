@@ -25,9 +25,12 @@
 ## 설계
 
 ### 수정 1(위험 작업 — 모드C 대상): 동기화 버그
-- `render/laneRenderer.ts`: `LaneRenderer.render()`에 `songStartSeconds: number` 파라미터 추가(새 필수 파라미터, `currentTimeSeconds` 바로 다음 — 둘 다 "지금이 절대 시각 기준 언제인지"를 나타내는 값이라 묶어 둠). `noteTimeOf`를 `songStartSeconds + ticksToSeconds(note.tick, score.ppq, playbackBpm) + score.audioOffsetMs/1000`으로 수정.
+- `render/laneRenderer.ts`: `LaneRenderer.render()`에 `songStartSeconds: number` 파라미터 추가(새 필수 파라미터, `currentTimeSeconds` 바로 다음 — 둘 다 "지금이 절대 시각 기준 언제인지"를 나타내는 값이라 묶어 둠). `noteTimeOf`를 `songStartSeconds + ticksToSeconds(note.tick, score.ppq, playbackBpm) + score.audioOffsetMs/1000`으로 수정(이 식 자체는 기존과 동일, `songStartSeconds`만 추가).
 - `features/practice/PracticeCanvas.tsx`: 렌더 루프 안에서 `barSeconds`/`songStartSeconds` 계산을 (이미 진행바 계산에 있던 것을) `renderer.render()` 호출보다 앞으로 끌어올려 같은 값을 렌더러 호출에도 전달. 진행바 계산은 그대로 재사용(중복 계산 제거).
 - 영향 범위: 호출부가 `PracticeCanvas.tsx` 한 곳뿐임을 grep으로 확인 — `LaneRenderer` 타입을 쓰는 다른 테스트 파일 없음(T2-3 때부터 Canvas 렌더러는 전용 테스트 없이 수동 QA로만 검증, jsdom 제약 때문).
+
+### 수정 1-2(Codex 모드C 1차 지적 C-001 반영, 필수): `audioOffsetMs` 비대칭
+`laneRenderer.ts`의 `noteTimeOf`는 `score.audioOffsetMs`를 더하는데, `scorePlayer.ts`의 실제 오디오 스케줄링(`schedule.songStartSeconds + ticksToSeconds(...)`)은 애초부터 이 필드를 전혀 반영하지 않았음(카운트인 오프셋과는 별개의, 기존부터 있던 비대칭) — `audioOffsetMs`가 0이 아닌 곡이 생기면(현재는 `score/import/midiEvents.ts`가 항상 0으로 생성해 실질 영향 없음, Phase 3 오디오-MIDI 정렬(T3-5)에서 실제로 쓰일 값) 화면과 소리가 그만큼 계속 어긋난다. `scorePlayer.ts`의 노트 스케줄 식도 렌더러와 동일하게 `+ score.audioOffsetMs / 1000`을 더해 대칭을 맞춘다(카운트인 클릭 스케줄은 악보 노트가 아니라 메트로놈 프리롤이라 영향 없음, 그대로 둠).
 
 ### 수정 2(위험 작업 아님): 연습 화면 R/L 즉석 계산
 - `PracticeCanvas.tsx`에서 `score.notes`를 렌더러에 그대로 넘기는 대신, `useMemo(() => recommendSticking(score.notes, score.ppq, DEFAULT_START_HAND), [score])`로 계산한 사본을 **렌더링(시각 표시)에만** 사용. 재생(`playDrumScore`)은 `hand`/`handSource`를 전혀 읽지 않으므로 원본 `score` 그대로 사용 — 재생 로직 영향 없음.
@@ -40,4 +43,5 @@
 ## 테스트 계획
 1. `render/laneRenderer.ts`는 전용 단위 테스트가 없음(Canvas, jsdom 한계) — `noteTimeOf` 계산 자체의 정합성은 코드 리뷰+수동 QA로.
 2. 수동 QA(실제 브라우저+서버): MusicDelta_Grunge 재생 → 카운트인 클릭이 끝나는 순간과 곡 첫 노트가 판정선에 닿는 순간이 일치하는지, 중반 노트 몇 개를 눈과 귀로 대조해 판정선 통과 시점과 소리가 같이 나는지 확인. R/L 표시 토글 켜면 레인/킷에 글자·점선이 바로 보이는지(저장 없이) 확인, 편집기에서 직접 지정한 손이 있는 곡이면 그 값이 유지되는지(연습 화면에서 임의로 안 바뀌는지) 확인.
-3. 전체 회귀: `npx tsc -b`/`oxlint`/`vitest run`, 백엔드는 변경 없음(프론트 전용 수정).
+3. **`audioOffsetMs` 비영점 사례**(Codex 모드C 1차 C-001 요구): `audioOffsetMs`를 0이 아닌 값(예: 500ms)으로 설정한 테스트 DrumScore를 만들어 `app/web/src/audio/scorePlayer.ts`의 노트 스케줄 식과 `app/web/src/render/laneRenderer.ts`의 `noteTimeOf`가 같은 값을 내는지 코드 리뷰로 재확인(현재 Phase 2 실제 데이터엔 비영점 값이 없어 수동 브라우저 QA로는 직접 재현 불가 — 코드 대칭성 확인으로 대체, 사유를 QA 증거에 명시).
+4. 전체 회귀: `npx tsc -b`/`oxlint`/`vitest run`, 백엔드는 변경 없음(프론트 전용 수정).
