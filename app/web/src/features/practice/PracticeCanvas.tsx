@@ -11,6 +11,7 @@ import {
   type PlaybackHandle,
 } from '../../audio'
 import type { DrumPiece, DrumScore, Hand } from '../../score/types'
+import { DEFAULT_START_HAND, recommendSticking } from '../../score/sticking'
 import { createLaneRenderer, type LaneRenderer } from '../../render/laneRenderer'
 import { KitIllustration } from '../../render/KitIllustration'
 
@@ -150,15 +151,31 @@ export function PracticeCanvas({ score, barsVisible = 2 }: PracticeCanvasProps) 
   const [progressPercent, setProgressPercent] = useState(0)
   const lastProgressKeyRef = useRef(-1)
 
+  // REQ-12 — 손 정보가 없는(또는 일부만 지정된) 곡도 연습 화면에서 바로 R/L을
+  // 볼 수 있게, 저장 없이 그 자리에서 자동 추천을 계산해 보여준다(편집기에서
+  // "자동 추천 재적용"을 눌러야만 보이던 기존 흐름의 보완 — Phase 2 게이트
+  // 피드백). 재생(`playDrumScore`)은 hand/handSource를 전혀 읽지 않으므로 원본
+  // `score`를 그대로 쓰고, 이 계산 결과는 화면 표시 전용.
+  const displayScore = useMemo<DrumScore>(
+    () => ({ ...score, notes: recommendSticking(score.notes, score.ppq, DEFAULT_START_HAND) }),
+    [score],
+  )
+
   useEffect(() => {
     function loop() {
       const clock = getMasterClock()
       const renderer = rendererRef.current
       const positionSeconds = clock.getPositionSeconds()
+      // T2-8(Phase 2 게이트 피드백) — scorePlayer.ts가 노트 소리를
+      // songStartSeconds(카운트인 길이)만큼 늦춰 스케줄링하므로, 화면도 같은
+      // 기준으로 그려야 판정선 통과 시점과 소리가 맞는다.
+      const barSeconds = barDurationSeconds(score.meta.timeSignature, playbackBpmRef.current)
+      const songStartSeconds = barSeconds * COUNT_IN_BARS
       if (renderer) {
         const rendered = renderer.render(
-          score,
+          displayScore,
           positionSeconds,
+          songStartSeconds,
           barsVisible,
           playbackBpmRef.current,
           showStickingRef.current,
@@ -193,8 +210,7 @@ export function PracticeCanvas({ score, barsVisible = 2 }: PracticeCanvasProps) 
       // 근처의 좁은 구간 안에서만 아주 조금 움직여 사실상 멈춘 것처럼 보임
       // (루프가 꺼져 있을 때만 "곡 전체 대비"가 의미 있는 지표). 루프 중엔 루프
       // 구간 자체를 0~100%로 삼아 "그 구간 안에서 어디까지 왔는지"를 보여준다.
-      const barSeconds = barDurationSeconds(score.meta.timeSignature, playbackBpmRef.current)
-      const songStartSeconds = barSeconds * COUNT_IN_BARS
+      // barSeconds/songStartSeconds는 위에서 렌더러 호출용으로 이미 계산해 재사용.
       const activeLoop = loopRef.current
       let rawPercent = 0
       if (isPlayingRef.current) {
@@ -222,7 +238,7 @@ export function PracticeCanvas({ score, barsVisible = 2 }: PracticeCanvasProps) 
     return () => {
       if (rafIdRef.current !== null) cancelAnimationFrame(rafIdRef.current)
     }
-  }, [score, barsVisible, totalBars])
+  }, [score, displayScore, barsVisible, totalBars])
 
   function stopPlayback() {
     if (!playbackRef.current) return

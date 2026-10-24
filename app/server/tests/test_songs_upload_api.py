@@ -202,6 +202,19 @@ def test_upload_rejects_nan_audio_offset(client: TestClient, db_session) -> None
     assert client.get("/songs").json() == []
 
 
+def test_upload_rejects_nonzero_audio_offset(client: TestClient, db_session) -> None:
+    # T2-8(Codex 모드C 3차 지적, C-001): "유한하기만 하면 통과"였던 이전 검증은
+    # API로 직접 0이 아닌 값을 올리는 경로를 막지 못했다 — 지금은 0만 허용
+    # (Phase 3 오디오-MIDI 정렬 UI 전까지 임시 제한, intent/07-open-questions.md Q-23).
+    _make_user(db_session, "u1")
+    _login(client, "u1")
+    score = _valid_drumscore()
+    score["audioOffsetMs"] = 500.0
+    resp = _upload(client, drumscore=json.dumps(score))
+    assert resp.status_code == 422
+    assert client.get("/songs").json() == []
+
+
 @pytest.mark.parametrize(
     "mutate",
     [

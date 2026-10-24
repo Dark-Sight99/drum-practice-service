@@ -1,0 +1,207 @@
+===== app/web: npx tsc -b =====
+EXIT=0
+
+===== app/web: npx oxlint =====
+EXIT=0
+
+===== app/web: npx vitest run --reporter=verbose =====
+
+ RUN  v5.0.5 C:/Users/Jaewoo/드럼연습서비스/app/web
+
+ ✓ src/score/import/importMidi.test.ts > importMidiBuffer > converts a percussion track to a valid DrumScore 5ms
+ ✓ src/score/import/importMidi.test.ts > importMidiBuffer > ignores notes on non-percussion channels 1ms
+ ✓ src/score/import/importMidi.test.ts > importMidiBuffer > skips GM percussion notes outside our 9-piece classification and counts them 1ms
+ ✓ src/score/import/importMidi.test.ts > importMidiBuffer > returns a safe failure result for corrupt bytes instead of throwing 1ms
+ ✓ src/score/import/importMidi.test.ts > importMidiBuffer > falls back to 120bpm/4-4 when the file has no tempo or time signature events 1ms
+ ✓ src/audio/timing.test.ts > secondsPerBeat > converts common bpm values to quarter-note seconds 1ms
+ ✓ src/audio/timing.test.ts > ticksToSeconds > converts one quarter note (ppq ticks) to the expected seconds at 120bpm 0ms
+ ✓ src/audio/timing.test.ts > ticksToSeconds > scales linearly with tick count 0ms
+ ✓ src/audio/timing.test.ts > ticksToSeconds > works with a different ppq (e.g. Tone.Transport default 192) 0ms
+ ✓ src/audio/timing.test.ts > beatsPerBar > returns the numerator directly for quarter-note subdivision on simple time 0ms
+ ✓ src/audio/timing.test.ts > beatsPerBar > doubles for eighth-note subdivision on simple time 0ms
+ ✓ src/audio/timing.test.ts > beatsPerBar > handles compound time (6/8) correctly for its natural eighth-note pulse 0ms
+ ✓ src/audio/timing.test.ts > barDurationSeconds > matches 4/4 at 120bpm = 2 seconds (count-in reference) 0ms
+ ✓ src/audio/timing.test.ts > barDurationSeconds > matches 6/8 at 120bpm = 1.5 seconds 0ms
+ ✓ src/audio/timing.test.ts > metronomeBeatTimes > generates 4 clicks for one 4/4 bar, first accented, evenly spaced 2ms
+ ✓ src/audio/timing.test.ts > metronomeBeatTimes > repeats the accent pattern across multiple bars 0ms
+ ✓ src/audio/timing.test.ts > metronomeBeatTimes > respects a non-zero start offset (e.g. after count-in) 0ms
+ ✓ src/audio/timing.test.ts > metronomeBeatTimes > supports eighth-note subdivision 0ms
+ ✓ src/audio/timing.test.ts > ticksPerBar > matches 4/4 at 960 ppq (one bar = 4 quarter notes) 0ms
+ ✓ src/audio/timing.test.ts > ticksPerBar > matches 6/8 — bar length is independent of ppq resolution, expressed in quarter-note-equivalent ticks 0ms
+ ✓ src/audio/timing.test.ts > barIndexForTick > tick 0 is bar 0 0ms
+ ✓ src/audio/timing.test.ts > barIndexForTick > a tick exactly at a bar boundary belongs to the new bar, not the previous one 0ms
+ ✓ src/audio/timing.test.ts > barIndexForTick > works across multiple bars 0ms
+ ✓ src/audio/timing.test.ts > computePlaybackSchedule > no loop: playback starts at 0, song starts after count-in, loop fields are null 0ms
+ ✓ src/audio/timing.test.ts > computePlaybackSchedule > loop starting at bar 0 matches the no-loop case exactly 0ms
+ ✓ src/audio/timing.test.ts > computePlaybackSchedule > loop starting mid-song skips ahead: playback starts right before the loop, not at bar 0 0ms
+ ✓ src/audio/timing.test.ts > computePlaybackSchedule > stays well-defined at BPM range boundaries (50%/150% of a typical 120bpm song) 1ms
+ ✓ src/features/editor/grid.test.ts > ticksPerGridUnit > computes ticks for each grid unit at ppq=480 2ms
+ ✓ src/features/editor/grid.test.ts > snapTick > snaps to the nearest grid line 0ms
+ ✓ src/features/editor/grid.test.ts > snapTick > leaves an already-aligned tick unchanged 0ms
+ ✓ src/features/editor/grid.test.ts > snapTick > always returns an integer tick even when ppq is not evenly divisible by the grid divisor (Codex 모드A 지적) 0ms
+ ✓ src/features/editor/grid.test.ts > EDITOR_ROWS / editorRowIndexForPiece > covers every DrumPiece exactly once (Codex 모드C C-009) 1ms
+ ✓ src/features/editor/grid.test.ts > EDITOR_ROWS / editorRowIndexForPiece > finds the correct row index for a piece 0ms
+ ✓ src/features/editor/grid.test.ts > EDITOR_ROWS / editorRowIndexForPiece > returns -1 for an unknown piece (type-cast to simulate bad data) 0ms
+ ✓ src/render/layout.test.ts > LANES > has exactly 8 lanes covering all 9 DrumPieces (hihat shares one lane) 2ms
+ ✓ src/render/layout.test.ts > LANES > finds the hihat lane for both closed and open variants 0ms
+ ✓ src/render/layout.test.ts > LANES > returns -1 for lanes that do not exist (defensive) 0ms
+ ✓ src/render/layout.test.ts > noteYPosition > places a note exactly on the hit line when its time equals current time 0ms
+ ✓ src/render/layout.test.ts > noteYPosition > places a future note above the hit line (smaller Y) 0ms
+ ✓ src/render/layout.test.ts > noteYPosition > places a past note below the hit line (larger Y) 0ms
+ ✓ src/render/layout.test.ts > pixelsPerSecond > decreases speed proportionally as more bars become visible (same lane length holds more music) 0ms
+ ✓ src/render/layout.test.ts > pixelsPerSecond > matches the expected value for 4/4 at 120bpm, 1 bar visible 0ms
+ ✓ src/render/layout.test.ts > visibleNotes > excludes notes outside the lookahead/lookbehind window 1ms
+ ✓ src/render/layout.test.ts > visibleNotes > includes notes within the window on both sides 0ms
+ ✓ src/render/layout.test.ts > barBeatLines > generates 1 bar line + 3 beat lines for one 4/4 bar at 120bpm (half-open window) 0ms
+ ✓ src/render/layout.test.ts > barBeatLines > does not duplicate the boundary line across two adjacent windows 0ms
+ ✓ src/render/layout.test.ts > barBeatLines > returns an empty array for an inverted or empty window 0ms
+ ✓ src/render/layout.test.ts > activePieces > includes only pieces within the hit window 0ms
+ ✓ src/render/layout.test.ts > activePieces > returns an empty set when nothing is near the hit line 0ms
+ ✓ src/render/layout.test.ts > activeHandByPiece > maps each active piece to its note hand 0ms
+ ✓ src/render/layout.test.ts > activeHandByPiece > returns an empty map when nothing is near the hit line 0ms
+ ✓ src/render/layout.test.ts > activeHandByPiece > keeps the last matching note for a piece when multiple fall in the window 0ms
+stderr | src/score/import/index.test.ts > importScoreFile > routes .gp5 corrupt input to the notation importer without throwing
+[AlphaTab][ScoreLoader] Score import failed due to unexpected error:  EndOfReaderError: Unexpected end of data within reader
+    at ThrowingReadable._requireBytes (file:///C:/Users/Jaewoo/%EB%93%9C%EB%9F%BC%EC%97%B0%EC%8A%B5%EC%84%9C%EB%B9%84%EC%8A%A4/app/web/node_modules/@coderline/alphatab/dist/alphaTab.core.mjs:14923:50)
+    at ThrowingReadable.read (file:///C:/Users/Jaewoo/%EB%93%9C%EB%9F%BC%EC%97%B0%EC%8A%B5%EC%84%9C%EB%B9%84%EC%8A%A4/app/web/node_modules/@coderline/alphatab/dist/alphaTab.core.mjs:14930:8)
+    at GpBinaryHelpers.gpReadStringByteLength (file:///C:/Users/Jaewoo/%EB%93%9C%EB%9F%BC%EC%97%B0%EC%8A%B5%EC%84%9C%EB%B9%84%EC%8A%A4/app/web/node_modules/@coderline/alphatab/dist/alphaTab.core.mjs:18840:8)
+    at Gp3To5Importer.readVersion (file:///C:/Users/Jaewoo/%EB%93%9C%EB%9F%BC%EC%97%B0%EC%8A%B5%EC%84%9C%EB%B9%84%EC%8A%A4/app/web/node_modules/@coderline/alphatab/dist/alphaTab.core.mjs:17983:33)
+    at Gp3To5Importer.readScore (file:///C:/Users/Jaewoo/%EB%93%9C%EB%9F%BC%EC%97%B0%EC%8A%B5%EC%84%9C%EB%B9%84%EC%8A%A4/app/web/node_modules/@coderline/alphatab/dist/alphaTab.core.mjs:17915:8)
+    at ScoreLoader.loadScoreFromBytes (file:///C:/Users/Jaewoo/%EB%93%9C%EB%9F%BC%EC%97%B0%EC%8A%B5%EC%84%9C%EB%B9%84%EC%8A%A4/app/web/node_modules/@coderline/alphatab/dist/alphaTab.core.mjs:30220:22)
+    at importNotationBytes (C:/Users/Jaewoo/드럼연습서비스/app/web/src/score/import/importNotation.ts:24:49)
+    at importScoreFile (C:/Users/Jaewoo/드럼연습서비스/app/web/src/score/import/index.ts:32:12)
+    at C:/Users/Jaewoo/드럼연습서비스/app/web/src/score/import/index.test.ts:58:20
+    at file:///C:/Users/Jaewoo/%EB%93%9C%EB%9F%BC%EC%97%B0%EC%8A%B5%EC%84%9C%EB%B9%84%EC%8A%A4/app/web/node_modules/vitest/dist/chunks/run.BPv-BBRv.js:1632:35 {
+  type: 1,
+  [cause]: undefined
+}
+
+ ✓ src/score/import/index.test.ts > importScoreFile > routes .mid files to the MIDI importer 4ms
+ ✓ src/score/import/index.test.ts > importScoreFile > routes .musicxml files to the notation importer 12ms
+ ✓ src/score/import/index.test.ts > importScoreFile > generates a correct DrumScore from a real Guitar Pro 7+ file (.gp) 10ms
+ ✓ src/score/import/index.test.ts > importScoreFile > routes .gp5 corrupt input to the notation importer without throwing 6ms
+ ✓ src/score/import/index.test.ts > importScoreFile > rejects unsupported extensions without throwing 0ms
+stderr | src/score/import/importNotation.test.ts > importNotationBytes (MusicXML, 실제 샘플) > returns a safe failure result for corrupt bytes instead of throwing
+[AlphaTab][ScoreLoader] Score import failed due to unexpected error:  EndOfReaderError: Unexpected end of data within reader
+    at ThrowingReadable._requireBytes (file:///C:/Users/Jaewoo/%EB%93%9C%EB%9F%BC%EC%97%B0%EC%8A%B5%EC%84%9C%EB%B9%84%EC%8A%A4/app/web/node_modules/@coderline/alphatab/dist/alphaTab.core.mjs:14923:50)
+    at ThrowingReadable.read (file:///C:/Users/Jaewoo/%EB%93%9C%EB%9F%BC%EC%97%B0%EC%8A%B5%EC%84%9C%EB%B9%84%EC%8A%A4/app/web/node_modules/@coderline/alphatab/dist/alphaTab.core.mjs:14930:8)
+    at GpBinaryHelpers.gpReadStringByteLength (file:///C:/Users/Jaewoo/%EB%93%9C%EB%9F%BC%EC%97%B0%EC%8A%B5%EC%84%9C%EB%B9%84%EC%8A%A4/app/web/node_modules/@coderline/alphatab/dist/alphaTab.core.mjs:18840:8)
+    at Gp3To5Importer.readVersion (file:///C:/Users/Jaewoo/%EB%93%9C%EB%9F%BC%EC%97%B0%EC%8A%B5%EC%84%9C%EB%B9%84%EC%8A%A4/app/web/node_modules/@coderline/alphatab/dist/alphaTab.core.mjs:17983:33)
+    at Gp3To5Importer.readScore (file:///C:/Users/Jaewoo/%EB%93%9C%EB%9F%BC%EC%97%B0%EC%8A%B5%EC%84%9C%EB%B9%84%EC%8A%A4/app/web/node_modules/@coderline/alphatab/dist/alphaTab.core.mjs:17915:8)
+    at ScoreLoader.loadScoreFromBytes (file:///C:/Users/Jaewoo/%EB%93%9C%EB%9F%BC%EC%97%B0%EC%8A%B5%EC%84%9C%EB%B9%84%EC%8A%A4/app/web/node_modules/@coderline/alphatab/dist/alphaTab.core.mjs:30220:22)
+    at importNotationBytes (C:/Users/Jaewoo/드럼연습서비스/app/web/src/score/import/importNotation.ts:24:49)
+    at C:/Users/Jaewoo/드럼연습서비스/app/web/src/score/import/importNotation.test.ts:48:16
+    at Proxy.assertThrows (file:///C:/Users/Jaewoo/%EB%93%9C%EB%9F%BC%EC%97%B0%EC%8A%B5%EC%84%9C%EB%B9%84%EC%8A%A4/app/web/node_modules/chai/index.js:2877:5)
+    at Proxy.methodWrapper (file:///C:/Users/Jaewoo/%EB%93%9C%EB%9F%BC%EC%97%B0%EC%8A%B5%EC%84%9C%EB%B9%84%EC%8A%A4/app/web/node_modules/chai/index.js:1737:25) {
+  type: 1,
+  [cause]: undefined
+}
+
+ ✓ src/score/import/importNotation.test.ts > importNotationBytes (MusicXML, 실제 샘플) > converts the Phase 0 drum_test.musicxml fixture into the expected DrumScore 17ms
+ ✓ src/score/import/importNotation.test.ts > importNotationBytes (MusicXML, 실제 샘플) > does not crash on a real-world .mxl file even without drum content asserted 17ms
+ ✓ src/score/import/importNotation.test.ts > importNotationBytes (MusicXML, 실제 샘플) > returns a safe failure result for corrupt bytes instead of throwing 7ms
+ ✓ src/features/library/filterSongs.test.ts > filterSongs > returns everything when query is empty or whitespace 3ms
+ ✓ src/features/library/filterSongs.test.ts > filterSongs > matches by title, case-insensitively 1ms
+ ✓ src/features/library/filterSongs.test.ts > filterSongs > matches by artist 0ms
+ ✓ src/features/library/filterSongs.test.ts > filterSongs > handles songs with a null artist without throwing 0ms
+ ✓ src/features/library/filterSongs.test.ts > filterSongs > returns an empty array when nothing matches 0ms
+ ✓ src/features/library/filterSongs.test.ts > filterSongs > does not mutate the input array 0ms
+ ✓ src/score/validate.test.ts > validateDrumScore > accepts a minimal score with no notes 2ms
+ ✓ src/score/validate.test.ts > validateDrumScore > accepts a score with multiple notes including hand info 0ms
+ ✓ src/score/validate.test.ts > validateDrumScore > rejects a version other than 1 1ms
+ ✓ src/score/validate.test.ts > validateDrumScore > rejects a non-zero audioOffsetMs (T2-8, Phase 3 전까지 임시 제한, Q-23) 0ms
+ ✓ src/score/validate.test.ts > validateDrumScore > rejects a non-finite audioOffsetMs 0ms
+ ✓ src/score/validate.test.ts > validateDrumScore > rejects an unknown meta.source 0ms
+ ✓ src/score/validate.test.ts > validateDrumScore > rejects ppq <= 0 0ms
+ ✓ src/score/validate.test.ts > validateDrumScore > rejects a malformed timeSignature 0ms
+ ✓ src/score/validate.test.ts > validateDrumScore > flags only the invalid note and keeps checking the rest (partial recognition, REQ-02) 0ms
+ ✓ src/score/validate.test.ts > validateDrumScore > rejects velocity out of 0-127 range 0ms
+ ✓ src/score/validate.test.ts > validateDrumScore > rejects a negative tick 0ms
+ ✓ src/score/validate.test.ts > validateDrumScore > rejects a non-integer tick (Codex 모드A C-002) 0ms
+ ✓ src/score/validate.test.ts > validateDrumScore > rejects a hand value outside R|L|RF|LF|null 0ms
+ ✓ src/score/validate.test.ts > validateDrumScore > does not flag handSource when hand is null (no such constraint in spec) 0ms
+ ✓ src/score/validate.test.ts > validateDrumScore > does not crash on completely malformed input 1ms
+ ✓ src/score/validate.test.ts > validateDrumScore > does not crash when a note field throws on access (Codex 모드A C-001 회귀) 0ms
+ ✓ src/score/validate.test.ts > isDrumScore > narrows unknown to DrumScore when valid 0ms
+ ✓ src/score/validate.test.ts > isDrumScore > returns false for invalid data 0ms
+ ✓ src/score/sticking.test.ts > recommendSticking > assigns fixed hand/foot per piece rule 2ms
+ ✓ src/score/sticking.test.ts > recommendSticking > recommends L for a snare that coincides with hihat/ride at the same tick 0ms
+ ✓ src/score/sticking.test.ts > recommendSticking > alternates hands within a fill run (gap within threshold), starting at startHand 0ms
+ ✓ src/score/sticking.test.ts > recommendSticking > restarts the alternation when the gap exceeds the threshold 0ms
+ ✓ src/score/sticking.test.ts > recommendSticking > defaults an isolated snare/tom hit (no run) to startHand 0ms
+ ✓ src/score/sticking.test.ts > recommendSticking > honors a custom startHand of L for fill alternation 0ms
+ ✓ src/score/sticking.test.ts > recommendSticking > never overwrites a note whose handSource is "user", even on repeated calls 0ms
+ ✓ src/score/sticking.test.ts > recommendSticking > still advances the fill position past a user-locked note for its neighbors 0ms
+ ✓ src/score/sticking.test.ts > recommendSticking > preserves input order in the returned array regardless of tick order 0ms
+ ✓ src/score/sticking.test.ts > alternateHandsByTick > alternates selected notes starting at R, marking them all as user-set 0ms
+ ✓ src/score/sticking.test.ts > alternateHandsByTick > alternates starting at L when requested 0ms
+ ✓ src/score/sticking.test.ts > alternateHandsByTick > orders by tick even when the input array is in a different order 0ms
+ ✓ src/score/sticking.test.ts > alternateHandsByTick > overwrites an existing user-set hand — this action is itself a new user decision 0ms
+stdout | src/features/editor/EditorScreen.test.tsx
+ * Tone.js v15.1.22 * 
+
+stdout | src/App.test.tsx
+ * Tone.js v15.1.22 * 
+
+ ✓ src/App.test.tsx > App > shows the login screen when not logged in 65ms
+ ✓ src/App.test.tsx > App > falls back to the login screen when the auth check fails outright 7ms
+ ✓ src/features/editor/EditorScreen.test.tsx > EditorScreen > adds a note when an empty grid cell is clicked 133ms
+ ✓ src/features/editor/EditorScreen.test.tsx > EditorScreen > selects an existing note when clicked, without adding a duplicate 20ms
+ ✓ src/features/editor/EditorScreen.test.tsx > EditorScreen > deletes the selected note with the Delete key 32ms
+ ✓ src/features/editor/EditorScreen.test.tsx > EditorScreen > moves the selected note in time with ArrowRight (grid-snapped) 26ms
+ ✓ src/features/editor/EditorScreen.test.tsx > EditorScreen > keeps moved notes on an integer tick even when ppq is not divisible by the grid divisor (Codex 모드A 지적) 33ms
+ ✓ src/features/editor/EditorScreen.test.tsx > EditorScreen > changes the selected note piece with ArrowUp/ArrowDown 18ms
+ ✓ src/features/editor/EditorScreen.test.tsx > EditorScreen > supports undo/redo via the toolbar buttons 33ms
+ ✓ src/features/editor/EditorScreen.test.tsx > EditorScreen > does not let grid shortcuts interfere with the BPM input 15ms
+ ✓ src/features/editor/EditorScreen.test.tsx > EditorScreen > calls saveSongDrumScore with the edited score on save 17ms
+ ✓ src/features/editor/EditorScreen.test.tsx > EditorScreen > shows an error message and does not call onSaved when the save request fails 21ms
+ ✓ src/features/editor/EditorScreen.test.tsx > EditorScreen > assigns a hand to the selected note via the R/L/RF/LF buttons (REQ-12) 18ms
+ ✓ src/features/editor/EditorScreen.test.tsx > EditorScreen > clears the hand with the 손 지우기 button 23ms
+ ✓ src/features/editor/EditorScreen.test.tsx > EditorScreen > does not show the multi-select batch bar for a plain (non-modifier) click — selection replaces, not toggles 14ms
+ ✓ src/features/editor/EditorScreen.test.tsx > EditorScreen > Ctrl+click adds a note to a multi-selection, showing the batch bar 14ms
+ ✓ src/features/editor/EditorScreen.test.tsx > EditorScreen > applies RLRL alternation by tick order to a multi-selection, marking them user-set 21ms
+ ✓ src/features/editor/EditorScreen.test.tsx > EditorScreen > applies auto-recommended sticking without overwriting a user-set hand 27ms
+ ✓ src/features/editor/velocity.test.ts > velocityTierOf > returns the exact tier for its own defined value 1ms
+ ✓ src/features/editor/velocity.test.ts > velocityTierOf > picks the nearest tier for in-between values 0ms
+ ✓ src/features/editor/velocity.test.ts > velocityTierOf > clamps sensibly at the extremes of the MIDI range 0ms
+ ✓ src/features/editor/editHistory.test.ts > editHistory > starts with no undo/redo available 1ms
+ ✓ src/features/editor/editHistory.test.ts > editHistory > undo restores the previous state, redo moves forward again 0ms
+ ✓ src/features/editor/editHistory.test.ts > editHistory > pushing a new state after undo clears the redo stack 0ms
+ ✓ src/features/editor/editHistory.test.ts > editHistory > undo/redo on an empty stack is a no-op, not a crash 0ms
+ ✓ src/features/editor/editHistory.test.ts > editHistory > supports at least 20 consecutive undos (REQ-03 수용 기준) 0ms
+ ✓ src/features/editor/editHistory.test.ts > editHistory > caps the past stack at MAX_HISTORY, dropping the oldest snapshot 1ms
+ ✓ src/score/gmMapping.test.ts > PIECE_TO_GM_NOTE > maps all 9 minimum classification pieces (REQ-02) 1ms
+ ✓ src/score/gmMapping.test.ts > PIECE_TO_GM_NOTE > matches the official General MIDI Level 1 percussion key map 0ms
+ ✓ src/score/gmMapping.test.ts > GM_NOTE_TO_PIECE > is the exact inverse of PIECE_TO_GM_NOTE (1:1 양방향 매핑) 1ms
+stdout | src/audio/drumVoices.test.ts
+ * Tone.js v15.1.22 * 
+
+ ✓ src/audio/drumVoices.test.ts > velocityToDb > maps full velocity to 0dB 1ms
+ ✓ src/audio/drumVoices.test.ts > velocityToDb > maps zero velocity to -24dB 0ms
+ ✓ src/audio/drumVoices.test.ts > velocityToDb > maps half velocity to -12dB (linear midpoint) 0ms
+ ✓ src/audio/drumVoices.test.ts > velocityToDb > clamps out-of-range velocity instead of producing nonsense dB values 0ms
+
+ Test Files  15 passed (15)
+      Tests  131 passed (131)
+   Start at  19:11:06
+   Duration  2.74s (environment 78%, setup 10%, import 6%, tests 3%, transform 2%, worker 1%)
+
+Environment  jsdom was created 15 times · 15.30s total, 78% of tracked time
+             create it once per worker with pool: 'vmThreads' (keeps per-file isolation) or isolate: false (shares it across files)
+             learn more: https://vitest.dev/guide/improving-performance#test-environments
+
+EXIT=0
+
+===== app/server: ruff check (T2-8 변경 파일만) =====
+All checks passed!
+EXIT=0
+
+===== app/server: ruff format --check (T2-8 변경 파일만) =====
+3 files already formatted
+EXIT=0
+
+===== app/server: pytest tests/ =====
+........................................................................ [ 88%]
+.........                                                                [100%]
+81 passed in 6.48s
+EXIT=0

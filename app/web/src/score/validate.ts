@@ -93,8 +93,19 @@ function runChecks(data: Record<string, unknown>, errors: string[]): void {
     errors.push('ppq: 0보다 큰 정수가 아님')
   }
 
-  if (typeof data.audioOffsetMs !== 'number' || !Number.isFinite(data.audioOffsetMs)) {
-    errors.push('audioOffsetMs: 유한한 숫자가 아님')
+  // T2-8(Codex 모드C 3차 지적, C-001): audioOffsetMs는 Phase 3(T3-5, 오디오-MIDI
+  // 오프셋 정렬 UI)가 생기기 전까지 0만 허용한다 — 0이 아닌 값이 들어오면
+  // scorePlayer.ts가 노트를 A-B 루프 경계 밖으로 밀어낼 수 있는데, 그 상호작용을
+  // 어떻게 처리할지는 아직 없는 T3-5 UI·허용범위가 정해진 뒤에야 설계할 수 있다
+  // (intent/07-open-questions.md Q-23). "유한하기만 하면 통과"였던 예전 검증은
+  // 이 경로를 막지 못해(직접 API 업로드로 0이 아닌 값을 넣을 수 있었음) 지금
+  // 당장 막는다.
+  if (
+    typeof data.audioOffsetMs !== 'number' ||
+    !Number.isFinite(data.audioOffsetMs) ||
+    data.audioOffsetMs !== 0
+  ) {
+    errors.push('audioOffsetMs: 0이어야 함(Phase 3 오디오-MIDI 정렬 전까지 임시 제한, Q-23)')
   }
 }
 

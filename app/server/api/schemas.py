@@ -81,10 +81,18 @@ class DrumScoreIn(BaseModel):
 
     @field_validator("audioOffsetMs")
     @classmethod
-    def audio_offset_must_be_finite(cls, value: float) -> float:
+    def audio_offset_must_be_zero(cls, value: float) -> float:
         # Codex 모드A C-001(재현됨): `value in (inf, -inf)`는 NaN을 못 거름
         # (NaN은 어떤 값과도 같지 않아 `in` 비교에 안 걸림) — math.isfinite()는
         # inf·-inf·NaN을 전부 정확히 걸러냄(Python 공식 문서 math.isfinite).
-        if not math.isfinite(value):
-            raise ValueError("audioOffsetMs는 유한해야 합니다")
+        #
+        # T2-8(Codex 모드C 3차 지적, C-001): "유한하기만 하면 통과"였던 이전 검증은
+        # 0이 아닌 값을 API로 직접 올리는 경로를 막지 못했다 — scorePlayer.ts가
+        # 노트를 A-B 루프 경계 밖으로 밀어낼 수 있는데, 그 상호작용 설계는
+        # audioOffsetMs를 실제로 쓰게 될 Phase 3(T3-5, 오디오-MIDI 오프셋 정렬 UI)
+        # 전까지 보류(intent/07-open-questions.md Q-23). 그래서 0만 허용.
+        if not math.isfinite(value) or value != 0:
+            raise ValueError(
+                "audioOffsetMs는 0이어야 합니다(Phase 3 오디오-MIDI 정렬 전까지 임시 제한)"
+            )
         return value
