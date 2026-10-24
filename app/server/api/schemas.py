@@ -15,6 +15,7 @@ plan.md §4) — 이게 서버가 막아야 할 가장 구체적인 위험이다
 유지 부담은 작다고 판단 — plan.md §4 가정).
 """
 
+import math
 from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
@@ -51,7 +52,7 @@ class DrumScoreMetaIn(BaseModel):
     @field_validator("bpm")
     @classmethod
     def bpm_must_be_finite_and_positive(cls, value: float) -> float:
-        if not (value > 0) or value in (float("inf"), float("-inf")):
+        if not math.isfinite(value) or value <= 0:
             raise ValueError("bpm은 유한한 양수여야 합니다")
         return value
 
@@ -74,6 +75,9 @@ class DrumScoreIn(BaseModel):
     @field_validator("audioOffsetMs")
     @classmethod
     def audio_offset_must_be_finite(cls, value: float) -> float:
-        if value in (float("inf"), float("-inf")):
+        # Codex 모드A C-001(재현됨): `value in (inf, -inf)`는 NaN을 못 거름
+        # (NaN은 어떤 값과도 같지 않아 `in` 비교에 안 걸림) — math.isfinite()는
+        # inf·-inf·NaN을 전부 정확히 걸러냄(Python 공식 문서 math.isfinite).
+        if not math.isfinite(value):
             raise ValueError("audioOffsetMs는 유한해야 합니다")
         return value

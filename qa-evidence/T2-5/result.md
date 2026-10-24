@@ -69,6 +69,16 @@ Claude Browser pane + 실제 `uvicorn`(127.0.0.1:8000) + Vite 프록시(5173→8
 - [x] "PC에서 올린 곡이 … 목록에 보이고" — localhost 멀티세션 + 서버 재시작으로 검증(원격 기기는 Phase 5)
 - [x] "… 재생됨" — 서버 데이터로 실제 재생 확인
 
+## Codex 모드A 검수 반영 — C-001(재현됨, 수정 완료)
+Codex 모드A(독립 코드 검수, `codex-modeA.md`)가 REQUEST_CHANGES로 지적:
+> `app/server/api/schemas.py:76–79` `audioOffsetMs` 검증은 양·음의 무한대만 거부하고 NaN은 통과시킵니다. `math.isfinite(value)`로 유한성을 검사하십시오.
+
+**재현 확인**: `value in (float("inf"), float("-inf"))` 비교는 NaN을 못 거른다(NaN은 자기 자신을 포함해 어떤 값과도 `==`/`in`이 성립하지 않는 IEEE 754 특성) — 실제로 `float("nan") in (float("inf"), float("-inf"))`가 `False`임을 확인. 더 나아가 pydantic-core의 JSON 파서가 `NaN` 리터럴 토큰(Python `json.dumps(allow_nan=True)`가 만드는 비표준 JSON)을 실제로 파싱해 필드 값으로 통과시킴을 직접 실행으로 확인 — 수정 전 코드는 이 입력을 그대로 저장했을 것.
+
+**수정**: `bpm`·`audioOffsetMs` 검증 둘 다 `math.isfinite()`로 통일(inf·-inf·NaN 전부 정확히 거름 — Python 공식 문서 `math.isfinite` 동작). `bpm`은 기존에 `value > 0` 비교가 NaN에 대해 우연히 `False`가 되어 결과적으로 막혔지만(정확한 설계는 아니었음), `isfinite` 사용으로 의도를 명확히 함.
+
+**재검증**: `score["audioOffsetMs"] = float("nan")`을 `json.dumps(allow_nan=True)`로 직렬화해 실제 업로드 API에 보내는 pytest(`test_upload_rejects_nan_audio_offset`)를 추가 — 422 거부 + 고아 Song 행 없음을 확인. 수정 후 `ruff check`/`ruff format --check`/`pytest` 재실행 — 전부 클린, 65/65 통과.
+
 ## 가정/한계
 - `window.confirm()` 자동화 한계로 QA 중 1회 스텁 처리(실제 코드는 변경 없음).
 - 원격(비-localhost) 기기 접근은 Secure 쿠키 제약으로 검증 범위 밖(Phase 5).

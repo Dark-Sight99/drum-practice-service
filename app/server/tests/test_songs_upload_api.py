@@ -154,6 +154,20 @@ def test_upload_rejects_malformed_drumscore_json(client: TestClient, db_session)
     assert resp.status_code == 422
 
 
+def test_upload_rejects_nan_audio_offset(client: TestClient, db_session) -> None:
+    # Codex 모드A C-001(재현됨): `value in (inf, -inf)`는 NaN을 못 거름 — 이 테스트가
+    # 실제로 그 경로를 통과하는지 확인한다. Python의 json.dumps(allow_nan=True, 기본값)로
+    # 만든 리터럴 NaN 토큰을 pydantic-core가 실제로 파싱한다는 것도 이 테스트가 증명한다.
+    _make_user(db_session, "u1")
+    _login(client, "u1")
+    score = _valid_drumscore()
+    score["audioOffsetMs"] = float("nan")
+    raw = json.dumps(score, allow_nan=True)
+    resp = _upload(client, drumscore=raw)
+    assert resp.status_code == 422
+    assert client.get("/songs").json() == []
+
+
 @pytest.mark.parametrize(
     "mutate",
     [
