@@ -32,6 +32,7 @@ DrumPiece = Literal[
     "ride",
 ]
 Hand = Literal["R", "L", "RF", "LF", None]
+HandSource = Literal["auto", "user"]
 # Phase 2는 디지털 악보(경로 C)만 다룬다 — audio/omr은 Phase 3/4라 여기선 거부.
 ScoreSourcePhase2 = Literal["midi", "musicxml", "gp"]
 
@@ -41,6 +42,12 @@ class DrumNoteIn(BaseModel):
     piece: DrumPiece
     velocity: int = Field(ge=0, le=127)
     hand: Hand = None
+    # T2-7(REQ-12) — app/web/src/score/types.ts의 HandSource와 동일 범위.
+    # 업로드/저장 둘 다 검증 통과 후 원본 바이트를 그대로 저장하므로(재직렬화
+    # 안 함) 이 필드가 없어도 실제로는 통과·보존돼 왔음 — 추가하는 이유는
+    # "handSource: 'bogus'" 같은 잘못된 값을 조용히 통과시키던 검증 공백을
+    # 메우기 위함이지 저장 동작을 바꾸는 게 아니다(work/T2-7/plan.md §설계 5).
+    handSource: HandSource | None = None
 
 
 class DrumScoreMetaIn(BaseModel):

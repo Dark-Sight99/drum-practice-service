@@ -1,4 +1,4 @@
-import type { DrumPiece } from '../score/types'
+import type { DrumPiece, Hand } from '../score/types'
 
 // 드럼킷 점등 — 단순 도형 placeholder(intent/07-open-questions.md Q-09: 정밀 일러스트는
 // 의뢰인 디자인 승인 필요, 이번엔 점등 "기능"만 구현, work/T2-3/plan.md §범위).
@@ -23,12 +23,25 @@ const KIT_PIECES: readonly KitPieceDef[] = [
 ]
 
 export interface KitIllustrationProps {
-  activePieces: ReadonlySet<DrumPiece>
+  /** 판정선 근처 피스별 손/발(REQ-12) — 비어 있으면(또는 `showSticking`이 꺼지면)
+   * T2-3 때처럼 단순 점등만 한다(회귀 없음). 키가 있으면(값이 null이어도) 점등됨 —
+   * `has(piece)`가 "lit" 조건(work/T2-7/plan.md §설계 3). */
+  activeHandByPiece: ReadonlyMap<DrumPiece, Hand>
+  /** 꺼지면 손이 있어도 테두리를 항상 실선으로(T2-3 때와 동일 모양). */
+  showSticking: boolean
   pieceColor: (piece: DrumPiece) => string
 }
 
+/** 오른손/오른발(R/RF) → 실선, 왼손/왼발(L/LF) → 점선(intent/08-design.md §3,
+ * REQ-12). 자동 추천 값은 추가로 더 흐리게(opacity) — `note.handSource` 자체는
+ * 레인에만 있고 킷은 피스 단위라 손이 L/R 어느 쪽인지만 반영, "자동이라 흐리게"는
+ * 레인 글자가 이미 맡고 있어 여기선 생략(과한 중복 표시 방지, §가정). */
+function isDashedHand(hand: Hand): boolean {
+  return hand === 'L' || hand === 'LF'
+}
+
 /** 판정선에 도달한 피스를 짧게 밝힌다(intent/08-design.md §6 "약 120ms"). */
-export function KitIllustration({ activePieces, pieceColor }: KitIllustrationProps) {
+export function KitIllustration({ activeHandByPiece, showSticking, pieceColor }: KitIllustrationProps) {
   return (
     <svg
       viewBox="0 0 100 100"
@@ -37,7 +50,9 @@ export function KitIllustration({ activePieces, pieceColor }: KitIllustrationPro
       style={{ width: '100%', height: 'auto' }}
     >
       {KIT_PIECES.map(({ piece, label, cx, cy, r }) => {
-        const lit = activePieces.has(piece)
+        const lit = activeHandByPiece.has(piece)
+        const hand = activeHandByPiece.get(piece) ?? null
+        const dashed = showSticking && lit && isDashedHand(hand)
         const color = pieceColor(piece)
         return (
           <g key={piece} style={{ transition: 'opacity 120ms ease-out' }} opacity={lit ? 1 : 0.55}>
@@ -48,6 +63,7 @@ export function KitIllustration({ activePieces, pieceColor }: KitIllustrationPro
               fill="none"
               stroke={color}
               strokeWidth={lit ? 2.5 : 1.5}
+              strokeDasharray={dashed ? '3 2' : undefined}
             />
             <text
               x={cx}

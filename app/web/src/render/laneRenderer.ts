@@ -1,7 +1,8 @@
 // Canvas 2D 레인 렌더러 — jsdom은 2D 컨텍스트가 없어(`getContext('2d')`가 null,
 // 실제 실행으로 확인) 실제 브라우저에서만 동작·검증 가능(work/T2-3/plan.md).
-import type { DrumNote, DrumScore } from '../score/types'
+import type { DrumNote, DrumPiece, DrumScore, Hand } from '../score/types'
 import {
+  activeHandByPiece,
   activePieces,
   barBeatLines,
   LANES,
@@ -11,6 +12,10 @@ import {
 } from './layout'
 import { ticksToSeconds } from '../audio/timing'
 
+function handLabel(hand: Hand): string | null {
+  return hand === 'R' || hand === 'L' || hand === 'RF' || hand === 'LF' ? hand : null
+}
+
 export interface LaneRendererOptions {
   /** DrumPiece별 색을 돌려주는 함수 — 호출자가 CSS 변수(`--piece-*`)를 읽어 전달
    * (Canvas는 CSS 변수를 모름, intent/08-design.md §3). */
@@ -19,19 +24,29 @@ export interface LaneRendererOptions {
   laneBarColor: string
   laneBeatColor: string
   hitLineColor: string
+  /** 스티킹 R/L 글자 색(REQ-12, intent/08-design.md §3 "노트 위 R/L 글자(--text)"). */
+  stickingTextColor: string
   /** 판정선 근처 노트를 "히트"로 보는 허용범위(초) — work/T2-3/plan.md §가정. */
   hitWindowSeconds: number
 }
 
+export interface LaneRenderResult {
+  activePieces: Set<DrumPiece>
+  /** 판정선 근처 피스별 손/발(REQ-12) — 킷 점등 테두리 실선/점선 트리거. */
+  activeHandByPiece: Map<DrumPiece, Hand>
+}
+
 export interface LaneRenderer {
   /** `playbackBpm` 생략 시 `score.meta.bpm`(원곡 그대로) 사용 — 연습 BPM(T2-4,
-   * REQ-04)으로 재생 중이면 낙하 속도·노트 위치가 그 속도를 따라가도록 넘긴다. */
+   * REQ-04)으로 재생 중이면 낙하 속도·노트 위치가 그 속도를 따라가도록 넘긴다.
+   * `showSticking`(REQ-12, 기본 true)이 꺼지면 노트 위 R/L 글자를 그리지 않는다. */
   render(
     score: DrumScore,
     currentTimeSeconds: number,
     barsVisible: number,
     playbackBpm?: number,
-  ): Set<DrumNote['piece']>
+    showSticking?: boolean,
+  ): LaneRenderResult
   dispose(): void
 }
 
@@ -117,7 +132,13 @@ export function createLaneRenderer(
   }
 
   return {
-    render(score, currentTimeSeconds, barsVisible, playbackBpm = score.meta.bpm) {
+    render(
+      score,
+      currentTimeSeconds,
+      barsVisible,
+      playbackBpm = score.meta.bpm,
+      showSticking = true,
+    ) {
       const width = canvas.clientWidth
       const height = canvas.clientHeight
       if (canvas.width !== width || canvas.height !== height) {
@@ -176,6 +197,22 @@ export function createLaneRenderer(
           const shape = lane.shapeByPiece[note.piece]
           if (!shape) continue
           drawNoteShape(ctx, shape, laneCenterX, y, noteSize, options.pieceColor(note.piece))
+
+          // REQ-12 — 노트 위 R/L(/RF/LF) 글자. 자동 추천 값은 반투명
+          // (intent/08-design.md §3 "자동 추천 값은 50% 투명도"), 사용자 지정은 불투명.
+          if (showSticking) {
+            const label = handLabel(note.hand)
+            if (label !== null) {
+              const prevAlpha = ctx.globalAlpha
+              ctx.globalAlpha = note.handSource === 'user' ? 1 : 0.5
+              ctx.fillStyle = options.stickingTextColor
+              ctx.font = `${Math.max(10, noteSize * 0.5)}px sans-serif`
+              ctx.textAlign = 'center'
+              ctx.textBaseline = 'bottom'
+              ctx.fillText(label, laneCenterX, y - noteSize / 2 - 2)
+              ctx.globalAlpha = prevAlpha
+            }
+          }
         }
       }
 
@@ -187,7 +224,15 @@ export function createLaneRenderer(
       ctx.lineTo(width, hitLineY)
       ctx.stroke()
 
-      return activePieces(score.notes, noteTimeOf, currentTimeSeconds, options.hitWindowSeconds)
+      return {
+        activePieces: activePieces(score.notes, noteTimeOf, currentTimeSeconds, options.hitWindowSeconds),
+        activeHandByPiece: activeHandByPiece(
+          score.notes,
+          noteTimeOf,
+          currentTimeSeconds,
+          options.hitWindowSeconds,
+        ),
+      }
     },
     dispose() {
       // Canvas 자체는 DOM 요소 소유자(React)가 정리 — 여기선 내부 상태가 없어 no-op.

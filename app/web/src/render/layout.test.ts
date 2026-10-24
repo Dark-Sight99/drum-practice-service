@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { DrumNote } from '../score/types'
 import {
+  activeHandByPiece,
   activePieces,
   barBeatLines,
   laneIndexForPiece,
@@ -60,8 +61,8 @@ describe('pixelsPerSecond', () => {
   })
 })
 
-function note(tick: number, piece: DrumNote['piece']): DrumNote {
-  return { tick, piece, velocity: 100, hand: null }
+function note(tick: number, piece: DrumNote['piece'], hand: DrumNote['hand'] = null): DrumNote {
+  return { tick, piece, velocity: 100, hand }
 }
 
 describe('visibleNotes', () => {
@@ -113,5 +114,27 @@ describe('activePieces', () => {
   it('returns an empty set when nothing is near the hit line', () => {
     const result = activePieces(notes, timeOf, 5, 0.05)
     expect(result.size).toBe(0)
+  })
+})
+
+describe('activeHandByPiece', () => {
+  const timeOf = (n: DrumNote) => n.tick
+
+  it('maps each active piece to its note hand', () => {
+    const notes = [note(0, 'kick', 'RF'), note(0.5, 'snare', 'L')]
+    const result = activeHandByPiece(notes, timeOf, 0.02, 0.05)
+    expect(result).toEqual(new Map([['kick', 'RF']]))
+  })
+
+  it('returns an empty map when nothing is near the hit line', () => {
+    const notes = [note(0, 'kick', 'RF')]
+    const result = activeHandByPiece(notes, timeOf, 5, 0.05)
+    expect(result.size).toBe(0)
+  })
+
+  it('keeps the last matching note for a piece when multiple fall in the window', () => {
+    const notes = [note(0, 'snare', 'R'), note(0.01, 'snare', 'L')]
+    const result = activeHandByPiece(notes, timeOf, 0, 0.05)
+    expect(result.get('snare')).toBe('L')
   })
 })
