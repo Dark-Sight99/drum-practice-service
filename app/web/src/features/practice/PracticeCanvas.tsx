@@ -143,6 +143,9 @@ export function PracticeCanvas({ score, barsVisible = 2 }: PracticeCanvasProps) 
         .getPropertyValue('--hit-line')
         .trim(),
       stickingTextColor: getComputedStyle(document.documentElement).getPropertyValue('--text').trim(),
+      laneHeaderBackgroundColor: getComputedStyle(document.documentElement)
+        .getPropertyValue('--bg')
+        .trim(),
       hitWindowSeconds: 0.06,
     })
   }, [])
