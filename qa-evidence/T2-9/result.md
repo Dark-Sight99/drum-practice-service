@@ -1,4 +1,4 @@
-> 한 줄 요약: T2-9 QA — 프론트(tsc/oxlint/vitest 131/131) 통과. 노트 판정 순간을 도형별 실제 하단 모서리 기준으로 수정(Codex 모드A 반영, 시간 계산 자체는 불변·픽셀 오프셋만 변경). MusicDelta_Grunge가 Phase 0 ADTOF 자동 채보 테스트 데이터임을 SHA-256 해시로 확정(톰 F-measure 0.33) — 다만 이 수치가 사용자가 보고한 구체적 증상 구간과 정확히 같은 지점인지까지는 미확인(Codex 모드B 지적 반영, 인과관계 과장 안 함).
+> 한 줄 요약: T2-9 QA — 프론트(tsc/oxlint/vitest 131/131) 통과. 노트 판정 순간을 도형별 실제 하단 모서리 기준으로 수정(Codex 모드A 반영, 시간 계산 자체는 불변·픽셀 오프셋만 변경). MusicDelta_Grunge가 Phase 0 ADTOF 자동 채보 테스트 데이터임을 SHA-256 해시로 확정(톰 F-measure 0.33, 증상과 같은 범주의 오류일 가능성을 시사하나 원인 여부·구간 대응은 미확인 — Codex 모드B 지적 반영, 인과관계 과장 안 함).
 
 # T2-9 QA 결과(2026-10-24)
 
@@ -8,7 +8,7 @@
 | 프론트 타입체크 | `npx tsc -b` | PASS |
 | 프론트 lint | `npx oxlint` | PASS |
 | 프론트 단위 테스트 | `npx vitest run` | PASS (131/131, 회귀 없음 — `laneRenderer.ts`는 픽셀 오프셋만 바뀌어 전용 테스트 대상 아님) |
-| MusicDelta_Grunge 출처 확인 | `diff <(xxd ...) <(xxd ...)`(exit 0) + 두 파일 SHA-256 | **바이트 완전 동일**(해시 `9c215431...bbb98e9` 양쪽 일치, `raw_log.txt`에 전체 해시·diff 종료 코드 보존 — 재현 가능) |
+| MusicDelta_Grunge 출처 확인 | `diff <(xxd ...) <(xxd ...)`(exit 0) + 두 파일 SHA-256 | **바이트 완전 동일**(해시 `9C2154310B64F66F4C7A266671B187F4827534F42A363907CFF417BCBBB98E95` 양쪽 일치, `raw_log.txt`에 실행한 명령 전문·전체 해시·diff 종료 코드 보존 — 재현 가능) |
 
 전체 로그: `raw_log.txt`
 
