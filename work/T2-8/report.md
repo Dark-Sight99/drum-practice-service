@@ -31,6 +31,11 @@
 
 원문: `qa-evidence/T2-8/codex-modeC.md`, `-3.md`(2차는 1차 안에 통합 서술)
 
+## Codex 모드A(독립 코드 검수) — 반박(재현 안 됨)
+판정: P1 1건("A-B 루프 진행바가 카운트인 오프셋을 반영 안 한다") — **실제 실행으로 검증한 결과 틀린 지적**. `loopStartSeconds`/`loopEndSeconds` 계산은 이번 커밋 이전부터 이미 `songStartSeconds`를 포함하고 있었고(이번엔 그 변수 선언 위치만 위로 옮김), 디버그 계측으로 실측(`positionSeconds≈5.79s`일 때 `rawPercent≈47.36%`, 화면 진행바 폭도 정확히 `47%`)해 정확함을 확인 — 코드 수정 없이 기각. T2-4에서 Codex 지적을 검증 후 반박했던 선례와 같은 패턴(`qa-evidence/T2-8/codex-modeA.md`).
+
+원문: `qa-evidence/T2-8/codex-modeA.md`
+
 ## 구현 근거 (실행 결과로 확인)
 - **근본 원인 특정**: `scorePlayer.ts`의 노트 스케줄 식(`schedule.songStartSeconds + ticksToSeconds(...)`)과 `laneRenderer.ts`의 `noteTimeOf`(수정 전: `ticksToSeconds(...) + audioOffsetMs/1000`)를 나란히 놓고 비교해 `songStartSeconds` 누락을 코드로 직접 확인(실행 로그가 아니라 코드 대조 자체가 증거 — 이 종류의 버그는 Canvas/Tone.js라 jsdom 단위 테스트로 재현 불가, work/T2-2·T2-3부터 이어진 제약).
 - **120bpm 4/4 1마디 = 2초**라는 구체적 수치로 "노트가 몇 초 일찍 보이는지" 계산 가능했고, 의뢰인이 보고한 "완전히 지나간 뒤 들림"(미세한 ms 단위가 아니라 뚜렷하게 체감되는 지연)이라는 증상 크기와 정확히 들어맞음 — 추측이 아니라 수치로 맞춰본 진단.
