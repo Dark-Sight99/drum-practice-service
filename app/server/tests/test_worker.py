@@ -6,7 +6,7 @@ import pytest
 from sqlalchemy.orm import sessionmaker
 
 import worker.runner as runner_module
-from db.models import Base, Job, JobStatus, JobType, Song, SongSourceType, User
+from db.models import Base, Job, JobStatus, JobType, Song, SongSourceType, SongStatus, User
 from db.session import create_sqlite_engine
 from worker.handlers import clear_handlers, register_handler
 from worker.runner import process_next_job, recover_orphaned_jobs
@@ -111,6 +111,103 @@ def test_recover_orphaned_jobs_marks_stuck_processing_as_failed(db) -> None:
     assert recovered_count == 1
     assert stuck_job.status == JobStatus.FAILED
     assert "재시작" in stuck_job.error_message
+
+
+def test_recover_orphaned_jobs_also_fails_the_songs_stuck_processing(db) -> None:
+    """T3-1 모드C C-001 — 워커가 핸들러 실행 도중 죽어 Job만 PROCESSING으로
+    남으면, 재시작 복구 시 그 Job의 Song도 PROCESSING이면 FAILED로 맞춰야 한다
+    (안 그러면 사용자 눈엔 "영원히 처리중"으로 보임)."""
+    user, song = _make_user_and_song(db)
+    song.status = SongStatus.PROCESSING
+    db.commit()
+    stuck_job = Job(user_id=user.id, song_id=song.id, job_type=JobType.SEPARATE)
+    stuck_job.status = JobStatus.PROCESSING
+    db.add(stuck_job)
+    db.commit()
+
+    recover_orphaned_jobs(db)
+
+    db.refresh(song)
+    assert song.status == SongStatus.FAILED
+
+
+def test_recover_orphaned_jobs_does_not_touch_song_not_processing(db) -> None:
+    """Song이 이미 COMPLETED/PENDING 등이면(이 Job과 무관한 경우) 건드리지 않는다."""
+    user, song = _make_user_and_song(db)
+    song.status = SongStatus.COMPLETED
+    db.commit()
+    stuck_job = Job(user_id=user.id, song_id=song.id, job_type=JobType.SEPARATE)
+    stuck_job.status = JobStatus.PROCESSING
+    db.add(stuck_job)
+    db.commit()
+
+    recover_orphaned_jobs(db)
+
+    db.refresh(song)
+    assert song.status == SongStatus.COMPLETED
+
+
+def test_sync_song_status_with_job_is_noop_when_handler_already_set_it(db) -> None:
+    """정상 흐름(핸들러가 스스로 Song.status를 맞춘 경우)에선 안전망이 아무 것도
+    안 바꿔야 한다."""
+    user, song = _make_user_and_song(db)
+    song.status = SongStatus.COMPLETED
+    db.commit()
+
+    def _handler_sets_song_completed(job: Job) -> None:
+        pass  # Song은 이미 위에서 COMPLETED로 맞춰놨다고 가정(핸들러가 직접 한 것처럼)
+
+    register_handler(JobType.SEPARATE, _handler_sets_song_completed)
+    job = Job(user_id=user.id, song_id=song.id, job_type=JobType.SEPARATE)
+    db.add(job)
+    db.commit()
+
+    process_next_job(db)
+
+    db.refresh(song)
+    assert song.status == SongStatus.COMPLETED  # 안전망이 안 건드림
+
+
+def test_sync_song_status_with_job_rescues_song_stuck_processing_after_job_failed(db) -> None:
+    """T3-1 모드C 3차 BLOCKING 지적 — 핸들러의 Song.FAILED 커밋 자체가 실패하는
+    (여기선 핸들러가 아예 Song을 안 건드리는 것으로 시뮬레이션) 경우에도, Job이
+    FAILED로 끝나면 안전망이 Song을 FAILED로 맞춰야 한다."""
+    user, song = _make_user_and_song(db)
+    song.status = SongStatus.PROCESSING
+    db.commit()
+
+    def _handler_fails_without_touching_song(job: Job) -> None:
+        raise RuntimeError("핸들러가 Song 상태를 못 맞추고 터짐")
+
+    register_handler(JobType.SEPARATE, _handler_fails_without_touching_song)
+    job = Job(user_id=user.id, song_id=song.id, job_type=JobType.SEPARATE)
+    db.add(job)
+    db.commit()
+
+    result = process_next_job(db)
+
+    assert result.status == JobStatus.FAILED
+    db.refresh(song)
+    assert song.status == SongStatus.FAILED
+
+
+def test_sync_song_status_with_job_rescues_song_stuck_processing_after_job_completed(db) -> None:
+    """Job은 COMPLETED로 끝났는데 핸들러가 Song을 못 맞춘 경우 — 성공을 낙관하지
+    않고 FAILED로 맞춘다(실제 산출물이 있다는 보장이 없으므로)."""
+    user, song = _make_user_and_song(db)
+    song.status = SongStatus.PROCESSING
+    db.commit()
+
+    register_handler(JobType.SEPARATE, lambda job: None)  # Song을 안 건드리고 성공
+    job = Job(user_id=user.id, song_id=song.id, job_type=JobType.SEPARATE)
+    db.add(job)
+    db.commit()
+
+    result = process_next_job(db)
+
+    assert result.status == JobStatus.COMPLETED
+    db.refresh(song)
+    assert song.status == SongStatus.FAILED
 
 
 def test_recover_orphaned_jobs_does_not_touch_queued_or_completed(db) -> None:

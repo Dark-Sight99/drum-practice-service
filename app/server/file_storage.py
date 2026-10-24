@@ -14,6 +14,7 @@ Codex 모드C C-001: 업로드 원본 파일명은 신뢰하지 않는다 — �
 
 import os
 import uuid
+from collections.abc import Iterable
 from pathlib import Path
 
 SERVER_ROOT = Path(__file__).resolve().parent
@@ -64,6 +65,32 @@ def write_song_file(song_id: int, fixed_filename: str, content: bytes) -> str:
         tmp_target.replace(target)
     finally:
         tmp_target.unlink(missing_ok=True)  # replace() 성공 후엔 이미 없음 — 실패 시에만 의미 있음
+    return f"{song_id}/{fixed_filename}"
+
+
+def write_song_file_streaming(
+    song_id: int, fixed_filename: str, chunks: Iterable[bytes]
+) -> str:
+    """`write_song_file()`과 같은 보장(요청별 고유 임시 파일 → 전체를 다 쓴 뒤에만
+    `Path.replace()`로 원자적 교체 → 예외 시 임시 파일 정리)을 그대로 따르되,
+    `content: bytes` 하나를 받는 대신 청크 이터러블을 받아 메모리에 전체를 모으지
+    않고 임시 파일에 순차적으로 쓴다(T3-1 REQ-01, 100MB 음원 업로드가 메모리에
+    두 번(청크 리스트+join) 안 올라가게 하기 위함 — work/T3-1/plan.md 모드C C-005).
+
+    업로드가 중간에(예: 크기 상한 초과) 중단돼 호출자가 예외를 던지면, 이 함수는
+    아직 `replace()`하기 전이므로 `fixed_filename`엔 아무 영향이 없고 임시 파일만
+    `finally`에서 지워진다 — 불완전한 최종 파일이 남지 않는다(모드C C-012).
+    """
+    directory = song_storage_dir(song_id)
+    target = _ensure_within_songs_root(directory / fixed_filename)
+    tmp_target = _ensure_within_songs_root(directory / f"{fixed_filename}.{uuid.uuid4().hex}.tmp")
+    try:
+        with tmp_target.open("wb") as f:
+            for chunk in chunks:
+                f.write(chunk)
+        tmp_target.replace(target)
+    finally:
+        tmp_target.unlink(missing_ok=True)
     return f"{song_id}/{fixed_filename}"
 
 
