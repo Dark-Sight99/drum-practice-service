@@ -147,6 +147,40 @@ def test_upload_rejects_oversized_file(client: TestClient, db_session, monkeypat
     assert resp.status_code == 413
 
 
+def test_upload_oversized_file_stops_reading_early(
+    client: TestClient, db_session, monkeypatch
+) -> None:
+    # Codex 모드B 권장 C-002: 413만 확인하면 "끝까지 다 읽고 나서 거부"와 "상한
+    # 넘는 순간 멈춤" 둘 다 통과해버려 조기 중단 자체는 증명 못 한다(작은 파일은
+    # 청크 1개 안에 다 들어가서 구분이 안 됨). 10MB 파일 + 2MB 상한으로, 실제
+    # UploadFile.read() 호출 횟수를 세어 "끝까지 다(10회) 안 읽고 일찍(상한을
+    # 막 넘는 시점인 3회 이하) 멈췄는지"를 직접 검증한다.
+    from starlette.datastructures import UploadFile
+
+    import api.songs as songs_module
+
+    _make_user(db_session, "u1")
+    _login(client, "u1")
+    monkeypatch.setattr(songs_module, "MAX_UPLOAD_BYTES", 2 * 1024 * 1024)
+
+    read_calls = 0
+    original_read = UploadFile.read
+
+    async def counting_read(self, size: int = -1) -> bytes:
+        nonlocal read_calls
+        read_calls += 1
+        return await original_read(self, size)
+
+    monkeypatch.setattr(UploadFile, "read", counting_read)
+
+    ten_mb = b"x" * (10 * 1024 * 1024)
+    resp = _upload(client, file_bytes=ten_mb)
+    assert resp.status_code == 413
+    # 끝까지 읽었다면 1MB 청크로 10회(+EOF 확인용 1회)는 필요했을 것 — 2MB
+    # 상한을 넘기려면 3번째 청크(2MB 초과 시점)에서 멈춰야 하므로 훨씬 적다.
+    assert read_calls <= 4, f"읽기가 일찍 멈추지 않음(read() {read_calls}회 호출)"
+
+
 def test_upload_rejects_malformed_drumscore_json(client: TestClient, db_session) -> None:
     _make_user(db_session, "u1")
     _login(client, "u1")

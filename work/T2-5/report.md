@@ -28,7 +28,7 @@
 - `python-multipart` 패키지가 설치돼 있지 않아(`pip list`로 직접 확인) `requirements.txt`에 추가하고 설치.
 
 ## 실행한 검증
-`qa-evidence/T2-5/result.md`, `raw_log.txt` — 프론트 tsc/oxlint/prettier/vitest(81/81), 백엔드 ruff/pytest(65/65, C-001 NaN 검증 추가 반영) 전부 PASS. 실제 FastAPI 서버+브라우저로 MIDI/MusicXML/GP 3종 업로드, 서버 프로세스 재시작 후 영속성 확인, 실제 재생, 이름변경, 검색, 삭제(파일 실제 제거 확인), 로그아웃/비로그인 차단 확인.
+`qa-evidence/T2-5/result.md`, `raw_log.txt` — 프론트 tsc/oxlint/prettier/vitest(81/81), 백엔드 ruff/pytest(66/66, C-001 NaN 검증+업로드 조기중단 회귀 테스트 반영) 전부 PASS. 실제 FastAPI 서버+브라우저로 MIDI/MusicXML/GP 3종 업로드, 서버 프로세스 재시작 후 영속성 확인, 실제 재생, 이름변경, 검색, 삭제(파일 실제 제거 확인), 로그아웃/비로그인 차단 확인.
 
 ## Codex 모드A 검수 반영
 `qa-evidence/T2-5/codex-modeA.md` — 판정 REQUEST_CHANGES, 필수 수정 1건(C-001).
@@ -37,8 +37,8 @@
 - 재검증: NaN `audioOffsetMs`를 실제로 보내는 pytest 추가(`test_upload_rejects_nan_audio_offset`) — 422 거부 확인. 수정 후 ruff/pytest 재실행 — 전부 클린, 65/65 통과.
 
 ## Codex 모드B 검수 반영
-1차 REQUEST_CHANGES: report.md/result.md가 64/64라 적었지만 raw_log.txt엔 C-001(NaN) 수정 후 65/65가 추가돼 있어 불일치(C-001, 필수). 2차에서 문서의 다른 곳(요약 줄·결과 표)에 남아있던 64 표기를 전부 65로 수정.
-권장 C-002(반영 완료): 업로드 핸들러가 `file.read()`를 인자 없이 호출해 20MB 제한을 검사하기 전에 파일 전체를 메모리로 읽고 있었음 — 1MB 청크 단위로 읽으며 상한 초과 시 즉시 중단하도록 수정.
+1차 REQUEST_CHANGES: report.md/result.md의 테스트 통과 수가 C-001(NaN) 수정 전 수치로 남아 raw_log.txt의 최신 결과와 불일치(C-001, 필수). 2차에서 문서의 다른 곳(요약 줄·결과 표)에 남아있던 이전 수치 표기를 전부 최신(65/65)으로 수정.
+권장 C-002(2라운드 끝에 반영 완료): 업로드 핸들러가 `file.read()`를 인자 없이 호출해 20MB 제한을 검사하기 전에 파일 전체를 메모리로 읽고 있었음 — 1MB 청크 단위로 읽으며 상한 초과 시 즉시 중단하도록 수정. 1라운드에서 "기존 오버사이즈 테스트로 검증했다"고 적었으나, 그 테스트의 입력(100바이트)이 청크 크기보다 작아 조기 중단을 실제로 증명 못 한다는 모드B 2차 지적이 맞아 `UploadFile.read()` 호출 횟수를 직접 세는 새 테스트(`test_upload_oversized_file_stops_reading_early`)를 추가해 보강.
 
 ## 가정
 - 업로드 화면은 디지털 악보 파일 선택기 하나만(음원/사진 선택 UI는 Phase 3/4).

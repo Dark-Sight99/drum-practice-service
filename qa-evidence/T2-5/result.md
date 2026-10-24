@@ -1,4 +1,4 @@
-> 한 줄 요약: T2-5 QA — 프론트(tsc/oxlint/prettier/vitest 81/81)·백엔드(ruff/pytest 65/65, C-001 NaN 검증 추가 반영) 전부 통과. 실제 FastAPI 서버+브라우저로 MIDI/MusicXML/GP 3종 업로드→서버 영속화(재시작 후에도 유지)→실제 재생까지 전체 플로우 확인, 삭제 시 파일 실제 제거·경로조작 방어 확인.
+> 한 줄 요약: T2-5 QA — 프론트(tsc/oxlint/prettier/vitest 81/81)·백엔드(ruff/pytest 66/66, C-001 NaN 검증+업로드 조기중단 회귀 테스트 반영) 전부 통과. 실제 FastAPI 서버+브라우저로 MIDI/MusicXML/GP 3종 업로드→서버 영속화(재시작 후에도 유지)→실제 재생까지 전체 플로우 확인, 삭제 시 파일 실제 제거·경로조작 방어 확인.
 
 # T2-5 QA 결과(2026-10-24)
 
@@ -11,7 +11,7 @@
 | 프론트 단위 테스트 | `npx vitest run` | PASS (81/81, T2-5 신규 7개 — `filterSongs` 6개 + `App.test.tsx` +1) |
 | 백엔드 lint | `ruff check`(T2-5가 바꾼 파일) | PASS |
 | 백엔드 포맷 | `ruff format --check`(T2-5가 바꾼 파일) | PASS |
-| 백엔드 단위 테스트 | `pytest` | PASS (65/65, T2-5 신규 27개 — 업로드 26개 + C-001 NaN 회귀 1개) |
+| 백엔드 단위 테스트 | `pytest` | PASS (66/66, T2-5 신규 28개 — 업로드 26개 + C-001 NaN 회귀 1개 + 업로드 조기중단 회귀 1개) |
 | 수동(실제 브라우저+실제 서버) | 업로드·재생·이름변경·삭제·검색·재시작 영속성 | PASS |
 
 전체 로그: `raw_log.txt`
@@ -80,9 +80,11 @@ Codex 모드A(독립 코드 검수, `codex-modeA.md`)가 REQUEST_CHANGES로 지�
 **재검증**: `score["audioOffsetMs"] = float("nan")`을 `json.dumps(allow_nan=True)`로 직렬화해 실제 업로드 API에 보내는 pytest(`test_upload_rejects_nan_audio_offset`)를 추가 — 422 거부 + 고아 Song 행 없음을 확인. 수정 후 `ruff check`/`ruff format --check`/`pytest` 재실행 — 전부 클린, 65/65 통과.
 
 ## Codex 모드B 검수 반영
-1차: QA 수치 불일치(C-001, 필수) — C-001(NaN) 수정 후 재실행한 65/65 출력을 `raw_log.txt`에 추가했으나, `report.md`·`result.md` 요약/표에는 여전히 64/64가 남아 있어 2차에서 다시 지적받음 → 세 곳 모두 65/65로 수정.
+1차: QA 수치 불일치(C-001, 필수) — C-001(NaN) 수정 후 재실행한 최신 테스트 결과를 `raw_log.txt`에 추가했으나, `report.md`·`result.md` 요약/표에는 여전히 수정 전 통과 수가 남아 있어 2차에서 다시 지적받음 → 세 곳 모두 최신(65/65)으로 수정.
 
-**권장 사항 C-002(반영 완료)**: `POST /songs`가 `await file.read()`를 인자 없이 호출해, 20MB 크기 제한을 검사하기 전에 파일 전체를 먼저 메모리에 읽어들이고 있었음(Starlette `UploadFile.read(size=-1)` 공식 시그니처로 확인) — 큰 업로드의 메모리 사용량을 실제로는 못 막는 구조. `file.read(chunk_size)`로 1MB씩 청크 단위로 읽으며 누적 크기가 상한을 넘는 순간 즉시 멈추도록 수정(전체를 다 읽지 않음). 재검증: 기존 `test_upload_rejects_oversized_file`이 새 청크 로직으로도 그대로 통과함을 확인, ruff/pytest 재실행 — 전부 클린, 65/65 통과.
+**권장 사항 C-002(반영 완료, 2라운드)**: `POST /songs`가 `await file.read()`를 인자 없이 호출해, 20MB 크기 제한을 검사하기 전에 파일 전체를 먼저 메모리에 읽어들이고 있었음(Starlette `UploadFile.read(size=-1)` 공식 시그니처로 확인) — 큰 업로드의 메모리 사용량을 실제로는 못 막는 구조. `file.read(chunk_size)`로 1MB씩 청크 단위로 읽으며 누적 크기가 상한을 넘는 순간 즉시 멈추도록 수정(전체를 다 읽지 않음).
+- 1라운드 재검증(불충분했음): 기존 `test_upload_rejects_oversized_file`(100바이트 입력, 10바이트 상한)이 통과함을 확인했다고 적었으나, 모드B 2차가 지적한 대로 이 테스트는 입력이 청크 크기(1MB)보다 작아 "끝까지 다 읽고 거부"와 "일찍 멈추고 거부" 둘 다 구분 없이 통과해버려 조기 중단 자체는 증명하지 못했음 — 반영 완료 주장이 과장이었음을 인정.
+- 2라운드 보강: `test_upload_oversized_file_stops_reading_early`를 추가 — `UploadFile.read()`를 몽키패치해 호출 횟수를 직접 세고, 10MB 입력+2MB 상한에서 `read()`가 4회 이하만 호출됨(끝까지 다 읽었다면 10회 이상 필요)을 확인해 조기 중단을 실측으로 증명. ruff/pytest 재실행 — 전부 클린, 66/66 통과.
 
 ## 가정/한계
 - `window.confirm()` 자동화 한계로 QA 중 1회 스텁 처리(실제 코드는 변경 없음).
