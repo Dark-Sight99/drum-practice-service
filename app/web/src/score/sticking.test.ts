@@ -20,10 +20,11 @@ describe('recommendSticking', () => {
 
   it('demotes the lower-priority fixed-R piece to L when two coincide at the same tick', () => {
     // T2-11 — 한 손이 같은 순간 두 악기를 칠 수 없음: 하이햇+크래시가 같은 틱이면
-    // 우선순위 낮은 크래시가 L로 밀려남(FIXED_HAND_PRIORITY).
+    // 우선순위 낮은 하이햇이 L로 밀려남(FIXED_HAND_PRIORITY, T2-17에서 순서 반전
+    // — 크래시가 하이햇보다 우선).
     const result = recommendSticking([note(0, 'hihat_closed'), note(0, 'crash')], PPQ)
-    expect(result.find((n) => n.piece === 'hihat_closed')?.hand).toBe('R')
-    expect(result.find((n) => n.piece === 'crash')?.hand).toBe('L')
+    expect(result.find((n) => n.piece === 'hihat_closed')?.hand).toBe('L')
+    expect(result.find((n) => n.piece === 'crash')?.hand).toBe('R')
   })
 
   it('keeps both hands distinct when ride and crash coincide (ride outranks crash)', () => {
@@ -33,16 +34,16 @@ describe('recommendSticking', () => {
   })
 
   it('does not demote a coincident piece because of a higher-priority piece the user moved off R', () => {
-    // Codex 모드A 지적(T2-11) — 사용자가 하이햇을 'L'로 직접 지정해놨으면 그 틱의
-    // 'R'은 비어 있으므로, 같은 틱 크래시는 'R'을 그대로 유지해야 한다(하이햇이
-    // 여전히 'R'을 쥐고 있다고 잘못 보고 크래시까지 'L'로 밀어, 하이햇·크래시가
-    // 둘 다 'L'로 겹치는 새 충돌을 만들면 안 됨).
+    // Codex 모드A 지적(T2-11), T2-17에서 우선순위 반전(크래시>하이햇)으로 역할 교체 —
+    // 사용자가 크래시를 'L'로 직접 지정해놨으면 그 틱의 'R'은 비어 있으므로, 같은
+    // 틱 하이햇은 'R'을 그대로 유지해야 한다(크래시가 여전히 'R'을 쥐고 있다고
+    // 잘못 보고 하이햇까지 'L'로 밀어, 둘 다 'L'로 겹치는 새 충돌을 만들면 안 됨).
     const result = recommendSticking(
-      [note(0, 'hihat_closed', { hand: 'L', handSource: 'user' }), note(0, 'crash')],
+      [note(0, 'crash', { hand: 'L', handSource: 'user' }), note(0, 'hihat_closed')],
       PPQ,
     )
-    expect(result.find((n) => n.piece === 'hihat_closed')?.hand).toBe('L')
-    expect(result.find((n) => n.piece === 'crash')?.hand).toBe('R')
+    expect(result.find((n) => n.piece === 'crash')?.hand).toBe('L')
+    expect(result.find((n) => n.piece === 'hihat_closed')?.hand).toBe('R')
   })
 
   it('recommends L for a snare that coincides with hihat/ride at the same tick', () => {
@@ -57,14 +58,28 @@ describe('recommendSticking', () => {
     // 같은 틱"만 검사하던 T2-11의 조건이 너무 좁았음 — 허용폭(PPQ=480 기준 30틱)
     // 이내면 "거의 동시"로 보고 똑같이 회피해야 한다.
     const result = recommendSticking([note(0, 'hihat_closed'), note(10, 'crash')], PPQ)
-    expect(result.find((n) => n.piece === 'hihat_closed')?.hand).toBe('R')
-    expect(result.find((n) => n.piece === 'crash')?.hand).toBe('L')
+    expect(result.find((n) => n.piece === 'hihat_closed')?.hand).toBe('L')
+    expect(result.find((n) => n.piece === 'crash')?.hand).toBe('R')
   })
 
   it('does not demote a fixed-R piece when the gap exceeds the simultaneity tolerance', () => {
     const result = recommendSticking([note(0, 'hihat_closed'), note(50, 'crash')], PPQ) // 50 > 30틱 허용폭
     expect(result.find((n) => n.piece === 'hihat_closed')?.hand).toBe('R')
     expect(result.find((n) => n.piece === 'crash')?.hand).toBe('R')
+  })
+
+  it('matches the real coincidence cases found in song id=2 after the T2-17 priority reversal', () => {
+    // T2-17 — 의뢰인이 실제로 지적한 두 경우(MusicDelta_Grunge, ppq=220)를 그대로
+    // 재현: 틱 4550(정확히 같은 틱)과 틱 17270 vs 17274(4틱 차이, 허용폭 이내) —
+    // 둘 다 크래시가 R 유지, 하이햇이 L로 밀려나야 한다(qa-evidence/T2-17/ 참조).
+    const songPpq = 220
+    const exactTick = recommendSticking([note(4550, 'hihat_closed'), note(4550, 'crash')], songPpq)
+    expect(exactTick.find((n) => n.piece === 'hihat_closed')?.hand).toBe('L')
+    expect(exactTick.find((n) => n.piece === 'crash')?.hand).toBe('R')
+
+    const nearTick = recommendSticking([note(17274, 'hihat_closed'), note(17270, 'crash')], songPpq)
+    expect(nearTick.find((n) => n.piece === 'hihat_closed')?.hand).toBe('L')
+    expect(nearTick.find((n) => n.piece === 'crash')?.hand).toBe('R')
   })
 
   it('recommends L for a snare within tolerance of a hihat/ride hit, not just exact-tick matches', () => {
