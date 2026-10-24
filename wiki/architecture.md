@@ -216,8 +216,19 @@ Phase 3 첫 작업 — REQ-01(오디오 분리). "공개 API+외부 모델 연�
 - **실제 버그 발견**: 실제 end-to-end QA(실제 mp4→wav 변환→실제 업로드→실제 워커→실제 Demucs) 중 Windows cp949 콘솔 환경에서 `subprocess.run(text=True)`가 Demucs 진행률 표시줄의 유니코드 문자를 디코딩하다 내부 리더 스레드가 죽는 버그를 발견 — `encoding="utf-8", errors="replace"` 명시로 수정. mp4(비디오) 입력도 ffmpeg 백엔드 덕에 Demucs가 바로 처리 가능함을 실측 확인(`qa-evidence/T3-1/demucs_mp4_spike.md`), 단 공식 업로드 API엔 반영 안 함(범위 밖).
 - 프런트엔드 음원 업로드 화면은 범위 밖(백엔드 모듈·API·큐 연결만).
 
+## DrumTranscriber 모듈(ADTOF-pytorch) + 작업 연결 (T3-2, 2026-10-25, Phase 3)
+REQ-02 경로 A. "공개 API+외부 모델 연동+스키마 확장"(위험 작업)이라 Codex 모드C 3라운드를 거쳤다.
+
+- **T3-1과 자동 연결 안 함**: `POST /songs/{id}/transcribe`(명시적 트리거) — REQ-01(분리)·REQ-02(채보)가 독립 요구사항이고(T3-3 다중 트랙 재생은 분리만으로 가치 있음), Q-26 하이브리드 입력(악보 보조) 방향과의 향후 흐름 충돌을 피하기 위함.
+- **5-class→9-class 변환**(`modules/transcriber/midi_to_drumscore.py`): ADTOF가 하이햇/탐/심벌을 각각 하나로 합쳐 출력 — 명시적 기본값(`hihat_closed`/`tom_mid`/`crash`)으로 단일 피스에 매핑, 추측임을 Q-26에 그대로 기록(숨기지 않음). `pretty_midi.time_to_tick()`으로 초→틱 변환을 직접 구현 안 함.
+- **스테이징 후 승격**(`modules/transcriber/handler.py`): 재채보 시 기존 `drumscore.json`을 바로 안 덮어씀 — 새 내용을 `drumscore.json.new`에 먼저 쓰고, `DRUMSCORE_RAW` Asset find-or-create(T2-6의 `_find_edited_asset`과 같은 패턴)+`Song.COMPLETED` 커밋이 확정된 뒤에만 원자적 rename으로 교체 — DB 커밋이 실패해도 기존 파일이 유실되지 않음(Codex 모드C 2차가 "최초 채보" 경로의 유실 가능성을 정확히 지적해 이 설계로 귀결). `DRUMSCORE_EDITED`는 절대 안 건드림(의도된 동작 — `GET .../drumscore`가 EDITED 우선).
+- **`_sync_song_status_with_job()` 안전망 강화**(T3-1에서 신설, 이번에 확장): PROCESSING뿐 아니라 PENDING도 커버하도록 조건을 넓힘(핸들러의 맨 처음 PROCESSING 커밋 자체가 실패하는 극단적 경우까지 — job_type 무관이라 T3-1 SEPARATE도 같이 혜택).
+- **중복 작업 방지**: `POST /songs/{id}/transcribe`가 같은 곡에 QUEUED/PROCESSING TRANSCRIBE 작업이 이미 있으면 새로 안 만들고 그 Job을 반환 — 단, 진짜 동시 HTTP 요청 경쟁(check-then-create)까지는 DB 유니크 제약 없이는 못 막음(Codex 모드A 지적) — Q-17 "워커 1개만 운영" 전제 하에서는 find-or-create가 결과 데이터를 여전히 1개로 수렴시켜 실질 위험 없다고 판단해 마이그레이션 보류(Q-17에 트레이드오프로 기록).
+- **실제 버그 없이 end-to-end 성공**: F-measure가 이미 측정된 MDB Drums 기준곡(T0-2와 동일)으로 업로드→분리→채보 전체를 실행해 258개 노트·피치 분포가 T0-2의 원시 측정값과 정확히 일치함을 확인, 프런트엔드(T2-1~T2-8)가 코드 변경 없이 그대로 재생함을 브라우저로 확인.
+- Q-10(셈여림) 해소: ADTOF-pytorch CLI가 velocity=100을 하드코딩(모델 예측 아님, 소스 확인).
+
 ## 아직 없는 것 (다음 작업)
-- 드럼 채보 핸들러(`JobType.TRANSCRIBE`, ADTOF) 등록 — T3-2(Phase 3). OMR(Audiveris)은 Phase 4. Demucs 분리(T3-1)는 완료.
+- OMR(Audiveris, 종이 악보 경로 B) — Phase 4. Demucs 분리(T3-1)·ADTOF 채보(T3-2)는 완료.
 - 편집기 마우스 드래그 이동, 곡 중간 템포변경, OMR 원본 대조 패널, 왼손잡이 레인 반전 — 범위 밖으로 명시 보류(`work/T2-6/plan.md`, `work/T2-7/plan.md` §범위)
 - REQ-04 공식 ±30ms 측정(Q-05) — 분리 오디오 트랙(Phase 3)과 BPM UI 모두 있어야 가능. T2-8이 "초 단위" 구조적 버그는 제거했지만 "ms 단위" 실측은 여전히 미해소
 - 오디오-MIDI 오프셋 정렬 UI(T3-5) — 생기면 `audioOffsetMs`를 0 이외 값으로 쓸 수 있게 되는데, 그때 A-B 루프 경계와의 상호작용(Q-23)도 같이 설계해야 함
