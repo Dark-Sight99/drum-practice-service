@@ -95,6 +95,15 @@ python -m venv .venv   # 최초 1회
 - 톰은 팩에 실제로 2종(Low/High)뿐이라 우리 스키마의 3종(high/mid/floor)과 안 맞음 — 피치시프트 등 가공 없이 Low Tom의 서로 다른 실제 타법(center=mid, off-center=floor)으로 구분.
 - 라이선스: `public/audio/drums/LICENSE.txt` + `intent/03-architecture-stack.md` §4.
 
+## 연습 화면 렌더러 (T2-3, 2026-10-24)
+- `app/web/src/render/layout.ts` — 노트 Y좌표, 낙하 속도(`pixelsPerSecond`), 보이는 노트 필터링, 마디/박선, 판정선 히트 판정을 전부 **순수 함수**로 분리(Tone.js·Canvas 의존 없음). `LANES` 상수로 8레인(HH, CR, SN, T1, T2, FT, RD, KK — 하이햇 닫힘/열림이 한 레인 공유)·피스별 모양(`intent/08-design.md` §3)을 정의.
+- **jsdom은 Canvas 2D 컨텍스트가 없음**(실제 실행으로 확인 — `document.createElement('canvas').getContext('2d')`가 `null`, "Not implemented" 경고) — T2-2의 Web Audio와 같은 사유. 그래서 `layout.ts`(순수 계산)만 단위 테스트(15개)하고, 실제 그리기(`laneRenderer.ts`, Canvas 2D)와 fps는 **실제 브라우저**로 수동 QA.
+- `laneRenderer.ts`: 노트 9종 모양(X/X+원/큰X/마름모/둥근사각형/원/큰원/막대)을 Canvas 2D로 직접 그림. `layout.ts`의 `barBeatLines`는 **반열림 구간**(`[start, end)`)으로 설계 — 닫힌 구간으로 하면 스크롤되는 인접 프레임 창끼리 경계(마디 끝=다음 마디 시작)에서 선이 중복 그려지는 걸 처음엔 못 보고 지나쳤다가 테스트로 발견·수정.
+- `PracticeCanvas.tsx`: rAF 루프로 마스터 클록 위치를 매 프레임 읽어 `laneRenderer`+`KitIllustration`(SVG 킷 점등)을 구동. **재생 중일 때만** 활성 피스를 계산 — 재생 여부와 무관하게 항상 계산하면 정지 중(클록 위치 고정) 그 근처 노트가 계속 "히트"로 잡혀 킷이 켜진 채 남는 버그가 있었음(Codex 모드A C-001, 실제 재현 후 `isPlayingRef`로 수정). 상태 전환은 `useEffect` 대신 `handlePlay`/`stopPlayback` 이벤트 핸들러 안에서 직접 수행(oxlint `react(set-state-in-effect)` 규칙).
+- **fps 30→60 버그**: 렌더 루프가 매 프레임(최대 60회/초) 새 `Set` 객체로 `setActivePieces`를 호출해, 활성 피스가 안 바뀌는 대부분의 프레임에도 React가 `PracticeCanvas`+`KitIllustration`을 통째로 리렌더하고 있었음(실측 평균 33.3ms/프레임≈30fps). 직전 프레임의 활성 피스 집합을 문자열 키로 캐싱해 내용이 실제로 바뀔 때만 `setState`하도록 수정 — 재검증 평균 16.68ms/프레임(**약 60fps**, `requestAnimationFrame` 180프레임 실측 원자료 `qa-evidence/T2-3/raw_log.txt` §5).
+- 드럼킷 일러스트는 `intent/07-open-questions.md` Q-09(의뢰인 디자인 승인 필요, 미해결)에 따라 정밀 그래픽이 아닌 단순 도형(원+글자) placeholder. 폰 세로의 "킷 축소 아이콘"은 완전히 숨김으로 단순화(아이콘 디자인은 범위 밖).
+- Codex 모드B가 1차 검수에서 fps·테스트 통과 수치가 QA 증거에 **원자료 없이 요약만** 있어 대조 불가하다고 REQUEST_CHANGES — 실제 명령 출력(`reverify-20261024.txt`)과 fps 실측 JSON(`raw_log.txt` §5)을 보강한 뒤 2차 APPROVE. 교훈: 측정값 주장은 요약 문장만으로는 검수자가 재현·대조할 수 없으므로 원자료를 QA 증거에 항상 같이 남길 것.
+
 ## 아직 없는 것 (다음 작업)
 - 큐에 작업을 넣는 공개 API(업로드 트리거), 실제 처리 핸들러(Demucs/ADTOF/Audiveris) 등록 — Phase 3/4
 - 파일 선택 UI(input/드래그앤드롭), 가져온 DrumScore의 서버 저장(원본+편집본) — T2-5(라이브러리 화면)
