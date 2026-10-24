@@ -22,6 +22,13 @@ describe('snapTick', () => {
     expect(snapTick(960, '8n', 480)).toBe(960)
     expect(snapTick(0, '16n', 480)).toBe(0)
   })
+
+  it('always returns an integer tick even when ppq is not evenly divisible by the grid divisor (Codex 모드A 지적)', () => {
+    // ppq=100, '8nt'(÷3) → ticksPerGridUnit = 33.333…, 스냅 결과도 정수가 아닐 수
+    // 있었음(score/validate.ts는 정수가 아닌 tick을 거부).
+    const result = snapTick(50, '8nt', 100)
+    expect(Number.isInteger(result)).toBe(true)
+  })
 })
 
 describe('EDITOR_ROWS / editorRowIndexForPiece', () => {

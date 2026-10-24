@@ -154,7 +154,10 @@ export function EditorScreen({ song, initialScore, onSaved, onCancel }: EditorSc
 
   function moveSelected(deltaTicks: number, deltaRows: number) {
     if (selectedNote === null) return
-    const nextTick = Math.max(0, selectedNote.tick + deltaTicks)
+    // ppq가 격자 분할 수로 나누어떨어지지 않으면 unitTicks 자체가 정수가 아닐 수
+    // 있어(Codex 모드A 지적, grid.ts의 snapTick 주석 참고) 더한 뒤 다시 격자에
+    // 스냅해 항상 정수·격자정렬 틱을 보장한다.
+    const nextTick = snapTick(Math.max(0, selectedNote.tick + deltaTicks), gridUnit, ppq)
     const rowIdx = editorRowIndexForPiece(selectedNote.piece)
     const nextRowIdx = Math.min(EDITOR_ROWS.length - 1, Math.max(0, rowIdx + deltaRows))
     updateSelectedNote({ tick: nextTick, piece: EDITOR_ROWS[nextRowIdx].piece })

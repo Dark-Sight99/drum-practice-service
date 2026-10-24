@@ -87,6 +87,29 @@ describe('EditorScreen', () => {
     expect(screen.getByText(/틱 720/)).toBeInTheDocument()
   })
 
+  it('keeps moved notes on an integer tick even when ppq is not divisible by the grid divisor (Codex 모드A 지적)', () => {
+    const score: DrumScore = {
+      version: 1,
+      meta: { title: '테스트곡', bpm: 120, timeSignature: [4, 4], source: 'midi' },
+      ppq: 100, // 100 / 3(8nt 분할) = 33.333… — 정수가 아닌 격자 스텝
+      audioOffsetMs: 0,
+      notes: [{ tick: 50, piece: 'kick', velocity: 90, hand: null }],
+    }
+    render(<EditorScreen song={song} initialScore={score} onSaved={() => {}} onCancel={() => {}} />)
+
+    const select = screen.getByDisplayValue('8분') as HTMLSelectElement
+    fireEvent.change(select, { target: { value: '8nt' } })
+
+    const kickRow = screen.getByTestId('editor-row-kick')
+    fireEvent.click(kickRow.querySelectorAll('button')[0])
+    const grid = screen.getByRole('application')
+    fireEvent.keyDown(grid, { key: 'ArrowRight' })
+
+    const text = screen.getByText(/틱 [\d.]+/).textContent ?? ''
+    const tick = Number(/틱 ([\d.]+)/.exec(text)?.[1])
+    expect(Number.isInteger(tick)).toBe(true)
+  })
+
   it('changes the selected note piece with ArrowUp/ArrowDown', () => {
     render(
       <EditorScreen song={song} initialScore={makeScore()} onSaved={() => {}} onCancel={() => {}} />,

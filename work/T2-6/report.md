@@ -1,4 +1,4 @@
-> 한 줄 요약: 피아노롤 방식 드럼 편집기(REQ-03) 구현 — 노트 추가/삭제/이동/악기변경/셈여림, 실행취소·다시실행(100단계), BPM/박자표 편집, `PUT /songs/{id}/drumscore` 저장. 구현 전 Codex 모드C 설계 검수 3회(동시저장 중복 방지·파일 원자적 쓰기)를 거쳤고, 실제 서버+브라우저로 저장→재오픈 동일성과 PracticeCanvas 연동까지 확인. 수동 QA 중 발견한 행 레이블 가로스크롤 소실 버그를 직접 고쳤다.
+> 한 줄 요약: 피아노롤 방식 드럼 편집기(REQ-03) 구현 — 노트 추가/삭제/이동/악기변경/셈여림, 실행취소·다시실행(100단계), BPM/박자표 편집, `PUT /songs/{id}/drumscore` 저장. 구현 전 Codex 모드C 설계 검수 3회(동시저장 중복 방지·파일 원자적 쓰기), 구현 후 모드A에서 ppq가 격자 분할 수로 안 나누어떨어질 때 정수가 아닌 틱이 생기는 문제(P1) 발견·수정. 실제 서버+브라우저로 저장→재오픈 동일성과 PracticeCanvas 연동까지 확인. 수동 QA 중 발견한 행 레이블 가로스크롤 소실 버그를 직접 고쳤다.
 
 # T2-6 보고
 
@@ -29,5 +29,8 @@
 - **DOM 기반 편집기는 T2-3/T2-4/T2-5와 달리 React Testing Library로 jsdom에서 직접 테스트 가능**: Canvas 2D나 Tone.js(Web Audio)에 의존하지 않는 순수 DOM 이벤트 UI라서, 클릭→노트추가, 방향키→이동, undo/redo, 저장 호출, BPM 입력 포커스 격리까지 jsdom 컴포넌트 테스트로 검증했다(`EditorScreen.test.tsx` 9개).
 - **수동 QA로만 발견 가능했던 버그**: 실제 서버 데이터로 가로 스크롤을 해보니 행 레이블이 화면 밖으로 완전히 사라짐을 발견(스크린샷 `qa-evidence/T2-6/screenshot-labels-bug-before-fix.jpg`) — 악보를 못 읽는 사용자에게는 레이블이 유일한 행 식별 수단이라 실사용에 치명적인 문제였다. `position: sticky` 기반 고정 거터로 수정하고 재검증(`screenshot-labels-fixed-after.jpg`). 이 문제는 자동 테스트(jsdom은 실제 레이아웃/스크롤을 계산하지 않음)로는 발견할 수 없었다.
 
+## Codex 모드A(독립 코드 검수) 반영
+`qa-evidence/T2-6/codex-modeA.md` — P1 1건: `ticksPerGridUnit`이 ppq를 격자 분할 수(8분음표 셋잇단=3)로 나누는데, MIDI ppq가 3으로 나누어떨어지지 않으면(예: ppq=100) 결과가 정수가 아니게 되고, 이게 `snapTick`을 거쳐 `DrumScore.notes[i].tick`까지 전파되면 `score/validate.ts`의 정수 검증에 걸려 저장이 거부될 수 있음을 지적. 직접 계산으로 재현 확인(`snapTick(50, '8nt', 100) = 66.666…`). 코드를 더 살펴보니 방향키 이동(`moveSelected`)은 `snapTick`조차 거치지 않고 직접 덧셈만 해서 같은 종류의 문제가 하나 더 있었음을 추가로 발견. `snapTick`의 최종 결과를 반올림하고, `moveSelected`가 `snapTick`을 거치도록 수정 후 회귀 테스트 2개(그리드 단위 1개, EditorScreen RTL 1개) 추가 — 107/107 재통과.
+
 ## 실행한 검증
-`qa-evidence/T2-6/result.md`, `raw_log.txt` — 프론트 tsc/oxlint/vitest(105/105), 백엔드 ruff/pytest(77/77) 전부 PASS. 실제 FastAPI 서버+브라우저로 편집기 전체 조작(추가/선택/이동/악기변경/셈여림/undo-redo/삭제/저장), 저장→새로고침→재오픈 동일성(REQ-03 핵심 기준), PracticeCanvas가 편집본을 재생함을 확인. prettier CRLF 경고는 레포 전체의 기존 문제임을 `git stash` 비교로 확인(T2-6 범위 밖, result.md 참고).
+`qa-evidence/T2-6/result.md`, `raw_log.txt` — 프론트 tsc/oxlint/vitest(107/107, Codex 모드A 수정 반영), 백엔드 ruff/pytest(77/77) 전부 PASS. 실제 FastAPI 서버+브라우저로 편집기 전체 조작(추가/선택/이동/악기변경/셈여림/undo-redo/삭제/저장), 저장→새로고침→재오픈 동일성(REQ-03 핵심 기준), PracticeCanvas가 편집본을 재생함을 확인. prettier CRLF 경고는 레포 전체의 기존 문제임을 `git stash` 비교로 확인(T2-6 범위 밖, result.md 참고).

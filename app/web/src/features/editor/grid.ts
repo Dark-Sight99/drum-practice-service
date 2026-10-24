@@ -11,10 +11,16 @@ export function ticksPerGridUnit(unit: GridUnit, ppq: number): number {
   return ppq / DIVISOR_BY_UNIT[unit]
 }
 
-/** 틱을 가장 가까운 격자선으로 반올림(스냅). */
+/** 틱을 가장 가까운 격자선으로 반올림(스냅).
+ *
+ * `ppq`가 격자 분할 수(8분음표 셋잇단은 3)로 나누어떨어지지 않으면(예: ppq=100에
+ * '8nt') `ticksPerGridUnit`이 정수가 아닌 값을 반환하고, 그 결과 스냅된 틱도
+ * 정수가 아니게 될 수 있다 — `score/validate.ts`는 `note.tick`이 정수가 아니면
+ * 거부한다(Codex 모드A 지적, 실제로 재현됨: ppq=100, '8nt'에서 tick=50 →
+ * 66.666…). 최종 결과를 한 번 더 반올림해 항상 정수를 반환한다. */
 export function snapTick(tick: number, unit: GridUnit, ppq: number): number {
   const step = ticksPerGridUnit(unit, ppq)
-  return Math.round(tick / step) * step
+  return Math.round(Math.round(tick / step) * step)
 }
 
 /** 편집기 세로 9행 — 연습 화면의 8레인(T2-3 LANES, 하이햇 닫힘/열림 공유 1레인)과

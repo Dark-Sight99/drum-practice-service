@@ -50,3 +50,26 @@ INFO  [alembic.runtime.migration] Context impl SQLiteImpl.
 INFO  [alembic.runtime.migration] Will assume non-transactional DDL.
 1424de118cb2 (head)
 EXIT=0
+
+===== Codex 모드A 반영 후 재검증 =====
+===== app/web: npx tsc -b =====
+EXIT=0
+
+===== app/web: npx oxlint =====
+EXIT=0
+
+===== app/web: npx vitest run =====
+
+ RUN  v5.0.5 C:/Users/Jaewoo/드럼연습서비스/app/web
+
+
+ Test Files  14 passed (14)
+      Tests  107 passed (107)
+   Start at  17:26:59
+   Duration  2.57s (environment 77%, setup 11%, import 5%, tests 3%, transform 3%, worker 1%)
+
+Environment  jsdom was created 14 times · 14.16s total, 77% of tracked time
+             create it once per worker with pool: 'vmThreads' (keeps per-file isolation) or isolate: false (shares it across files)
+             learn more: https://vitest.dev/guide/improving-performance#test-environments
+
+EXIT=0

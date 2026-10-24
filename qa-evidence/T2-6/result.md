@@ -1,4 +1,4 @@
-> 한 줄 요약: T2-6 QA — 프론트(tsc/oxlint/vitest 105/105)·백엔드(ruff/pytest 77/77) 전부 통과. 실제 FastAPI 서버+브라우저로 편집기 add/select/move/kit변경/velocity/undo-redo/삭제/저장→새로고침→재오픈 동일성(REQ-03 핵심 기준) 확인, 편집본이 PracticeCanvas 재생에도 반영됨을 확인. 수동 QA 중 발견한 행 레이블 가로스크롤 소실 버그를 코드로 수정(고정 거터)하고 재검증 완료.
+> 한 줄 요약: T2-6 QA — 프론트(tsc/oxlint/vitest 107/107)·백엔드(ruff/pytest 77/77) 전부 통과. 실제 FastAPI 서버+브라우저로 편집기 add/select/move/kit변경/velocity/undo-redo/삭제/저장→새로고침→재오픈 동일성(REQ-03 핵심 기준) 확인, 편집본이 PracticeCanvas 재생에도 반영됨을 확인. 수동 QA 중 발견한 행 레이블 가로스크롤 소실 버그를 코드로 수정(고정 거터), Codex 모드A에서 발견한 비정수 틱 버그(P1)도 수정하고 재검증 완료.
 
 # T2-6 QA 결과(2026-10-24)
 
@@ -8,7 +8,7 @@
 | 프론트 타입체크 | `npx tsc -b` | PASS |
 | 프론트 lint | `npx oxlint` | PASS |
 | 프론트 포맷 | `npx prettier --check`(T2-6가 바꾼 파일) | FAIL — 전부 CRLF 줄바꿈 문제(아래 "알려진 이슈" 참고, T2-6 범위 밖) |
-| 프론트 단위 테스트 | `npx vitest run` | PASS (105/105 — 기존 T2-5까지 81개 + T2-6 신규 24개: grid 5 + editHistory 6 + velocity 3 + EditorScreen RTL 9 + App.test.tsx 기존 1) |
+| 프론트 단위 테스트 | `npx vitest run` | PASS (107/107 — 기존 T2-5까지 81개 + T2-6 신규 26개: grid 6 + editHistory 6 + velocity 3 + EditorScreen RTL 10 + App.test.tsx 기존 1, Codex 모드A 회귀 2개 포함) |
 | 백엔드 lint | `ruff check`(T2-6가 바꾼 파일) | PASS |
 | 백엔드 포맷 | `ruff format --check`(T2-6가 바꾼 파일) | PASS |
 | 백엔드 단위 테스트 | `pytest` | PASS (77/77, T2-6 신규 11개) |
@@ -41,6 +41,9 @@ Claude Browser pane(Vite dev 5173 → `/api` 프록시 → 실제 `uvicorn` 127.
 8. **REQ-03 핵심 — 저장→새로고침→재오픈 동일성**: KK 틱 1430 노트를 추가해 저장(204 응답, 라이브러리로 복귀) → 같은 탭에서 "편집" 재클릭 → 노트 존재 확인 → **브라우저 전체 새로고침(새 앱 인스턴스, 서버에서 새로 fetch)** 후 다시 "편집" 클릭 → 노트가 여전히 존재함을 확인. 서버 로그에도 `PUT /songs/2/drumscore → 204`가 정확히 1건 기록됨.
 9. **PracticeCanvas 연동 확인**(T2-5↔T2-6 end-to-end 최초 확인): 저장한 편집본 상태로 라이브러리에서 곡 제목 클릭(연습 화면 진입) → PracticeCanvas가 정상 렌더링됨(레인·킷 일러스트 모두 표시) — `GET /songs/{id}/drumscore`가 T2-5에서 구현한 DRUMSCORE_EDITED 우선 로직을 그대로 타므로, 방금 편집·저장한 내용이 연습 화면에도 반영된다.
 10. **정리**: 테스트용 KK 노트를 삭제 후 재저장해 원본 데이터로 복원, 재오픈으로 복원 확인.
+
+## Codex 모드A(독립 코드 검수) 반영
+`codex-modeA.md` — P1 1건: ppq가 격자 분할 수(8분음표 셋잇단=3)로 나누어떨어지지 않으면 스냅/이동된 틱이 정수가 아니게 돼 `validateDrumScore`가 거부할 수 있음(실제 재현 확인). `grid.ts`의 `snapTick`이 최종 결과를 반올림하도록, `EditorScreen.tsx`의 방향키 이동이 `snapTick`을 거치도록 수정하고 회귀 테스트 2개 추가. 위 표의 수치는 이 수정 반영 후 기준.
 
 ### 수동 QA 중 발견한 버그 → 수정 → 재검증
 그리드를 가로로 스크롤하면 행 레이블(HH/CR/SN/...)이 음표와 같은 스크롤 영역에 `position: absolute`로 떠 있어서 **화면 밖으로 완전히 사라짐**을 발견(스크린샷으로 재현). 이 앱의 첫 사용자가 악보를 못 읽어 레이블이 유일한 행 식별 수단이므로, 곡 후반부를 편집할 때 어느 행이 무슨 악기인지 알 수 없게 되는 실사용 문제였다.
