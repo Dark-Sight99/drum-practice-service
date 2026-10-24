@@ -1,10 +1,22 @@
-import { render, screen } from '@testing-library/react'
-import { describe, expect, it } from 'vitest'
+import { render, screen, waitFor } from '@testing-library/react'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import App from './App'
 
 describe('App', () => {
-  it('renders the project title', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it('shows the login screen when not logged in', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(null, { status: 401 })))
     render(<App />)
-    expect(screen.getByText('드럼 연습 서비스')).toBeInTheDocument()
+    await waitFor(() => expect(screen.getByText('드럼 연습 서비스')).toBeInTheDocument())
+    expect(screen.getByLabelText('아이디')).toBeInTheDocument()
+  })
+
+  it('falls back to the login screen when the auth check fails outright', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('network error')))
+    render(<App />)
+    await waitFor(() => expect(screen.getByText('드럼 연습 서비스')).toBeInTheDocument())
   })
 })
