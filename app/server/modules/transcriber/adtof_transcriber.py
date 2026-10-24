@@ -73,7 +73,12 @@ def normalize_loudness(
         # 모드A 피드백 2차 1라운드 C-001: mkstemp()가 만든 임시 파일은 sf.write()가
         # 실패해도 OS에 이미 존재 — 여기서 못 지우면 호출자에게 경로가 전달되지
         # 않아 영원히 못 지워지는 고아 파일이 됨.
-        tmp_path.unlink(missing_ok=True)
+        # 모드A 피드백 2차 2라운드 나이트픽: 정리(unlink) 자체가 실패해도 원래
+        # sf.write() 예외가 가려지면 안 되므로 정리 실패는 조용히 무시.
+        try:
+            tmp_path.unlink(missing_ok=True)
+        except OSError:
+            pass
         raise
     return tmp_path
 
