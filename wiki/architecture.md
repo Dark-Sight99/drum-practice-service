@@ -127,10 +127,21 @@ python -m venv .venv   # 최초 1회
 - **화면 전환**: 라우팅 라이브러리 없이 `App.tsx`가 `screen` 상태(`login`/`library`/`upload`/`practice`)로 전환 — 화면 4개뿐이고 URL 딥링크 요구사항이 없어 당장은 과한 설계라고 판단. 나중에 URL 공유·뒤로가기가 필요해지면 재검토 필요(Codex 모드C 리스크 의견으로 기록해둠).
 - **업로드→재생 연결**: 라이브러리에서 곡을 클릭하면 `GET /songs/{id}/drumscore`로 서버가 저장한 DrumScore를 가져와 T2-3/T2-4가 만든 `PracticeCanvas`에 그대로 넘긴다 — 이 연결로 T2-1(가져오기)·T2-2~T2-4(오디오 엔진·레인·BPM)가 비로소 실제 영속 데이터로 동작하는 것을 확인했다(실제 FastAPI 서버 재시작 전후로 재생까지 전체 플로우 확인).
 
+## 드럼 편집기 (T2-6, 2026-10-24)
+피아노롤 방식 편집기. "DB 스키마 변경(부분 유니크 인덱스)+공개 API 추가"(위험 작업)라 구현 전 Codex 모드C 설계 검수 3회를 거쳤다.
+
+- **격자 수학**: `app/web/src/features/editor/grid.ts` — `GridUnit = '4n'|'8n'|'16n'|'8nt'`(8분음표 셋잇단 포함), `ticksPerGridUnit(unit, ppq) = ppq / {4n:1,8n:2,16n:4,'8nt':3}[unit]`. **ppq가 분할 수로 나누어떨어지지 않으면(예: ppq=100에 '8nt') 비정수 틱이 나올 수 있어**(Codex 모드A 지적, 실제 재현됨 — `score/validate.ts`가 정수 틱만 허용) `snapTick`이 최종 결과를 반올림하고, `EditorScreen.tsx`의 방향키 이동도 반드시 `snapTick`을 거치도록 함(직접 덧셈 금지).
+- **행 구성**: `EDITOR_ROWS`(9행, 하이햇 닫힘/열림을 별도 행으로 분리 — T2-3 `LANES`의 8레인과 다름, 편집기는 정밀한 피스 지정이 필요하기 때문). 행 레이블은 `position: sticky`로 가로 스크롤과 무관하게 항상 보이게 함(수동 QA 중 발견한 버그 — 악보를 못 읽는 사용자에게 레이블이 유일한 행 식별 수단이라 치명적이었음).
+- **실행취소/다시실행**: `editHistory.ts` — `{past, present, future}` 스냅샷 방식, `MAX_HISTORY=100`(REQ-03 요구 ≥20보다 여유 있게).
+- **노트 식별**: `DrumScore`/`DrumNote`엔 안정적인 id가 없어 편집기 내부에서만 쓰는 `EditableNote { ..._editorId: number }`를 로드 시 순차 부여, 저장 직전 destructuring으로 제거.
+- **편집기는 Canvas가 아니라 DOM/SVG** — T2-3(Canvas 2D)·T2-2(Tone.js/Web Audio)와 달리 jsdom이 못 구현하는 API에 의존하지 않아, 유일하게 React Testing Library로 클릭·키보드 조작까지 jsdom에서 직접 테스트 가능(`EditorScreen.test.tsx`). 키보드 단축키(방향키/Delete/1·2·3)는 그리드 컨테이너(`tabIndex=0`)에만 바인딩 — BPM/박자표 입력창에 포커스가 있을 때는 이벤트가 거기까지 버블링되지 않아 자동으로 격리됨(별도 "input이면 무시" 분기 불필요).
+- **저장 API**: `PUT /songs/{id}/drumscore` — `get_owned_song`·`DrumScoreIn`(T2-5와 동일 모델) 재사용. 기존 `DRUMSCORE_EDITED` Asset을 조회해 있으면 UPDATE, 없으면 INSERT하되 **DB 레벨 부분 유니크 인덱스**(`Asset(song_id) WHERE kind='drumscore_edited'`, `sqlite_where`)로 동시 요청 간 중복 삽입을 막고, `IntegrityError` 발생 시 `db.rollback()` 후 재조회→UPDATE로 복구(ORM 세션은 rollback 없이 추가 쿼리 시 `PendingRollbackError`가 남을 실제 실행으로 확인). 전역 `(song_id, kind)` 유니크가 아니라 `DRUMSCORE_EDITED`에만 범위를 한정한 이유: Phase 4의 `SHEET_IMAGE`가 곡당 여러 행을 가져야 함.
+- **파일 쓰기 원자성**: `file_storage.write_song_file()`을 같은 디렉터리+요청별 고유(`uuid4`) 임시파일명으로 재작성(`Path.replace()`는 같은 디렉터리/볼륨 안에서만 원자적) — T2-5의 업로드 경로도 같은 함수를 공유해 함께 강화됨.
+- **편집→연습 연동**: `fetchSongDrumScore()`를 편집기·연습 화면이 동일하게 사용, `GET /songs/{id}/drumscore`가 T2-5에서 구현한 DRUMSCORE_EDITED 우선 로직을 그대로 타 저장한 편집본이 `PracticeCanvas`에도 반영됨을 확인(T2-5↔T2-6 end-to-end 최초 연결 확인).
+
 ## 아직 없는 것 (다음 작업)
 - 큐에 작업을 넣는 공개 API(업로드 트리거), 실제 처리 핸들러(Demucs/ADTOF/Audiveris) 등록 — Phase 3/4
-- 파일 선택 UI(input/드래그앤드롭), 가져온 DrumScore의 서버 저장(원본+편집본) — T2-5(라이브러리 화면)
-- BPM 슬라이더·A-B 루프(T2-4), 연습 화면 렌더러가 마스터 클록에 동기화(T2-3)
+- 스티킹(hand 필드, 자동 추천, 편집기 일괄 교대, 레인·킷 R/L 표시) — T2-7
+- 편집기 마우스 드래그 이동, 곡 중간 템포변경, OMR 원본 대조 패널 — 범위 밖으로 명시 보류(`work/T2-6/plan.md` §범위)
 - REQ-04 공식 ±30ms 측정(Q-05) — 분리 오디오 트랙(Phase 3)과 BPM UI 모두 있어야 가능
-- 실제 화면(연습·라이브러리·편집·믹서)은 Phase 2부터
 - 관리자 콘솔 UI 없음(API만) — 계정 생성은 지금은 API 직접 호출 필요
