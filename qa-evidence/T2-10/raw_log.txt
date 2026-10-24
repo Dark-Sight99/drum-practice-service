@@ -36,3 +36,13 @@ grep exit code: 0
 
 명령: git show main:app/web/src/render/laneRenderer.ts | wc -l (전체 줄 수 — 함수 전체를 다 봤다는 근거로)
 283
+
+===== Codex 모드B 3차 지적 반영 — strokeText도 함께 검사 =====
+명령: git show main:app/web/src/render/laneRenderer.ts | grep -n "fillText\|strokeText"
+254:              ctx.fillText(label, laneCenterX, y - shapeBottomExtent(shape, noteSize) - 2)
+grep exit code: 0
+
+명령: grep -n "fillText\|strokeText" app/web/src/render/laneRenderer.ts (수정 후, 현재 브랜치)
+264:              ctx.fillText(label, laneCenterX, y - shapeBottomExtent(shape, noteSize) - 2)
+291:        ctx.fillText(LANES[laneIndex].label, laneCenterX, LANE_HEADER_HEIGHT / 2)
+grep exit code: 0
