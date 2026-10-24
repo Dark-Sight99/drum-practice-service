@@ -1,0 +1,4 @@
+fps 30.0 n_frames 765
+visual series computed, nonzero frames: 515
+audio sr 16000 samples 407552
+saved

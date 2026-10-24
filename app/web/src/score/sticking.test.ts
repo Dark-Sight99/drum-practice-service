@@ -51,6 +51,27 @@ describe('recommendSticking', () => {
     expect(snare?.hand).toBe('L')
   })
 
+  it('demotes a fixed-R piece within tolerance of a higher-priority piece even on a different tick', () => {
+    // T2-12, Phase 2 게이트 5차 피드백 — 의뢰인이 실제 화면에서 하이햇·크래시가
+    // 몇 틱(약 9ms) 차이로 서로 다른 틱인데도 둘 다 R로 남아있는 걸 지적. "정확히
+    // 같은 틱"만 검사하던 T2-11의 조건이 너무 좁았음 — 허용폭(PPQ=480 기준 30틱)
+    // 이내면 "거의 동시"로 보고 똑같이 회피해야 한다.
+    const result = recommendSticking([note(0, 'hihat_closed'), note(10, 'crash')], PPQ)
+    expect(result.find((n) => n.piece === 'hihat_closed')?.hand).toBe('R')
+    expect(result.find((n) => n.piece === 'crash')?.hand).toBe('L')
+  })
+
+  it('does not demote a fixed-R piece when the gap exceeds the simultaneity tolerance', () => {
+    const result = recommendSticking([note(0, 'hihat_closed'), note(50, 'crash')], PPQ) // 50 > 30틱 허용폭
+    expect(result.find((n) => n.piece === 'hihat_closed')?.hand).toBe('R')
+    expect(result.find((n) => n.piece === 'crash')?.hand).toBe('R')
+  })
+
+  it('recommends L for a snare within tolerance of a hihat/ride hit, not just exact-tick matches', () => {
+    const result = recommendSticking([note(0, 'hihat_closed'), note(10, 'snare')], PPQ)
+    expect(result.find((n) => n.piece === 'snare')?.hand).toBe('L')
+  })
+
   it('alternates hands within a fill run (gap within threshold), starting at startHand', () => {
     const notes = [note(0, 'snare'), note(100, 'tom_high'), note(200, 'snare'), note(300, 'tom_mid')]
     const result = recommendSticking(notes, PPQ, 'R')

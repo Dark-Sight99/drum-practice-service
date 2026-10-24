@@ -1,0 +1,13 @@
+TOL ticks: 13.75 = 31.25 ms
+
+tick=4540..4560:
+  4550 snare L
+  4550 hihat_closed R
+  4550 crash L
+
+tick=17260..17280:
+  17270 crash L
+  17274 hihat_closed R
+
+exact-tick same-hand collisions: 1
+ tick 4550 hand L pieces ['snare', 'crash']
