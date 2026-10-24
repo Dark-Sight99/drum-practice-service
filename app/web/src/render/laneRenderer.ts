@@ -282,13 +282,23 @@ export function createLaneRenderer(
         if (v.label === null) continue
         const prevAlpha = ctx.globalAlpha
         ctx.globalAlpha = v.handSource === 'user' ? 1 : 0.5
-        ctx.fillStyle = options.stickingTextColor
         // T2-10(Phase 2 게이트 3차 피드백 "RL이 잘 안보임") — 최소 크기를
         // 10px→13px로 키움. 투명도(auto=50%)는 intent/08-design.md §3의
         // 의뢰인 결정 수치라 임의로 안 건드림(바꾸려면 별도 확인 필요).
         ctx.font = `bold ${Math.max(13, noteSize * 0.55)}px sans-serif`
         ctx.textAlign = 'center'
         ctx.textBaseline = 'bottom'
+        // T2-13(Phase 2 게이트 6차 피드백 "HH의 R이 잘 안보임") — 하이햇처럼
+        // 노트가 연속으로 촘촘히 떨어지는 레인은 글자 주변에 다른 노트의 도형
+        // (X자 획)이 겹쳐 글자가 배경 잡음에 묻혔다. 색 자체를 바꾸는 대신
+        // 캔버스 배경색으로 글자 테두리(halo)를 먼저 그려 어떤 배경 위에서도
+        // 글자 윤곽이 도드라지게 함 — 기존 색·투명도 규칙은 그대로 둔 채
+        // 가독성만 보강(라이브러리 표준 기법: 윤곽선 먼저, 채우기 나중).
+        ctx.lineJoin = 'round'
+        ctx.lineWidth = 3
+        ctx.strokeStyle = options.laneHeaderBackgroundColor
+        ctx.strokeText(v.label, v.laneCenterX, v.topEdgeY - 2)
+        ctx.fillStyle = options.stickingTextColor
         ctx.fillText(v.label, v.laneCenterX, v.topEdgeY - 2)
         ctx.globalAlpha = prevAlpha
       }
