@@ -11,6 +11,15 @@ REQ-02 드럼 MIDI 생성, 경로 A(오디오) — T3-1의 drums 트랙을 ADT(A
 ## 핵심 설계 결정 — 5-class→9-class 기본 매핑(추측 명시)
 ADTOF는 하이햇(열림/닫힘)·탐(하이/미드/플로어)·심벌(크래시/라이드)을 각각 하나로 합쳐 출력(`LABELS_5=[35,38,47,42,49]`, 소스 확인). 합친 뒤 어떤 구체적 피스로 보여줄지는 명시적 기본값 선택 — **하이햇(합산)→`hihat_closed`, 탐(합산)→`tom_mid`, 심벌(합산)→`crash`**. `intent/07-open-questions.md` Q-26에 그대로 기록, 틀릴 수 있음을 숨기지 않음 — REQ-03 편집기(이미 구현됨)가 유일한 보정 수단.
 
+## Codex 모드A(코드 검수) 지적·반영
+1차 REQUEST_CHANGES(4건) — 전부 반영:
+- **C-001(필수)**: `DRUMSCORE_RAW` find-or-create는 순차 재채보만 보호 — 워커를 여러 개 띄우면(Q-17 전제 위반) 두 작업이 동시에 "행 없음"으로 판단해 중복 생성 가능. **API 레벨에서 선제 차단**: `POST /songs/{id}/transcribe`가 같은 곡에 QUEUED/PROCESSING 상태인 TRANSCRIBE 작업이 이미 있으면 새로 안 만들고 그 Job을 그대로 반환(중복 클릭·중복 트리거 자체를 막음). 실제 HTTP 호출로 같은 job_id가 반환됨을 재확인.
+- **C-002(권장)**: 실패 시 스테이징 파일 정리(`unlink`)가 실패하면 그 예외가 `Song.FAILED` 커밋을 막을 수 있었음 — 정리를 자체 try/except로 감싸 정리 실패는 로그만 남기고 원래 예외를 그대로 올리도록 수정.
+- **C-003(권장)**: 핸들러의 맨 처음 "Song.PROCESSING" 커밋 자체가 실패하면 Song이 PENDING에 머문 채 Job만 끝나, `_sync_song_status_with_job` 안전망의 `song.status != PROCESSING` 조건을 피해갔음 — 조건을 "아직 종료 상태(COMPLETED/FAILED)가 아니면"으로 넓혀 PENDING도 커버(job_type 무관 범용 로직이라 T3-1 SEPARATE도 자동으로 같이 보호됨).
+- **C-004(권장)**: 스테이징 후 승격의 핵심 실패 경계(DB 커밋 실패 시 기존 파일 보존, 승격 rename 실패 시 FAILED+정리)를 직접 재현하는 회귀 테스트 2개 신규 추가 — `SASession.commit`/`Path.replace`를 호출 횟수 기준으로 정확한 지점에서만 실패시키는 방식으로 정밀 재현, 둘 다 설계대로 동작함을 실제로 증명.
+
+2차: APPROVE(아래 참조) — 추가 지적 없음.
+
 ## Codex 모드C 설계 검수 경위(3라운드, 전부 반영)
 1차 "수정 후 진행"(필수 C-001: 프로덕션 핸들러 등록 누락 — 계획에 빠져 있었음. 필수 C-002/C-003: 재채보 시 `DRUMSCORE_RAW` 중복 생성·기존 파일 커밋 실패 시 유실 가능. 권장 C-004~C-008: EDITED 우선순위 의도 확인·mkstemp fd 정리·사전조건 파일존재 확인·스키마 확장 영향범위·device 문자열 확정 시점) → 전부 1차 반영.
 2차 "수정 후 진행"(C-003 잔여 — find-or-create로 재채보는 보호됐지만 **최초 채보**(신규 INSERT)·Song 상태 커밋 실패 경로는 여전히 열려있다고 정확히 재지적) → **스테이징 후 승격**(`drumscore.json.new`에 먼저 쓰고, DB 커밋 성공 후에만 원자적 rename으로 실제 파일 교체) 설계로 전면 해소.

@@ -109,10 +109,19 @@ def transcribe_handler(job: Job) -> None:
             staging_rel_path = None  # 승격 성공 — 더 이상 정리 대상 아님
         except Exception:
             db.rollback()
+            # 모드A 지적 C-002: 스테이징 정리 자체가 실패해도(예: 파일 잠김)
+            # 아래 Song.FAILED 커밋은 반드시 실행돼야 한다 — 정리 실패가 상태
+            # 기록을 막으면 Song이 PROCESSING에 남아버린다. 정리 실패는 로그만
+            # 남기고 원래 예외(아래 raise)를 그대로 올린다.
             if staging_rel_path is not None:
-                p = resolve_asset_path(staging_rel_path)
-                if p is not None:
-                    p.unlink(missing_ok=True)
+                try:
+                    p = resolve_asset_path(staging_rel_path)
+                    if p is not None:
+                        p.unlink(missing_ok=True)
+                except OSError:
+                    logger.warning(
+                        "transcribe song=%s 스테이징 파일 정리 실패(무시하고 계속)", song.id
+                    )
             song.status = SongStatus.FAILED
             db.commit()
             raise

@@ -116,6 +116,42 @@ def test_transcribe_creates_queued_job(client: TestClient, db_session) -> None:
     assert job.user_id == user.id
 
 
+def test_transcribe_returns_existing_job_instead_of_duplicating(
+    client: TestClient, db_session
+) -> None:
+    """모드A 지적 C-001 — 같은 곡에 아직 안 끝난 TRANSCRIBE 작업이 있으면
+    새 Job을 또 만들지 않고 기존 것을 그대로 돌려준다."""
+    user = _make_user(db_session, "u1")
+    song = _make_song_with_stem(db_session, user)
+    _login(client, "u1")
+
+    first = client.post(f"/songs/{song.id}/transcribe")
+    second = client.post(f"/songs/{song.id}/transcribe")
+
+    assert first.status_code == 201
+    assert second.status_code == 201
+    assert first.json()["job_id"] == second.json()["job_id"]
+    assert db_session.query(Job).filter(Job.song_id == song.id).count() == 1
+
+
+def test_transcribe_allows_new_job_after_previous_one_finished(
+    client: TestClient, db_session
+) -> None:
+    user = _make_user(db_session, "u1")
+    song = _make_song_with_stem(db_session, user)
+    _login(client, "u1")
+
+    first = client.post(f"/songs/{song.id}/transcribe")
+    job = db_session.get(Job, first.json()["job_id"])
+    job.status = JobStatus.COMPLETED
+    db_session.commit()
+
+    second = client.post(f"/songs/{song.id}/transcribe")
+
+    assert second.json()["job_id"] != first.json()["job_id"]
+    assert db_session.query(Job).filter(Job.song_id == song.id).count() == 2
+
+
 def test_other_user_cannot_transcribe_song(client: TestClient, db_session) -> None:
     owner = _make_user(db_session, "owner")
     _make_user(db_session, "other")

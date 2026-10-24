@@ -228,6 +228,25 @@ def test_sync_song_status_with_job_rescues_song_stuck_processing_after_job_compl
     assert song.status == SongStatus.FAILED
 
 
+def test_sync_song_status_with_job_rescues_song_stuck_pending(db) -> None:
+    """T3-2 모드A 지적(C-003) — 핸들러의 맨 처음 "Song.PROCESSING" 커밋 자체가
+    실패하면 Song은 PENDING에 머문 채 Job만 끝날 수 있다. 안전망이
+    PROCESSING뿐 아니라 PENDING도 커버해야 한다."""
+    user, song = _make_user_and_song(db)
+    assert song.status == SongStatus.PENDING  # 핸들러가 PROCESSING 커밋을 아예 못 한 상황을 흉내
+
+    register_handler(JobType.SEPARATE, lambda job: None)
+    job = Job(user_id=user.id, song_id=song.id, job_type=JobType.SEPARATE)
+    db.add(job)
+    db.commit()
+
+    result = process_next_job(db)
+
+    assert result.status == JobStatus.COMPLETED
+    db.refresh(song)
+    assert song.status == SongStatus.FAILED  # COMPLETED로 낙관하지 않음(C-003 반영)
+
+
 def test_recover_orphaned_jobs_does_not_touch_queued_or_completed(db) -> None:
     user, song = _make_user_and_song(db)
     queued = Job(user_id=user.id, song_id=song.id, job_type=JobType.SEPARATE)

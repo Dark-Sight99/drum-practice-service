@@ -120,14 +120,22 @@ def _sync_song_status_with_job(db: Session, job: Job) -> None:
     있다고 보장할 수 없어 COMPLETED로 낙관하지 않는다.
 
     정상 흐름에서는 핸들러가 이미 Song.status를 맞춰놨으므로 이 함수는 항상 no-op
-    (song.status != PROCESSING 조건에서 바로 반환)이다. recover_orphaned_jobs()와
+    (song.status가 이미 종료 상태라 바로 반환)이다. recover_orphaned_jobs()와
     역할이 겹치지 않음 — 그쪽은 "워커 강제종료로 Job이 PROCESSING에 멈춘" 경우,
     이쪽은 "Job은 정상적으로 끝났는데 핸들러의 Song 커밋만 실패한" 경우를 커버한다.
-    job_type과 무관한 범용 로직이라 향후 다른 핸들러도 자동으로 이 보호를 받는다."""
+    job_type과 무관한 범용 로직이라 향후 다른 핸들러도 자동으로 이 보호를 받는다.
+
+    T3-2 모드A 지적(C-003): 핸들러가 맨 처음 "Song.PROCESSING" 커밋 자체에
+    실패하면(극히 드문 DB 오류), Song은 PROCESSING에도 못 가보고 이전 상태
+    (보통 PENDING)에 그대로 머문다 — `song.status != PROCESSING`만 보면 이
+    경우를 놓친다. 그래서 "아직 종료 상태(COMPLETED/FAILED)가 아닌 모든 경우"를
+    대상으로 넓혔다 — 정상 흐름에서 Job이 끝나는 시점엔 Song이 이미 PROCESSING
+    이어야 하므로(해당 핸들러가 가장 먼저 하는 일), PENDING까지 포함해도 정상
+    흐름에서 잘못 발동할 일은 없다."""
     if job.status not in (JobStatus.COMPLETED, JobStatus.FAILED):
         return
     song = db.get(Song, job.song_id)
-    if song is None or song.status != SongStatus.PROCESSING:
+    if song is None or song.status in (SongStatus.COMPLETED, SongStatus.FAILED):
         return
     song.status = SongStatus.FAILED
     db.commit()

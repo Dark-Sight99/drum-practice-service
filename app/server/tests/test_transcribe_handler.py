@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pretty_midi
 import pytest
+from sqlalchemy.orm import Session as SASession
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -220,3 +221,89 @@ def test_transcribe_handler_missing_stem_drums_fails_cleanly(db) -> None:
 
     db.refresh(song)
     assert song.status == SongStatus.FAILED
+
+
+def test_transcribe_handler_db_commit_failure_preserves_old_raw_file(db, monkeypatch) -> None:
+    """모드A 지적 C-004 — 스테이징 쓰기까지 성공한 뒤 DB 커밋(Asset/Song.COMPLETED)
+    자체가 실패하면, 아직 승격 전이라 기존 drumscore.json이 그대로 남아야 한다
+    (work/T3-2/plan.md "스테이징 후 승격"의 핵심 보장)."""
+    _, song, job = _make_song_with_drums_stem(db)
+    monkeypatch.setattr(handler_module, "transcribe", _fake_transcribe_writing_midi([35, 38]))
+    handler_module.transcribe_handler(job)
+    raw = (
+        db.query(Asset)
+        .filter(Asset.song_id == song.id, Asset.kind == AssetKind.DRUMSCORE_RAW)
+        .first()
+    )
+    old_content = file_storage.resolve_asset_path(raw.file_path).read_bytes()
+
+    job2 = Job(user_id=song.user_id, song_id=song.id, job_type=JobType.TRANSCRIBE)
+    db.add(job2)
+    db.commit()
+    monkeypatch.setattr(
+        handler_module, "transcribe", _fake_transcribe_writing_midi([35, 38, 47])
+    )
+
+    real_commit = SASession.commit
+    call_count = {"n": 0}
+
+    def flaky_commit(self):
+        call_count["n"] += 1
+        # 1번째 커밋=Song.PROCESSING 선언, 2번째=Asset/Song.COMPLETED(스테이징 쓰기 직후).
+        if call_count["n"] == 2:
+            raise RuntimeError("DB 커밋 실패 시뮬레이션")
+        return real_commit(self)
+
+    monkeypatch.setattr(SASession, "commit", flaky_commit)
+
+    try:
+        with pytest.raises(RuntimeError, match="DB 커밋 실패 시뮬레이션"):
+            handler_module.transcribe_handler(job2)
+    finally:
+        # monkeypatch.undo()는 db 픽스처가 이미 patch해둔 file_storage.SONGS_ROOT
+        # 등 다른 것까지 전부 되돌려버리므로(공유 monkeypatch 객체), commit만
+        # 직접 원복한다.
+        SASession.commit = real_commit
+
+    db.refresh(song)
+    assert song.status == SongStatus.FAILED
+    raw_path = file_storage.resolve_asset_path(raw.file_path)
+    assert raw_path.read_bytes() == old_content  # 기존 파일 그대로 보존(승격 전이었음)
+    assert not (raw_path.parent / "drumscore.json.new").exists()  # 스테이징도 정리됨
+
+
+def test_transcribe_handler_promotion_failure_marks_failed_and_cleans_staging(
+    db, monkeypatch
+) -> None:
+    """모드A 지적 C-004 — DB 커밋은 성공했는데 마지막 승격(rename) 자체가
+    실패하는 극단적인 경우도 Song.FAILED로 끝나고 스테이징 파일이 정리돼야
+    한다(T3-1의 "Song 실패 커밋 자체 실패"와 같은 급의 잔여 위험,
+    _sync_song_status_with_job 안전망과 별개로 핸들러 자신도 최대한 정리)."""
+    _, song, job = _make_song_with_drums_stem(db)
+    monkeypatch.setattr(handler_module, "transcribe", _fake_transcribe_writing_midi([35]))
+
+    real_replace = Path.replace
+    call_count = {"n": 0}
+
+    def flaky_replace(self, target):
+        call_count["n"] += 1
+        # write_song_file 내부 교체(스테이징 쓰기)는 1번째 — 통과시킨다.
+        # 핸들러의 승격(staging -> drumscore.json)이 2번째 — 여기서 실패시킨다.
+        if call_count["n"] == 2:
+            raise OSError("rename 실패 시뮬레이션")
+        return real_replace(self, target)
+
+    monkeypatch.setattr(Path, "replace", flaky_replace)
+
+    try:
+        with pytest.raises(OSError, match="rename 실패 시뮬레이션"):
+            handler_module.transcribe_handler(job)
+    finally:
+        Path.replace = real_replace  # 같은 이유로 monkeypatch.undo() 대신 직접 원복
+
+    db.refresh(song)
+    assert song.status == SongStatus.FAILED
+    # 승격 전에 실패했으니 최종 drumscore.json은 아예 없어야 하고, 스테이징도 정리됨.
+    song_dir = file_storage.song_storage_dir(song.id)
+    assert not (song_dir / "drumscore.json").exists()
+    assert not (song_dir / "drumscore.json.new").exists()

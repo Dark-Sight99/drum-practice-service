@@ -30,7 +30,17 @@ from sqlalchemy.orm import Session
 
 from api.deps import get_current_user, get_db
 from api.schemas import DrumScoreIn
-from db.models import Asset, AssetKind, Job, JobType, Song, SongSourceType, SongStatus, User
+from db.models import (
+    Asset,
+    AssetKind,
+    Job,
+    JobStatus,
+    JobType,
+    Song,
+    SongSourceType,
+    SongStatus,
+    User,
+)
 from file_storage import (
     UploadTooLargeError,
     delete_song_files,
@@ -298,6 +308,23 @@ def transcribe_song(
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST, "드럼 스템 파일을 찾을 수 없습니다"
         )
+
+    # 모드A 지적 C-001: 같은 곡에 아직 안 끝난 TRANSCRIBE 작업이 있으면 새로
+    # 만들지 않고 그 Job을 그대로 돌려준다 — 중복 클릭으로 같은 곡에 작업이
+    # 여러 개 쌓이는 걸 막는다(Q-17 "워커 1개만 운영" 전제에서 핸들러의
+    # find-or-create가 순차 재채보는 이미 안전하게 처리하지만, 큐에 여러 개가
+    # 쌓이는 것 자체는 막는 게 더 안전함).
+    pending_job = (
+        db.query(Job)
+        .filter(
+            Job.song_id == song.id,
+            Job.job_type == JobType.TRANSCRIBE,
+            Job.status.in_((JobStatus.QUEUED, JobStatus.PROCESSING)),
+        )
+        .first()
+    )
+    if pending_job is not None:
+        return TranscribeOut(job_id=pending_job.id)
 
     job = Job(user_id=user.id, song_id=song.id, job_type=JobType.TRANSCRIBE)
     db.add(job)
