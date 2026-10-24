@@ -74,6 +74,16 @@ Codex 모드B(`codex-modeB.md`, 1차 APPROVE) 권장 사항:
 
 수정 후 `App.tsx`를 원래 최소 상태로 되돌리고 `tsc -b`/`oxlint`/`prettier --check`/`vitest run`을 재실행 — 전부 클린, 74/74 통과. 원자료: `reverify-20261024.txt`(갱신).
 
+## Codex 모드B 2차 지적 — C-001(재현 안 됨, 반박 근거 포함)
+2차 재검수(`codex-modeB-2.md`)가 REQUEST_CHANGES로 지적:
+> `PracticeCanvas.tsx:315` 시작 마디를 마지막 마디로 지정하면 `endBar`도 마지막 마디가 될 수 있고, 종료 마디를 시작 마디와 같게 설정해도 두 값이 같아집니다... 반복 구간이 유효하지 않습니다.
+
+**재현 시도 결과: 재현 안 됨.** `handlePlay`에서 `LoopBars`를 만들 때 `{ startBar: loopStartBar1 - 1, endBar: loopEndBar1 }`로 **시작 마디에만 -1을 적용**하기 때문에, UI의 `loopStartBar1 === loopEndBar1`(예: "마디 4~4")는 내부적으로 `{startBar: 3, endBar: 4}`가 되어 길이 1마디짜리 **유효한** 루프가 된다 — 길이는 항상 `endBar - startBar = loopEndBar1 - (loopStartBar1 - 1) = (loopEndBar1 - loopStartBar1) + 1`이고, 클램프 로직이 `loopEndBar1 >= loopStartBar1` 불변식을 항상 유지하므로(시작 필드를 끝 필드와 같거나 크게 편집하면 끝을 밀어올리고, 끝 필드를 시작과 같거나 작게 편집하면 시작을 밀어내림) 이 값은 **항상 1 이상**이다. 0길이·음수길이 루프는 만들어지지 않는다.
+
+**검증 방법**: `PracticeCanvas.tsx`의 클램프·자동조정 로직을 그대로 옮긴 스크립트로 `totalBars`∈{1,2,3,4,8} × 시작/끝 필드 각각 1~totalBars 전체 편집 조합(및 초기 기본값)을 전수 시뮬레이션 — 모든 경우에서 `lengthBars(=endBar-startBar) >= 1` 확인(스크립트: 세션 스크래치패드, 결과는 전부 "OK"/"ALL CASES VALID"). 모드A의 지적 패턴(코드를 직접 실행해 확인)과 같은 방식.
+
+**결론**: 모드A/B의 "경계값 버그" 우려는 합리적인 의심이었으나, `loopStartBar1 - 1` 시프트를 추적하지 못한 데서 온 오판으로 판단해 코드를 바꾸지 않았다(확인되지 않은 지적에 대해 불필요한 수정을 하지 않는다는 원칙, CLAUDE.md 1절). 이 반박 근거로 모드B 3차 재검수를 요청.
+
 ## 가정/한계
 - BPM 슬라이더는 정수 단위(소수점 BPM 입력 불필요).
 - A-B 루프 마디 범위는 UI에서 1-기준 표시, 내부는 0-기준(반열림).
