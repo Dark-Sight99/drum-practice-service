@@ -49,3 +49,14 @@ export async function deleteSong(id: number): Promise<void> {
 export async function fetchSongDrumScore(id: number): Promise<DrumScore> {
   return apiFetchJson<DrumScore>(`/songs/${id}/drumscore`)
 }
+
+/** T2-6(REQ-03) — 편집기가 수정한 DrumScore를 저장(편집본). work/T2-6/plan.md
+ * §설계 1 — 원문 그대로 보내고(재직렬화는 호출자 쪽 JSON.stringify 한 번뿐),
+ * 서버도 그 바이트를 그대로 저장한다. */
+export async function saveSongDrumScore(id: number, drumScore: DrumScore): Promise<void> {
+  await apiFetch(`/songs/${id}/drumscore`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(drumScore),
+  })
+}
