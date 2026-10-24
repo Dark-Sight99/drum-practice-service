@@ -1,4 +1,4 @@
-> 한 줄 요약: `response-body-after-cleanup.json`이 실제로 `server-log-cleanup-verification-2.txt`의 특정 GET 요청(09:04:56.639Z)에 대한 응답임을 타임스탬프+SHA-256 해시로 직접 연결(Codex 모드B 2차 지적 반영).
+> 한 줄 요약: `response-body-after-cleanup.json`의 SHA-256이 브라우저가 실제 수신한 응답 본문과 정확히 일치함을 확정하고(완전 증명), 그 응답이 `server-log-cleanup-verification-2.txt`의 09:04:56.639Z GET 줄의 것이라는 건 37ms 이내 유일한 후보라는 강한 정황(요청ID·서버측 해시가 없어 수학적 증명은 아님, Codex 모드B 3차 지적 반영해 표현 조정).
 
 # 정리 검증 — 클라이언트 요청↔서버 로그 상관관계
 
@@ -28,5 +28,7 @@ raw bytes: 11011, sha256(raw)     = 21222ac4bf157970bd515ee740519b8fd66e095df56e
 stripped : 11010, sha256(stripped) = 8dfd070ebb465cad1e427db5d5e71abe0f629773168193fc3c352838093e4258  ← 브라우저 측과 동일
 ```
 
-## 결론
-`response-body-after-cleanup.json`(개행 1바이트 제외)은 `server-log-cleanup-verification-2.txt`의 `2026-10-24T09:04:56.639Z` GET 요청에 대한 실제 응답 본문임이 타임스탬프 근접성 + SHA-256 완전 일치로 증명된다. 이 응답에는 `handSource` 문자열이 0회 등장하고(`grep -c`), 모든 `notes[].hand`가 `null`이다(본문 전체가 `"hand":null`만 가짐, 비-null 패턴 매치 0건) — T2-7 QA 중 스티킹 데이터로 수정했던 실제 사용자 곡("MusicDelta_Grunge", song_id=2)이 테스트 이전 상태로 완전히 원상복구됐음을 재현 가능한 방식으로 증명한다.
+## 결론(Codex 모드B 3차 지적 반영 — 표현 수위 조정)
+서버 로그는 요청 ID나 응답 본문 해시를 직접 기록하지 않으므로, 시간 근접성(37ms)과 SHA-256 일치만으로는 `response-body-after-cleanup.json`이 `server-log-cleanup-verification-2.txt`의 `2026-10-24T09:04:56.639Z` GET 줄의 응답이라는 것을 수학적으로 "증명"한다고 말할 수 없다 — 두 자료를 직접 잇는 요청 ID·서버측 본문 해시가 없다는 Codex 지적이 맞다. 정확히 말하면: **그 시간창 안에 `/songs/2/drumscore` GET이 그 한 줄뿐이라는 점에서 "시간상 일치하는 유일한 후보"이고, 브라우저가 계산한 SHA-256은 커밋된 파일(개행 1바이트 제외)과 정확히 일치한다**(이 부분은 완전한 증명 — 파일이 브라우저가 실제로 받은 본문이라는 것은 해시로 확정됨). "그 GET 로그 줄이 바로 그 요청이다"는 결론은 강한 정황 증거(시간 유일성)에 기반한 것이지, 로그·요청 양쪽에 공통 식별자가 없어 반박 불가능한 증명은 아니다.
+
+이 응답에는 `handSource` 문자열이 0회 등장하고(`grep -c`), 모든 `notes[].hand`가 `null`이다(본문 전체가 `"hand":null`만 가짐, 비-null 패턴 매치 0건) — T2-7 QA 중 스티킹 데이터로 수정했던 실제 사용자 곡("MusicDelta_Grunge", song_id=2)이 테스트 이전 상태로 돌아갔다는 것은(해시로 확정된) 커밋된 파일 자체로 확인 가능하다.

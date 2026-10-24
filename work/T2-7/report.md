@@ -38,14 +38,17 @@
 
 원문: `qa-evidence/T2-7/codex-modeA.md`
 
-## Codex 모드B(보고서 대조) 반영 — 2회
+## Codex 모드B(보고서 대조) 반영 — 3회(최대)
 **1회차: needs-attention.** 서버 접근 로그는 PUT 3건의 총횟수만 증명하고, "어느 PUT이 어느 조작인지"·"정리 후 175개 노트 전부 hand:null"이라는 서술형 주장까지는 로그만으로 뒷받침되지 않음(medium) — PASS 판정이 증거 범위보다 강하다는 지적.
 → "정리"(최종 상태) 주장을 완전히 별도의 새 서버 세션에서 재조회한 실제 응답 본문(`response-body-after-cleanup.json`, `handSource` 0건·non-null hand 0건을 파일 자체에서 직접 확인 가능)으로 교체, 그 검증 세션의 GET-only 로그도 함께 커밋. PUT 귀속 서술은 "로그로 증명되지 않는, 수행 당시 설명"이라고 result.md에 명시해 로그가 증명하는 것(건수·최종 상태)과 서술(어느 PUT이 어느 조작인지)을 구분.
 
 **2회차: needs-attention.** 1차에서 추가한 응답 본문·GET-only 로그가 "같은 요청"인지(세션·응답 상관관계) 두 파일만으로는 여전히 대조할 수 없다는 재지적(medium) — 타임스탬프도 요청 식별자도 없었기 때문.
 → 서버 로그에 UTC 타임스탬프(밀리초)를 붙이고, 같은 브라우저 실행 안에서 요청 전후 시각과 응답 본문의 SHA-256을 함께 캡처 → 로그의 `GET /songs/2/drumscore` 줄(09:04:56.639Z)과 브라우저 측 `afterTimestamp`(09:04:56.615Z)가 37ms 이내로 유일하게 대응함을 보이고, 커밋된 JSON 파일(개행 1바이트 제외)의 SHA-256이 브라우저가 계산한 해시와 정확히 일치함을 확인 — `cleanup-verification-correlation.md`로 문서화. 1차의 비-타임스탬프 로그는 삭제하고 2차 산출물로 완전히 대체.
 
-원문: `qa-evidence/T2-7/codex-modeB.md`, `-2.md`
+**3회차(최대 횟수): needs-attention.** 시간 근접성+해시만으로는 "같은 요청"을 수학적으로 증명 못 한다는 지적(medium) — 서버가 요청 ID나 응답 본문 해시를 자체적으로 로깅하지 않는 한 원천적 한계이고, 이를 완전히 없애려면 FastAPI 앱에 요청 추적 로깅을 추가해야 해(별도 작업 범위) `06-pipeline.md` §1-1 "재검수 최대 3회" 규칙에 따라 모드B는 3회에서 종료.
+→ Codex가 Recommendation에서 직접 제시한 대안 표현("시간상 일치하는 유일한 후보이며 본문 해시는 파일과 일치")을 그대로 채택해 `cleanup-verification-correlation.md`·`result.md`의 "증명했다"/"유일하게 대응" 표현을 수정 — 수학적으로 확정되는 것(SHA-256 일치)과 정황 증거로만 뒷받침되는 것(로그-응답 상관관계)을 문장 단위로 구분.
+
+원문: `qa-evidence/T2-7/codex-modeB.md`, `-2.md`, `-3.md`
 
 ## 실행한 검증
 `qa-evidence/T2-7/result.md`, `raw_log.txt` — 프론트 tsc/oxlint/vitest(129/129), 백엔드 ruff/pytest(79/79) 전부 PASS. 실제 FastAPI 서버+브라우저로 자동 추천(피스 규칙·동시타·필인 교대)·사용자 지정 보존·다중선택 RLRL 교대·저장→연습 화면 R/L 표시(레인 글자+킷 실선/점선) 켜기/끄기까지 end-to-end 확인. 서버 접근 로그 전체(21줄, 프로세스 종료까지)와, 별도 검증 세션에서 재확인한 최종 데이터 상태(응답 본문 그대로 커밋)를 증거로 남겼다.
