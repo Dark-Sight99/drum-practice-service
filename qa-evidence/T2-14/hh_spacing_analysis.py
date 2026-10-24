@@ -1,16 +1,25 @@
 # song2.json은 악보 데이터라 레포에 커밋하지 않는다(CLAUDE.md §5 data/ 커밋 금지 원칙과
-# 같은 취지) — 재현하려면 로그인 후 GET /songs/2/drumscore 로 받은 응답을 이 경로에 저장.
+# 같은 취지) — 재현하려면 로그인 후 GET /songs/2/drumscore 로 받은 응답을 저장하고,
+# 그 파일 경로를 이 스크립트의 첫 인자로 넘긴다:
+#   python hh_spacing_analysis.py song2.json
+# (Codex 모드B 2차 지적 반영 — raw_log.txt의 curl 저장 경로와 스크립트가 읽는 경로가
+#  서로 달라 "명령대로 받아도 스크립트 입력으로 안 쓰인다"는 지적을 받아, 하드코딩된
+#  절대경로 대신 인자로 받도록 교체)
 #
 # T2-14, Phase 2 게이트 7차 피드백 — "HH가 일정한 간격으로 치는데(마디당 8번), SN은
 # 항상 같은 HH 타격에 맞춰 같이 친다면, SN의 마디 내 위치도 항상 같아야 하는 것
 # 아니냐"는 의뢰인의 날카로운 재반박을 검증한다. 가설: (1) SN이 정말 항상 같은 틱의
 # HH와 일치하는지, (2) HH 자체가 정말로 "교과서적으로 균등한" 8분음표 간격(220/2=110틱)
 # 인지 직접 확인.
+import sys
 import json
 import numpy as np
 from collections import Counter
 
-with open(r"C:\Users\Jaewoo\AppData\Local\Temp\claude\C--Users-Jaewoo--------\254e3255-489f-4c7b-97a9-abdbac464328\scratchpad\t211830\song2.json", encoding="utf-8") as f:
+DEFAULT_PATH = r"C:\Users\Jaewoo\AppData\Local\Temp\claude\C--Users-Jaewoo--------\254e3255-489f-4c7b-97a9-abdbac464328\scratchpad\t211830\song2.json"
+path = sys.argv[1] if len(sys.argv) > 1 else DEFAULT_PATH
+
+with open(path, encoding="utf-8") as f:
     score = json.load(f)
 
 notes = score["notes"]
