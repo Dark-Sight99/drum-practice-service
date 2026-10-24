@@ -63,6 +63,12 @@ export function PracticeCanvas({ score, barsVisible = 2 }: PracticeCanvasProps) 
   // "buffer is either not set or not loaded" 예외가 나는 것을 실제 브라우저로
   // 재현 확인함(work/T2-3/plan.md, qa-evidence/T2-3/result.md).
   const playbackRef = useRef<{ handle: PlaybackHandle; voices: DrumVoiceMap } | null>(null)
+  // Codex 모드A C-001(재현됨): 렌더 루프가 재생 여부와 무관하게 매 프레임
+  // activePieces를 계산해서, 정지 중(마스터 클록 위치가 고정된 상태)에도
+  // 그 고정 위치 근처에 노트가 있으면 킷이 계속 켜진 채로 남아있을 수 있었음
+  // (예: 재생 전 초기 위치 0초에 틱 0 노트가 있으면 처음부터 켜진 채로 보임).
+  // isPlaying을 ref로도 들고 있어 루프 안에서 "재생 중일 때만" 점등을 계산한다.
+  const isPlayingRef = useRef(false)
 
   useEffect(() => {
     if (!canvasRef.current) return
@@ -91,7 +97,11 @@ export function PracticeCanvas({ score, barsVisible = 2 }: PracticeCanvasProps) 
       const clock = getMasterClock()
       const renderer = rendererRef.current
       if (renderer) {
-        const active = renderer.render(score, clock.getPositionSeconds(), barsVisible)
+        const rendered = renderer.render(score, clock.getPositionSeconds(), barsVisible)
+        // 정지 중에는 마스터 클록 위치가 고정돼 있어, 그 고정 위치 근처에 노트가
+        // 있으면 계속 "히트"로 잡혀 킷이 켜진 채 남는다 — 재생 중일 때만 점등
+        // 계산을 반영한다(Codex 모드A C-001).
+        const active: ReadonlySet<DrumPiece> = isPlayingRef.current ? rendered : new Set()
         // 성능: 대부분의 프레임은 활성 피스가 없거나 직전 프레임과 동일함(판정선
         // 근처에 노트가 있을 때만 바뀜) — 매 프레임 새 Set으로 setState하면
         // KitIllustration이 매 프레임(최대 60회/초) 리렌더되며, 실제 측정해보니
@@ -117,6 +127,9 @@ export function PracticeCanvas({ score, barsVisible = 2 }: PracticeCanvasProps) 
     playbackRef.current.handle.stop()
     disposeDrumVoices(playbackRef.current.voices)
     playbackRef.current = null
+    isPlayingRef.current = false
+    lastActiveKeyRef.current = ''
+    setActivePieces(new Set())
     setIsPlaying(false)
   }
 
@@ -125,6 +138,7 @@ export function PracticeCanvas({ score, barsVisible = 2 }: PracticeCanvasProps) 
     const voices = await createDrumVoices()
     const handle = playDrumScore(score, voices, { countInBars: 1 })
     playbackRef.current = { handle, voices }
+    isPlayingRef.current = true
     setIsPlaying(true)
     // 재생 종료(마지막 노트 이후) 자동 정지 — 정확한 종료 이벤트 연결은 범위 밖,
     // 데모용 최소 구현(work/T2-3/plan.md). playDrumScore가 카운트인만큼 모든

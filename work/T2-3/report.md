@@ -1,4 +1,4 @@
-> 한 줄 요약: 연습 화면 레인(노트 낙하)+드럼킷 점등+마디/박선 렌더러 구현. Canvas 2D, 순수 좌표계산은 단위 테스트, 실제 그리기·fps는 실제 브라우저로 검증 — 실측 60.1fps 달성, 실제 버그 2건(오디오 재생 예외, fps 저하 원인) 발견·수정.
+> 한 줄 요약: 연습 화면 레인(노트 낙하)+드럼킷 점등+마디/박선 렌더러 구현. Canvas 2D, 순수 좌표계산은 단위 테스트, 실제 그리기·fps는 실제 브라우저로 검증 — 실측 60.1fps 달성, 실제 버그 2건(오디오 재생 예외, fps 저하 원인) 발견·수정. Codex 모드A 지적 C-001(정지 중 킷 점등 고정)도 수정·재검증 완료.
 
 # T2-3 보고
 
@@ -32,6 +32,12 @@
 
 ## 질문
 - 없음.
+
+## Codex 모드A 검수 반영
+`qa-evidence/T2-3/codex-modeA.md` — 판정 REQUEST_CHANGES, 필수 수정 1건(C-001).
+
+- **C-001(재현됨, 수정 완료)**: `PracticeCanvas.tsx`의 렌더 루프가 재생 여부와 무관하게 매 프레임 `activePieces`를 계산해, 정지 중에도(마스터 클록 위치가 고정된 상태) 그 위치 근처에 노트가 있으면 킷이 계속 켜진 채로 남아있을 수 있었음(예: tick=0 노트 + 클록 초기 위치 0초). `isPlayingRef`를 도입해 재생 중일 때만 점등을 반영하고, 정지 시 즉시 `activePieces`를 비우도록 수정. `isPlaying` 상태 전환은 (oxlint `react(set-state-in-effect)` 경고에 따라) `useEffect`가 아니라 `handlePlay()`/`stopPlayback()` 이벤트 핸들러 안에서 직접 수행.
+- 재검증: 2노트(tick:0 kick, tick:PPQ*4 snare) 전용 하니스로 실제 브라우저에서 "재생 전 고정 점등 없음" + "재생 후 정지 시 즉시 소등" 둘 다 스크린샷으로 확인(`qa-evidence/T2-3/result.md` §Codex 모드A 검수 반영). 수정 후 tsc/oxlint/prettier/vitest 재실행 — 전부 클린, 65/65 통과.
 
 ## 남은 문제
 - T2-4가 BPM 슬라이더·A-B 루프를 이 렌더러에 연결.

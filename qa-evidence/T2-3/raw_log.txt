@@ -76,3 +76,21 @@ screenshot-tablet.jpg (768x1024): 레인 + 킷 일러스트 둘 다 표시, 재�
   (HH) 원이 밝게(불투명도 1, 테두리 굵게) 점등됨을 확인 — 킷 점등 로직이 실제로
   동작함을 시각적으로 확인.
 screenshot-pc.jpg (800x600 브라우저 팬 기본폭): 레인 + 킷 동일하게 표시.
+
+--- 4. Codex 모드A 검수 C-001 수정 재검증(실제 브라우저) ---
+[C-001] "재생 여부와 무관하게 매 프레임 activePieces 계산 → 정지 중에도 틱0
+노트 근처 피스가 계속 켜져 있음"
+재현 방법: tick:0 kick, tick:PPQ*4 snare 두 노트짜리 스코어로 App.tsx에
+C-001 전용 검증 하니스 구성. 재생 버튼을 누르기 전(정지 상태, 마스터 클록
+위치=0초) 스크린샷 확인 — 수정 후에는 모든 킷 서클이 흐린 상태(opacity 0.55,
+얇은 테두리)로 렌더링되어 kick이 고정 점등되지 않음을 확인(수정 전이었다면
+클록 위치 0초가 tick:0 kick의 ±60ms 판정 범위 안이라 처음부터 켜져 있었을 것).
+재생 버튼 클릭 → 6초 대기 → 정지 버튼 클릭 → 스크린샷 재확인: 정지 직후
+모든 킷 서클이 다시 흐린 상태로 돌아가 있고 켜진 채 남은 피스 없음(정지 시
+setActivePieces(new Set())가 즉시 반영됨을 확인).
+수정 코드: PracticeCanvas.tsx에 isPlayingRef 도입, 렌더 루프가
+isPlayingRef.current일 때만 activePieces를 반영(정지 중엔 항상 빈 Set).
+isPlaying/activePieces 상태 갱신은 (oxlint react(set-state-in-effect) 경고에
+따라) useEffect가 아니라 handlePlay/stopPlayback 이벤트 핸들러 안에서 직접 수행.
+재검증 후 tsc -b / oxlint / prettier --check / vitest run 재실행 — 전부 클린,
+65/65 통과(App.tsx를 검증 하니스에서 원래 최소 상태로 되돌린 뒤 재실행).

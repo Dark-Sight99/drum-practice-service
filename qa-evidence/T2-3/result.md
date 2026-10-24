@@ -1,4 +1,4 @@
-> 한 줄 요약: T2-3 QA — tsc/oxlint/prettier/vitest 전부 통과(65/65: 기존 50개 + 신규 15개 순수 좌표계산 테스트). 실제 브라우저에서 레인+킷+마디선 렌더링 확인, 실측 fps 60.1(목표 달성), 반응형 3종 스크린샷, 실제 버그 2건 발견·수정.
+> 한 줄 요약: T2-3 QA — tsc/oxlint/prettier/vitest 전부 통과(65/65: 기존 50개 + 신규 15개 순수 좌표계산 테스트). 실제 브라우저에서 레인+킷+마디선 렌더링 확인, 실측 fps 60.1(목표 달성), 반응형 3종 스크린샷, 실제 버그 2건 발견·수정. Codex 모드A 지적 C-001(정지 중 킷 점등 고정 유지)도 재현 확인 후 수정·재검증 완료.
 
 # T2-3 QA 결과(2026-10-24)
 
@@ -53,6 +53,20 @@ Claude Browser pane에서 Vite dev 서버로 임시 하니스(QA 후 삭제)를 
 - [x] 60fps 목표(측정) — 실측 60.1fps(버그 수정 후)
 - [x] 폰 세로·가로/태블릿/PC 레이아웃 동작 — 스크린샷 3종 확인
 - [x] 스크린샷 증거 — `screenshot-phone-portrait.jpg`, `screenshot-tablet.jpg`, `screenshot-pc.jpg`
+
+## Codex 모드A 검수 반영 — C-001(재현됨, 수정 완료)
+Codex 모드A(독립 코드 검수, `codex-modeA.md`)가 REQUEST_CHANGES로 지적:
+> `PracticeCanvas.tsx:85-97` 재생 여부와 관계없이 매 프레임 `activePieces`를 계산하고, 활성 피스 상태를 유지합니다. 마스터 클록이 정지한 동안 현재 위치가 노트 시각에서 ±60ms 이내라면 해당 킷이 계속 켜져 있습니다.
+
+**재현 확인**: tick=0 kick 노트가 있으면, 재생 전(마스터 클록 초기 위치=0초)에도 그 위치가 kick 노트의 ±60ms 판정 범위 안이라 처음부터 kick이 점등된 채로 보일 수 있는 로직이었음 — 코드 검토로 재현 가능함을 확인(실제 버그).
+
+**수정**: `PracticeCanvas.tsx`에 `isPlayingRef`를 추가해 렌더 루프가 재생 중일 때만 `activePieces`를 반영하고, 정지 중엔 항상 빈 `Set`을 쓰도록 변경. `isPlaying`/`activePieces` 상태 전환은 `handlePlay()`/`stopPlayback()` 이벤트 핸들러 안에서 직접 수행(처음엔 `useEffect`로 구현했다가 oxlint `react(set-state-in-effect)` 경고를 받아 이벤트 핸들러 방식으로 수정).
+
+**재검증(실제 브라우저)**: tick:0 kick + tick:PPQ*4 snare 2노트 스코어로 전용 하니스 구성 →
+1. 재생 전 스크린샷: 모든 킷 서클이 흐린 상태(opacity 0.55)로, kick이 고정 점등되지 않음 확인.
+2. 재생 → 6초 후 정지 버튼 클릭 → 스크린샷 재확인: 모든 킷 서클이 다시 흐린 상태로 복귀, 켜진 채 남은 피스 없음.
+
+수정 후 `App.tsx`를 원래 최소 상태로 되돌리고 `tsc -b`/`oxlint`/`prettier --check`/`vitest run`을 재실행 — 전부 클린, 65/65 통과(`raw_log.txt` §4).
 
 ## 가정/한계
 - 드럼킷 일러스트는 정밀 그래픽이 아닌 단순 도형(원+글자) — `intent/07-open-questions.md` Q-09(의뢰인 디자인 승인 필요)에 따라 이번엔 기능만.
