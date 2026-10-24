@@ -30,7 +30,8 @@ export interface LaneRendererOptions {
    * 떨어지는 노트가 글자 뒤를 지나가도 가독성이 안 깨진다(T2-10, Phase 2 게이트
    * 3차 피드백: "처음에 내려오는 노트가 어느 부분을 치라는건지 와닿지 않는다" —
    * intent/04-ui-ux.md §3 와이어프레임엔 "HH CR SN T1 T2 FT RD KK ← 레인 머리글"이
-   * 명시돼 있었는데 T2-3 구현에서 빠뜨렸던 것을 뒤늦게 발견). */
+   * 명시돼 있었는데 T2-3 구현에서 빠뜨렸던 것을 뒤늦게 발견 — 탐 레인 글자는 이후
+   * T2-15에서 T1/T2 → HT/MT로 변경, 현재는 "HH CR SN HT MT FT RD KK"). */
   laneHeaderBackgroundColor: string
   /** 판정선 근처 노트를 "히트"로 보는 허용범위(초) — work/T2-3/plan.md §가정. */
   hitWindowSeconds: number

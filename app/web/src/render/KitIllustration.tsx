@@ -2,7 +2,7 @@ import type { DrumPiece, Hand } from '../score/types'
 
 // 드럼킷 점등 — 단순 도형 placeholder(intent/07-open-questions.md Q-09: 정밀 일러스트는
 // 의뢰인 디자인 승인 필요, 이번엔 점등 "기능"만 구현, work/T2-3/plan.md §범위).
-// 배치는 intent/04-ui-ux.md §3 3행 레이아웃: 상단 HH·CR·RD / 중단 SN·T1·T2 / 하단 KK·FT.
+// 배치는 intent/04-ui-ux.md §3 3행 레이아웃: 상단 HH·CR·RD / 중단 SN·HT·MT / 하단 KK·FT.
 interface KitPieceDef {
   piece: DrumPiece
   label: string
@@ -16,8 +16,8 @@ const KIT_PIECES: readonly KitPieceDef[] = [
   { piece: 'crash', label: 'CR', cx: 50, cy: 15, r: 14 },
   { piece: 'ride', label: 'RD', cx: 80, cy: 20, r: 16 },
   { piece: 'snare', label: 'SN', cx: 30, cy: 50, r: 15 },
-  { piece: 'tom_high', label: 'T1', cx: 50, cy: 48, r: 13 },
-  { piece: 'tom_mid', label: 'T2', cx: 70, cy: 50, r: 13 },
+  { piece: 'tom_high', label: 'HT', cx: 50, cy: 48, r: 13 },
+  { piece: 'tom_mid', label: 'MT', cx: 70, cy: 50, r: 13 },
   { piece: 'kick', label: 'KK', cx: 25, cy: 82, r: 18 },
   { piece: 'tom_floor', label: 'FT', cx: 70, cy: 82, r: 17 },
 ]
