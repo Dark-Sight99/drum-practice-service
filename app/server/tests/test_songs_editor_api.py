@@ -218,6 +218,7 @@ def test_other_user_cannot_save_drumscore(client: TestClient, db_session) -> Non
         lambda d: d["notes"][0].update(velocity=200),
         lambda d: d["notes"][0].update(piece="not_a_real_piece"),
         lambda d: d["notes"][0].update(handSource="bogus"),  # T2-7(REQ-12)
+        lambda d: d.update(audioOffsetMs=500.0),  # T2-8(Codex 모드C 3차, Q-23)
     ],
 )
 def test_save_rejects_invalid_drumscore_invariants(client: TestClient, db_session, mutate) -> None:

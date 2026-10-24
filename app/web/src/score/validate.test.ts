@@ -37,6 +37,20 @@ describe('validateDrumScore', () => {
     expect(result.errors).toContain('version: 1이 아님')
   })
 
+  it('rejects a non-zero audioOffsetMs (T2-8, Phase 3 전까지 임시 제한, Q-23)', () => {
+    const score = { ...minimalScore(), audioOffsetMs: 500 }
+    const result = validateDrumScore(score)
+    expect(result.valid).toBe(false)
+    expect(result.errors.some((e) => e.startsWith('audioOffsetMs'))).toBe(true)
+  })
+
+  it('rejects a non-finite audioOffsetMs', () => {
+    const score = { ...minimalScore(), audioOffsetMs: Number.POSITIVE_INFINITY }
+    const result = validateDrumScore(score)
+    expect(result.valid).toBe(false)
+    expect(result.errors.some((e) => e.startsWith('audioOffsetMs'))).toBe(true)
+  })
+
   it('rejects an unknown meta.source', () => {
     const score = minimalScore()
     // @ts-expect-error 의도적으로 잘못된 값 주입

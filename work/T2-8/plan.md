@@ -32,8 +32,10 @@
 ### 수정 1-2(Codex 모드C 1차 지적 C-001 반영, 필수): `audioOffsetMs` 비대칭
 `laneRenderer.ts`의 `noteTimeOf`는 `score.audioOffsetMs`를 더하는데, `scorePlayer.ts`의 실제 오디오 스케줄링(`schedule.songStartSeconds + ticksToSeconds(...)`)은 애초부터 이 필드를 전혀 반영하지 않았음(카운트인 오프셋과는 별개의, 기존부터 있던 비대칭) — `audioOffsetMs`가 0이 아닌 곡이 생기면(현재는 `score/import/midiEvents.ts`가 항상 0으로 생성해 실질 영향 없음, Phase 3 오디오-MIDI 정렬(T3-5)에서 실제로 쓰일 값) 화면과 소리가 그만큼 계속 어긋난다. `scorePlayer.ts`의 노트 스케줄 식도 렌더러와 동일하게 `+ score.audioOffsetMs / 1000`을 더해 대칭을 맞춘다(카운트인 클릭 스케줄은 악보 노트가 아니라 메트로놈 프리롤이라 영향 없음, 그대로 둠).
 
-### 수정 1-2 관련 보류 사항(Codex 모드C 2차 지적, C-002 — 설계 보류로 대응)
-위 수정을 적용하면 오프셋이 노트를 A-B 루프 시작/끝 마디 경계 너머로 밀어낼 수 있어, 그 노트가 반복마다 누락되거나 구간 밖에서 재생될 수 있다는 지적(Codex 2차, high). **실제 위험 범위를 따져보면**: `audioOffsetMs`를 설정하는 경로가 현재 코드에 전혀 없음(`score/import/midiEvents.ts`가 항상 `0`으로 생성, 편집기도 이 필드를 편집하는 UI가 없음 — `EditorScreen.tsx`는 읽고 그대로 돌려줄 뿐) — 즉 이 엣지 케이스는 **지금은 발생할 수 있는 경로 자체가 없는 이론상의 문제**다. 루프 경계에 걸친 노트를 어떤 기준(클램프? 루프 포인트도 같이 이동?)으로 처리할지는 `audioOffsetMs`를 실제로 사용자가 설정하게 될 Phase 3(T3-5, 오디오-MIDI 오프셋 정렬 UI)가 그 UI와 허용 범위(예: ±수백ms 수준인지, 더 큰 값도 허용하는지)를 먼저 정의해야 제대로 설계할 수 있다고 판단 — 지금 추측으로 설계하면 T3-5 요구사항과 안 맞을 위험이 크다(CLAUDE.md §1-1 "모르는 정보는 지어내지 마라"). `intent/07-open-questions.md` Q-23으로 등록하고, `scorePlayer.ts`에 이 보류 사실을 주석으로 남겨 T3-5 착수 시 반드시 재검토하도록 한다.
+### 수정 1-2 관련 보류 사항 → 최종적으로 검증 단계에서 0 강제(Codex 모드C 2~3차 지적 반영)
+위 수정을 적용하면 오프셋이 노트를 A-B 루프 시작/끝 마디 경계 너머로 밀어낼 수 있어, 그 노트가 반복마다 누락되거나 구간 밖에서 재생될 수 있다는 지적(2차, high). **1차 대응(문서화만)은 부족했다** — "`audioOffsetMs`를 설정하는 UI·가져오기 경로가 없다"는 근거만으로는 막지 못함: `score/validate.ts`·`api/schemas.py`의 검증이 "유한하기만 하면 통과"였어서, **API에 직접 0이 아닌 값을 가진 DrumScore JSON을 올리는 경로(업로드·저장 둘 다)는 막혀 있지 않았다**(3차 지적, C-001 — 맞는 지적, 1차 판단이 틀렸음을 인정).
+
+**최종 수정**: `score/validate.ts`와 `api/schemas.py` 둘 다 `audioOffsetMs`를 "유한한 숫자"에서 **"정확히 0"**으로 검증을 강화 — 업로드(`POST /songs`)·편집기 저장(`PUT /songs/{id}/drumscore`) 어느 경로로도 0이 아닌 값이 들어올 수 없게 됐다(클라이언트 `validateDrumScore()`가 편집기 저장 전에도 한 번 더 막음). 이걸로 "지금은 발생 불가능하다"는 주장이 우연한 현재 상태가 아니라 **검증으로 강제되는 불변식**이 됐다 — 루프 경계+오프셋 상호작용 설계 자체는 여전히 Q-23으로 Phase 3(T3-5)에 넘기되, 그 전까지 이 경로가 실제로 막혀 있음을 테스트로 증명.
 
 ### 수정 2(위험 작업 아님): 연습 화면 R/L 즉석 계산
 - `PracticeCanvas.tsx`에서 `score.notes`를 렌더러에 그대로 넘기는 대신, `useMemo(() => recommendSticking(score.notes, score.ppq, DEFAULT_START_HAND), [score])`로 계산한 사본을 **렌더링(시각 표시)에만** 사용. 재생(`playDrumScore`)은 `hand`/`handSource`를 전혀 읽지 않으므로 원본 `score` 그대로 사용 — 재생 로직 영향 없음.
