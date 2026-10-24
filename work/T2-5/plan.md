@@ -92,7 +92,7 @@
 5. `DELETE` 후 실제 파일이 디스크에서 사라짐, 같은 id로 `GET`하면 404.
 6. `file_storage.resolve_asset_path()`에 `../`·절대경로가 섞인 `file_path`를 직접 넣었을 때 저장소 루트 밖으로 못 나가는지(경로조작 방어 재검증, 단위 테스트).
 7. `PATCH`로 제목을 빈 문자열로 바꾸려 하면 거부.
-8. `drumscore`에 `bpm:0`·`bpm:Infinity`(JSON으로는 `null`이나 매우 큰 수로 대리 표현)·범위 밖 `velocity`(예: 200)·목록에 없는 `piece` 값을 넣으면 4xx로 거부(Codex 모드C C-002 반영 검증).
+8. `drumscore`의 모든 수치 불변식이 각각 거부되는지 개별 테스트(Codex 모드C C-002 반영, 2차 검수에서 "설계엔 있는데 QA 목록엔 빠짐" 지적 — 전부 명시): `meta.bpm`이 `0`·음수·`Infinity`·`NaN`(JSON 표현은 매우 큰 수·`null` 등으로 대리), `ppq`가 `0`·음수, `audioOffsetMs`가 비유한값, `meta.timeSignature`가 원소 2개가 아니거나 분자·분모가 `0`/음수, `notes[].velocity`가 범위 밖(예: `200`), `notes[].piece`가 9종 목록에 없는 값, `notes[].tick`이 음수 — 전부 4xx로 거부되고 DB에 고아 행이 안 남는지.
 
 **프론트(vitest)**
 - `filterSongs()` 순수 함수: 제목/아티스트 부분일치(대소문자 무시), 빈 검색어는 전체 반환.
