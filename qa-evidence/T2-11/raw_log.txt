@@ -1,0 +1,111 @@
+===== app/web: npx tsc -b =====
+EXIT=0
+
+===== app/web: npx oxlint =====
+EXIT=0
+
+===== app/web: npx vitest run =====
+Test Files  15 passed (15)
+Tests  134 passed (134)
+EXIT=0
+(이전 131개 + sticking.test.ts에 추가한 3개[동시타격 2개 + Codex 모드A 재현 1개] = 134개.
+ 자세한 로그는 qa-evidence/T2-11/vitest_output.txt — 모드A 반영 후 재실행한 최신본)
+
+===== outputLatency/baseLatency 사용 여부(코드 검색, 전수) =====
+명령: grep -rn "outputLatency\|baseLatency" app/web/src
+결과: (매치 없음)
+grep exit code: 1
+(exit 1 = grep이 매치를 찾지 못함 — AudioContext.outputLatency/baseLatency를 코드 어디서도 읽거나 보정하지 않음을 확정)
+
+===== 의뢰인 첨부 영상 정보 =====
+파일: C:\Users\Jaewoo\Videos\녹음 2026-10-24 211830.mp4
+명령: ffmpeg -i "<위 경로>"
+결과(발췌): Duration: 00:00:35.23, Video: h264 1240x956 30fps, Audio: aac 48000Hz stereo
+(ffmpeg은 로컬 미설치 — Python 패키지 imageio-ffmpeg가 번들한 바이너리 사용,
+ C:\Users\Jaewoo\AppData\Local\Programs\Python\Python312\Lib\site-packages\imageio_ffmpeg\binaries\ffmpeg-win-x86_64-v7.1.exe)
+
+===== 프레임·오디오 추출 =====
+명령: ffmpeg -y -i "<영상>" -vf fps=5 frame_%03d.png   (저속 프레임 샘플 — 레이아웃 확인용)
+명령: ffmpeg -y -i "<영상>" -ac 1 -ar 16000 audio.wav   (오디오 트랙)
+결과: 176개 프레임(5fps) + audio.wav(34초, 16kHz mono) 생성, 둘 다 exit 0
+
+===== 판정선(하단 흰 줄) 행 좌표 확인 =====
+명령: python -c "...프레임 200(연습 화면 로드 후)에서 y=400~700 구간 중 가장 밝은 행을 찾음..."
+결과: 행 556, 밝기 231.47 (배경·그리드보다 뚜렷이 밝음 — 판정선으로 확인)
+
+===== 시각 신호·오디오 신호 교차상관(동기화 실측) =====
+스크립트: qa-evidence/T2-11/analyze_sync.py (전체 30fps 프레임 1057장 + 16kHz 오디오를
+  cv2/wave로 직접 디코딩, 판정선 바로 위 띠(y=548~558px, 전체 폭)에서 "채도>40(배경 검정·
+  판정선 흰색과 구분되는 색 픽셀)" 존재 여부로 시각 신호를, 같은 길이의 오디오 구간 RMS로
+  오디오 신호를 프레임 단위로 만듦)
+명령: python analyze_sync.py
+결과: fps=30.0, n_frames=1057, visual nonzero frames=845/1057, audio samples=544427 @16kHz
+  (qa-evidence/T2-11/sync_extract_output.txt)
+
+스크립트: qa-evidence/T2-11/cross_correlation.py (위 시계열을 lag -20~+20프레임(±667ms)
+  범위에서 교차상관 — 전체 구간 + 전/후반 분할. **Codex 모드B 2차 지적 반영**: 1차
+  버전은 전체 배열 기준으로 한 번만 정규화한 뒤 겹침 구간의 내적을 구간 길이로
+  나눴을 뿐이라 진짜 피어슨 상관계수가 아니었음(증거: 합성 신호에서 corr=1.07처럼
+  1을 넘는 값이 나옴, 상관계수는 정의상 [-1,1]을 벗어날 수 없음) — lag마다 "겹치는
+  구간 그 자체"의 평균·표준편차로 다시 정규화하는 진짜 피어슨 상관계수로 교체)
+명령: python cross_correlation.py
+결과(qa-evidence/T2-11/cross_correlation_output.txt 전문 보존, 발췌 — 교정된 피어슨 상관계수):
+  전체 구간 최댓값: lag=+7프레임(+233.3ms), corr=0.2126 (다른 lag들보다 뚜렷히 높음, [-1,1] 범위 안)
+  전반부: lag=+7프레임(+233.3ms), corr=0.0519(약함 — 초반 구간은 노트 밀도가 높아 신호가 덜 깨끗함)
+  후반부: lag=+7프레임(+233.3ms), corr=0.5548(강한 신호 — 노트 밀도가 낮아 신호가 깨끗한 구간)
+  (1차 버전의 근사치 0.2138/0.0525/0.5606과 거의 같은 값 — 정규화 방식을 바로잡아도
+   best_lag=+7이라는 결론 자체는 바뀌지 않음, 상관계수만 올바른 범위로 교정됨)
+===== lag 부호 방향 검증(Codex 모드B 1차 지적 — 최초 서술의 방향이 반대였음) =====
+스크립트: qa-evidence/T2-11/sign_check.py (cross_correlation.py와 완전히 같은 lag
+  루프(2차 지적 반영한 진짜 피어슨 상관계수 버전)를, "오디오가 화면보다 7프레임
+  늦는다"는 정답을 고정한 합성 신호에 적용 — 이 루프가 실제로 어느 부호를 어느
+  방향으로 보고하는지 직접 검증)
+명령: PYTHONIOENCODING=utf-8 python sign_check.py (qa-evidence/T2-11/sign_check_output.txt 전문 보존)
+결과: 정답("오디오가 화면보다 7프레임=233ms 늦음=화면이 먼저")에 대해 스크립트는
+  best_lag=-7을 보고함(corr=1.0 정확히 — 완전 재현되는 합성 신호라 피어슨 상관계수의
+  이론적 최댓값과 정확히 일치, 교정 전 버전의 corr=1.07[이론상 불가능한 값]과 대조).
+  즉 "화면이 먼저"는 이 코드에서 **음수** lag로 나타난다.
+결론(방향 정정, 교정된 상관계수로도 동일): 실제 영상 분석의 best_lag는 **+7**
+  (cross_correlation_output.txt) — 부호가 반대이므로 "화면상 노트가 판정선에 닿는
+  시점"보다 "소리가 들리는 시점"이 **233ms 먼저**였다(최초 서술 "소리가 233ms
+  늦다"는 부호 해석 오류, Codex 모드B 1차 [medium] 지적으로 발견·정정). 영상
+  전체·후반부 단독 분석 모두 같은 lag(+7프레임)에서 피크가 나와 방향 자체는
+  재현됨 — 다만 그 방향이 처음 서술과 반대였을 뿐.
+한계(과장 금지): (1) 이 수치는 화면 녹화 소프트웨어 자체의 영상/오디오 버퍼링 차이를
+  포함할 수 있어 "앱 자체의 지연"이라고 100% 분리 확정하지 못함 — 오히려 방향이
+  뒤집힌 지금은 이쪽이 더 유력한 설명(아래 outputLatency 가설 철회 참조). (2) 상관
+  계수가 1.0에 가깝지 않아(0.05~0.55) 노이즈가 섞여 있음 — "약 233ms"는 추정치이지
+  ±10ms 정밀도의 측정값이 아님. (3) 이 세션의 브라우저로 확인한
+  AudioContext.outputLatency는 0(아래 참조) — 의뢰인의 실제 재생 장치 값이 아니라
+  참고 불가.
+outputLatency 가설 철회: outputLatency는 소리를 "늦추기만" 할 수 있는 값이라(하드웨어가
+  샘플을 실제로 내보내는 데 걸리는 시간), 오디오가 화면보다 먼저 들리는 이번 방향은
+  outputLatency 미보정으로 설명할 수 없음 — 방향이 뒤집힌 이상 이 가설은 폐기하고,
+  화면 녹화 소프트웨어의 영상 인코딩 지연(통상 오디오보다 큼)을 더 유력한 설명으로 본다.
+
+===== 이 세션 브라우저의 AudioContext.outputLatency(참고용, 의뢰인 환경 아님) =====
+실행: new AudioContext(); ctx.resume(); {state, sampleRate, baseLatency, outputLatency}
+결과: {"state":"running","sampleRate":48000,"baseLatency":0.01,"outputLatency":0}
+(이 값은 Claude 브라우저 패널 환경의 것으로, 의뢰인이 영상을 녹화한 실제 PC·오디오
+ 장치의 outputLatency와 무관 — 의뢰인에게 직접 확인 요청 예정)
+
+===== 스티킹 동시타격 규칙 — 실제 곡 데이터(song id=2, MusicDelta_Grunge)로 검증 =====
+명령: curl 로그인 후 GET /songs/2/drumscore → song2.json(175개 노트, ppq=220, bpm=120)
+스크립트: qa-evidence/T2-11/sticking_sim.py (sticking.ts 로직을 Python으로 이식해 실제
+  데이터에 적용 — 수정 전/후 양쪽 로직 비교)
+명령: python sticking_sim.py
+결과(qa-evidence/T2-11/sticking_sim_output.txt 전문 보존, 발췌):
+  - 수정 전: tick=4550에서 hihat_closed·crash가 둘 다 'R'로 배정(간격 0.0ms) — 한 손이
+    같은 순간 두 악기를 치는 물리적으로 불가능한 배정.
+  - 수정 후: 같은 tick에서 hihat_closed='R'(우선순위 유지), crash='L'로 변경 확인.
+  - 잔여 한계: 같은 tick(4550)에 snare도 있어(하이햇과의 동시타 규칙으로 이미 'L') crash가
+    'L'로 바뀌면서 snare·crash가 새로 'L'끼리 겹침 — 전체 파일에서 이 tick이 유일하게
+    고정 우선순위 피스 2개 이상이 겹치는 지점(검색: 2+ FIXED_PRIORITY 피스가 같은 틱인
+    경우 전수 스캔, 결과 1건, 그 1건에 스네어도 동시에 있음). 3개의 서로 다른 손 악기가
+    정확히 같은 순간 겹치면 손 2개로는 어떤 배정을도 물리적 충돌을 완전히 없앨 수 없음
+    (근본적으로 2손 모델의 한계이지 알고리즘 버그가 아님) — T2-9에서 이미 확인한 이 파일의
+    낮은 채보 정확도(ADTOF, 톰 F=0.333)로 인한 전사 오류일 가능성이 있다고 보되 확정은
+    못 함.
+  - "SN=R 배정이 하이햇 타격과 60ms 이내로 겹치는 사례": 0건(전수 확인) — 필인 교대가
+    'R'을 배정하는 순간은 전부 하이햇이 쉬는 타이밍에 떨어져 있어, 의뢰인이 질문한 "HH
+    계속 치면서 SN도 R로 동시에 친다"는 충돌은 이 곡에서 실제로 발생하지 않음.

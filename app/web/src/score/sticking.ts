@@ -20,6 +20,15 @@ export const STICKING_PIECE_RULES: Partial<Record<DrumPiece, 'R' | 'RF'>> = {
 const COINCIDENCE_TRIGGER_PIECES: readonly DrumPiece[] = ['hihat_closed', 'hihat_open', 'ride']
 const FILL_PIECES: readonly DrumPiece[] = ['snare', 'tom_high', 'tom_mid', 'tom_floor']
 
+/** 고정 'R' 배정 피스들의 우선순위(앞쪽이 높음) — 같은 틱에 둘 이상이 겹치면
+ * 우선순위가 낮은 쪽을 'L'로 보낸다. 한 손이 같은 순간 두 악기를 칠 수 없다는
+ * 물리적 제약을 반영(T2-11, Phase 2 게이트 4차 피드백 "HH 계속 치면서 SN을 R/L
+ * 번갈아 치는 게 물리적으로 가능한가" 질문을 조사하다가, 실제 곡 데이터에서
+ * 하이햇·크래시가 같은 틱에 둘 다 'R'로 배정된 사례를 발견해 등록). 하이햇/라이드는
+ * 통상 타임키핑을 담당해 손을 유지하고, 크래시는 액센트라 손을 비켜주는 쪽이 더
+ * 자연스럽다고 판단했지만 전문 검증은 안 된 휴리스틱(Q-11에 포함). */
+const FIXED_HAND_PRIORITY: readonly DrumPiece[] = ['hihat_closed', 'hihat_open', 'ride', 'crash']
+
 function otherHand(hand: 'R' | 'L'): 'R' | 'L' {
   return hand === 'R' ? 'L' : 'R'
 }
@@ -52,6 +61,31 @@ export function recommendSticking(
     if (COINCIDENCE_TRIGGER_PIECES.includes(note.piece)) coincidenceTicks.add(note.tick)
   }
 
+  // 같은 틱에 고정 'R' 피스가 둘 이상 겹치는지 빠르게 찾기 위한 보조 맵(틱 →
+  // 그 틱에 실제로 'R'을 쥐고 있는 고정 피스 집합) — T2-11, 위 FIXED_HAND_PRIORITY
+  // 설명 참조. 사용자가 직접 'R'이 아닌 손으로 지정한 노트는 그 틱에서 'R'을 쥐고
+  // 있지 않으므로 제외한다 — 안 그러면(Codex 모드A 지적) 사용자가 하이햇을 'L'로
+  // 직접 바꿔놔도 그 틱의 크래시가 "하이햇이 R을 쥐고 있다"고 잘못 보고 'L'로
+  // 밀려나, 실제로는 비어 있는 'R' 대신 하이햇과 크래시가 둘 다 'L'로 겹치는
+  // 새 충돌을 만들 수 있었다.
+  const fixedHandTicks = new Map<number, Set<DrumPiece>>()
+  for (const note of notes) {
+    if (!FIXED_HAND_PRIORITY.includes(note.piece)) continue
+    if (note.handSource === 'user' && note.hand !== 'R') continue
+    const set = fixedHandTicks.get(note.tick) ?? new Set<DrumPiece>()
+    set.add(note.piece)
+    fixedHandTicks.set(note.tick, set)
+  }
+  function hasHigherPriorityAtSameTick(piece: DrumPiece, tick: number): boolean {
+    const set = fixedHandTicks.get(tick)
+    if (!set) return false
+    const myRank = FIXED_HAND_PRIORITY.indexOf(piece)
+    for (const other of set) {
+      if (other !== piece && FIXED_HAND_PRIORITY.indexOf(other) < myRank) return true
+    }
+    return false
+  }
+
   const result = new Array<DrumNote>(notes.length)
 
   // 필인 구간(스네어/탐) 위치 계산 — 간격이 maxGap 이하인 연속 구간마다 0부터
@@ -74,7 +108,12 @@ export function recommendSticking(
 
     const pieceRule = STICKING_PIECE_RULES[note.piece]
     if (pieceRule !== undefined) {
-      result[i] = { ...note, hand: pieceRule, handSource: 'auto' }
+      // 고정 'R' 피스끼리 같은 틱에 겹치면(예: 하이햇+크래시 동시타) 한 손이
+      // 동시에 두 악기를 칠 수 없으므로 우선순위가 낮은 쪽을 'L'로 보낸다
+      // (T2-11 — 'RF'인 킥은 발이라 손 충돌과 무관, 검사 대상 아님).
+      const hand =
+        pieceRule === 'R' && hasHigherPriorityAtSameTick(note.piece, note.tick) ? 'L' : pieceRule
+      result[i] = { ...note, hand, handSource: 'auto' }
       continue
     }
 
