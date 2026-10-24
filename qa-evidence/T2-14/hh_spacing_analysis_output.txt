@@ -1,0 +1,38 @@
+total HH notes: 120 total SN notes: 46
+
+--- 1. SN이 HH와 정확히 같은 틱에 있는지(바 9~13, 끊기지 않은 구간) ---
+bar=9 HH offsets=[4, 123, 242, 361, 488, 612, 726, 845] (count=8)
+       HH gaps=[119, 119, 119, 127, 124, 114, 119]
+       SN offset=4 exact_HH_match=True
+       SN offset=488 exact_HH_match=True
+bar=10 HH offsets=[88, 207, 321, 440, 563, 682, 796] (count=7)
+       HH gaps=[119, 114, 119, 123, 119, 114]
+       SN offset=88 exact_HH_match=True
+       SN offset=563 exact_HH_match=True
+bar=11 HH offsets=[35, 158, 282, 392, 510, 638, 761, 876] (count=8)
+       HH gaps=[123, 124, 110, 118, 128, 123, 115]
+       SN offset=158 exact_HH_match=True
+       SN offset=638 exact_HH_match=True
+bar=12 HH offsets=[114, 242, 361, 475, 594, 717, 840] (count=7)
+       HH gaps=[128, 119, 114, 119, 123, 123]
+       SN offset=242 exact_HH_match=True
+       SN offset=717 exact_HH_match=True
+bar=13 HH offsets=[75, 194, 321, 440, 559, 678, 805] (count=7)
+       HH gaps=[119, 127, 119, 119, 119, 127]
+       SN offset=321 exact_HH_match=True
+       SN offset=805 exact_HH_match=True
+
+--- 2. 곡 전체: SN-HH 정확 일치율 ---
+SN notes with exact same-tick HH match: 30/46
+
+--- 3. 곡 전체: HH 자체의 연속 간격(gap) 통계 ---
+이상적인 8분음표 간격(교과서 기준, 균등 분할): 110.0 틱
+실제 HH 연속 간격(gap<200틱, n=118): 평균=120.03, 표준편차=4.01, 최소=110, 최대=132
+
+--- 4. 마디당 HH 타격 수 분포 ---
+마디당 HH 타격 수 분포: [(1, 1), (4, 1), (5, 1), (7, 10), (8, 5)]
+
+--- 5. 정량적 일관성 검증: HH 간격 초과분으로 SN 드리프트 예측 ---
+HH 간격 초과분으로 예측한 마디당 드리프트: 80.2틱
+T2-13에서 실측한 SN 백비트 드리프트: 78.8틱
+두 값의 비율: 1.018 (1.0에 가까울수록 같은 현상임을 뒷받침)
