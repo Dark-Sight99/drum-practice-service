@@ -1,44 +1,44 @@
-lag=-20 frames (-666.7 ms)  corr=-0.1343
-lag=-19 frames (-633.3 ms)  corr=-0.1063
-lag=-18 frames (-600.0 ms)  corr=-0.1045
-lag=-17 frames (-566.7 ms)  corr=-0.0939
-lag=-16 frames (-533.3 ms)  corr=-0.0705
-lag=-15 frames (-500.0 ms)  corr=-0.0579
-lag=-14 frames (-466.7 ms)  corr=-0.0872
-lag=-13 frames (-433.3 ms)  corr=-0.0915
-lag=-12 frames (-400.0 ms)  corr=-0.0607
-lag=-11 frames (-366.7 ms)  corr=-0.0329
-lag=-10 frames (-333.3 ms)  corr=-0.0467
-lag= -9 frames (-300.0 ms)  corr=-0.0679
-lag= -8 frames (-266.7 ms)  corr=-0.0399
-lag= -7 frames (-233.3 ms)  corr=-0.0300
-lag= -6 frames (-200.0 ms)  corr=-0.0633
-lag= -5 frames (-166.7 ms)  corr=-0.0899
-lag= -4 frames (-133.3 ms)  corr=-0.0785
-lag= -3 frames (-100.0 ms)  corr=-0.0632
-lag= -2 frames ( -66.7 ms)  corr=-0.0947
-lag= -1 frames ( -33.3 ms)  corr=-0.1277
-lag= +0 frames (  +0.0 ms)  corr=-0.1267
-lag= +1 frames ( +33.3 ms)  corr=-0.1365
-lag= +2 frames ( +66.7 ms)  corr=-0.1530
-lag= +3 frames (+100.0 ms)  corr=-0.1301
-lag= +4 frames (+133.3 ms)  corr=-0.0102
-lag= +5 frames (+166.7 ms)  corr=0.1179
-lag= +6 frames (+200.0 ms)  corr=0.2069
-lag= +7 frames (+233.3 ms)  corr=0.2138
-lag= +8 frames (+266.7 ms)  corr=0.1921
-lag= +9 frames (+300.0 ms)  corr=0.1290
-lag=+10 frames (+333.3 ms)  corr=0.0024
-lag=+11 frames (+366.7 ms)  corr=-0.1545
-lag=+12 frames (+400.0 ms)  corr=-0.1674
-lag=+13 frames (+433.3 ms)  corr=-0.1201
-lag=+14 frames (+466.7 ms)  corr=-0.0889
-lag=+15 frames (+500.0 ms)  corr=-0.0784
-lag=+16 frames (+533.3 ms)  corr=-0.0627
-lag=+17 frames (+566.7 ms)  corr=-0.0482
-lag=+18 frames (+600.0 ms)  corr=-0.0678
-lag=+19 frames (+633.3 ms)  corr=-0.0824
-lag=+20 frames (+666.7 ms)  corr=-0.0579
-BEST: 7 frames = 233.33333333333334 ms  corr= 0.2137516858054995
-first_half best lag 7 frames = 233.33333333333334 ms corr= 0.052459274352849285
-second_half best lag 7 frames = 233.33333333333334 ms corr= 0.560638446821656
+lag=-20 frames (-666.7 ms)  corr=-0.1325  overlap=1037
+lag=-19 frames (-633.3 ms)  corr=-0.1049  overlap=1038
+lag=-18 frames (-600.0 ms)  corr=-0.1032  overlap=1039
+lag=-17 frames (-566.7 ms)  corr=-0.0928  overlap=1040
+lag=-16 frames (-533.3 ms)  corr=-0.0697  overlap=1041
+lag=-15 frames (-500.0 ms)  corr=-0.0573  overlap=1042
+lag=-14 frames (-466.7 ms)  corr=-0.0864  overlap=1043
+lag=-13 frames (-433.3 ms)  corr=-0.0907  overlap=1044
+lag=-12 frames (-400.0 ms)  corr=-0.0602  overlap=1045
+lag=-11 frames (-366.7 ms)  corr=-0.0326  overlap=1046
+lag=-10 frames (-333.3 ms)  corr=-0.0463  overlap=1047
+lag= -9 frames (-300.0 ms)  corr=-0.0675  overlap=1048
+lag= -8 frames (-266.7 ms)  corr=-0.0397  overlap=1049
+lag= -7 frames (-233.3 ms)  corr=-0.0298  overlap=1050
+lag= -6 frames (-200.0 ms)  corr=-0.0631  overlap=1051
+lag= -5 frames (-166.7 ms)  corr=-0.0896  overlap=1052
+lag= -4 frames (-133.3 ms)  corr=-0.0783  overlap=1053
+lag= -3 frames (-100.0 ms)  corr=-0.0631  overlap=1054
+lag= -2 frames ( -66.7 ms)  corr=-0.0946  overlap=1055
+lag= -1 frames ( -33.3 ms)  corr=-0.1276  overlap=1056
+lag= +0 frames (  +0.0 ms)  corr=-0.1267  overlap=1057
+lag= +1 frames ( +33.3 ms)  corr=-0.1363  overlap=1056
+lag= +2 frames ( +66.7 ms)  corr=-0.1527  overlap=1055
+lag= +3 frames (+100.0 ms)  corr=-0.1297  overlap=1054
+lag= +4 frames (+133.3 ms)  corr=-0.0101  overlap=1053
+lag= +5 frames (+166.7 ms)  corr=0.1174  overlap=1052
+lag= +6 frames (+200.0 ms)  corr=0.2059  overlap=1051
+lag= +7 frames (+233.3 ms)  corr=0.2126  overlap=1050
+lag= +8 frames (+266.7 ms)  corr=0.1909  overlap=1049
+lag= +9 frames (+300.0 ms)  corr=0.1280  overlap=1048
+lag=+10 frames (+333.3 ms)  corr=0.0024  overlap=1047
+lag=+11 frames (+366.7 ms)  corr=-0.1531  overlap=1046
+lag=+12 frames (+400.0 ms)  corr=-0.1658  overlap=1045
+lag=+13 frames (+433.3 ms)  corr=-0.1189  overlap=1044
+lag=+14 frames (+466.7 ms)  corr=-0.0880  overlap=1043
+lag=+15 frames (+500.0 ms)  corr=-0.0775  overlap=1042
+lag=+16 frames (+533.3 ms)  corr=-0.0619  overlap=1041
+lag=+17 frames (+566.7 ms)  corr=-0.0476  overlap=1040
+lag=+18 frames (+600.0 ms)  corr=-0.0669  overlap=1039
+lag=+19 frames (+633.3 ms)  corr=-0.0812  overlap=1038
+lag=+20 frames (+666.7 ms)  corr=-0.0570  overlap=1037
+BEST: 7 frames = 233.33333333333334 ms  corr= 0.2125531456780883
+first_half best lag 7 frames = 233.33333333333334 ms corr= 0.05185623082504957
+second_half best lag 7 frames = 233.33333333333334 ms corr= 0.554753445103479

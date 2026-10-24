@@ -13,25 +13,29 @@ for base in [10, 30, 50, 70]:
     a[base + 7] = 1.0  # 정답: 오디오가 화면보다 7프레임(233ms) 늦음
 
 
-def norm(x):
+def pearson(x, y):
     x = x - x.mean()
-    s = x.std()
-    return x / s if s > 0 else x
+    y = y - y.mean()
+    sx = x.std()
+    sy = y.std()
+    if sx == 0 or sy == 0:
+        return 0.0
+    return float(np.dot(x, y) / (len(x) * sx * sy))
 
 
-vn = norm(v)
-an = norm(a)
-
+# Codex 모드B 2차 지적 반영 — cross_correlation.py와 마찬가지로 전체 배열 기준
+# 정규화 대신 겹침 구간 자체로 정규화한 진짜 피어슨 상관계수를 쓴다(corr은
+# 항상 [-1, 1], 이전 버전은 1을 넘는 corr=1.07이 나와 진짜 상관계수가 아니었음).
 best_lag, best_corr = None, -1e9
 for lag in range(-20, 21):
     if lag >= 0:
-        vv = vn[lag:]
-        aa = an[:len(vv)]
+        vv = v[lag:]
+        aa = a[:len(vv)]
     else:
-        aa = an[-lag:]
-        vv = vn[:len(aa)]
+        aa = a[-lag:]
+        vv = v[:len(aa)]
     m = min(len(vv), len(aa))
-    corr = np.dot(vv[:m], aa[:m]) / m
+    corr = pearson(vv[:m], aa[:m])
     if corr > best_corr:
         best_corr = corr
         best_lag = lag

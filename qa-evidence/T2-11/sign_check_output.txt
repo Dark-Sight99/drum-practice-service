@@ -1,5 +1,5 @@
 정답: 오디오가 화면보다 7프레임(233ms) 늦음(화면이 먼저)
-cross_correlation.py와 동일한 lag 루프의 best_lag: -7 corr: 1.072132616487456
+cross_correlation.py와 동일한 lag 루프의 best_lag: -7 corr: 1.0
 해석: 이 부호 하에서 '화면이 먼저'는 best_lag=-7로 나타난다.
 실제 영상 분석의 best_lag=+7(cross_correlation_output.txt)은 반대 부호이므로,
 실제로는 '오디오가 화면보다 7프레임(233ms) 먼저'였다는 뜻이다.
