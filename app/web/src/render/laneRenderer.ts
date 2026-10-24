@@ -200,9 +200,15 @@ export function createLaneRenderer(
           if (!lane.pieces.includes(note.piece)) continue
           const t = noteTimeOf(note)
           if (t < windowStart || t > windowEnd) continue
-          const y = noteYPosition(t, currentTimeSeconds, speed, hitLineY)
+          const yCenter = noteYPosition(t, currentTimeSeconds, speed, hitLineY)
           const shape = lane.shapeByPiece[note.piece]
           if (!shape) continue
+          // T2-9(Phase 2 게이트 피드백) — 노트는 위→아래로 떨어지므로 "닿는" 순간은
+          // 도형의 하단 모서리가 판정선에 닿는 순간이어야 소리와 맞는다(리듬게임
+          // 관례). `noteYPosition`은 도형 "중심"이 판정선에 오는 시각을 기준으로
+          // 계산하므로, 그리는 위치를 반 칸(noteSize/2) 위로 올려 하단이 정확히
+          // 그 시각에 판정선에 닿게 한다.
+          const y = yCenter - noteSize / 2
           drawNoteShape(ctx, shape, laneCenterX, y, noteSize, options.pieceColor(note.piece))
 
           // REQ-12 — 노트 위 R/L(/RF/LF) 글자. 자동 추천 값은 반투명
