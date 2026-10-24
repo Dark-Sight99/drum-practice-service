@@ -69,7 +69,8 @@
   - 상세: `work/T2-8/report.md`, `work/T2-9/report.md`, `work/T2-10/report.md`, `work/T2-11/report.md`, `work/T2-12/report.md`, `work/T2-13/report.md`, `work/T2-14/plan.md`, `qa-evidence/T2-8/`, `qa-evidence/T2-9/`, `qa-evidence/T2-10/`, `qa-evidence/T2-11/`, `qa-evidence/T2-12/`, `qa-evidence/T2-13/`, `qa-evidence/T2-14/`, `qa-evidence/T2-15/`, `qa-evidence/T2-16/`, `intent/07-open-questions.md` Q-05(진전)·Q-11(갱신)·Q-23·Q-24·Q-25(갱신)·Q-26
 
 ## Phase 3 — 음원으로 연습
-- [ ] T3-1 Separator 모듈(Demucs) + 작업 연결 (REQ-01)
+- [x] T3-1 Separator 모듈(Demucs) + 작업 연결 (REQ-01)
+  - 완료(2026-10-25): `app/server/modules/separator/`(Demucs 서브프로세스 호출부 + `JobType.SEPARATE` 핸들러)·`POST /songs/audio`(REQ-01 확장자만, 100MB 상한, 진짜 스트리밍 저장)·`file_storage.write_song_file_streaming()`. DB 스키마는 T1-2가 이미 Phase 3를 내다보고 만들어둬 마이그레이션 불필요. "공개 API+외부 모델 연동"(위험 작업)이라 Codex 모드C 3라운드 거침 — 1·2차는 필수 지적 반영, 3차 BLOCKING(Asset 커밋 실패 시 정리 경로가 의사코드에 명시 안 됨, Song 실패 커밋 자체가 실패하는 경우 미복구)은 `intent/06-pipeline.md` 최대 3회 규칙에 따라 마스터가 직접 판단해 §3을 확정 의사코드로 재작성 + `worker/runner.py`에 `_sync_song_status_with_job()` 공용 안전망 신규 설계(사유는 `work/T3-1/plan.md` "마스터 최종 판단" 절에 기록). 구현 후 Codex 모드A 2라운드(1차 REQUEST_CHANGES — 안전망이 "핸들러 없음" 분기를 건너뜀, 가짜 스트리밍(리스트로 다 모은 뒤 넘김) — 둘 다 반영 후 2차 APPROVE). 테스트 107개 전부 통과, 린트 0건. **실제 end-to-end**: 의뢰인이 `음원/` 폴더에 준 실제 mp4에서 ffmpeg로 wav 추출 → 실제 서버(`app/server/.venv`에 이번에 torch(cu128)+demucs+ffmpeg 신규 설치)+실제 워커로 성공/실패 경로 둘 다 재현 — 과정에서 Windows cp949 콘솔 환경 한정 진짜 버그(subprocess 출력 디코딩 크래시)를 직접 발견해 `encoding="utf-8", errors="replace"`로 수정. 의뢰인이 "비상업이니 ADTOF-pytorch(Q-15) 채택" 결정도 이 작업 착수 전 확정(Phase 2 게이트 승인과 함께). 프런트엔드 업로드 화면은 범위 밖(백엔드만). 증거: `qa-evidence/T3-1/`, 설계: `work/T3-1/plan.md`
 - [ ] T3-2 DrumTranscriber 모듈 → DrumScore (REQ-02 경로 A)
 - [ ] T3-3 다중 트랙 동기 재생 + 음정 유지 속도 변경 (REQ-04)
 - [ ] T3-4 믹서(볼륨/M/S/프리셋) (REQ-05)

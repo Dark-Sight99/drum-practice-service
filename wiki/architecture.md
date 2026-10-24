@@ -206,8 +206,18 @@ T2-10~T2-12와 결이 다른 질문 — "버그를 고쳐달라"가 아니라 "�
 - **3차 지적과 그걸 테스트하다 발견한 진짜 버그**: 3차로 "재현 명령이 저장소 루트에서 실행하면 스크립트를 못 찾는다"는 경로 문제를 지적받았는데, 이걸 고치면서 **직접 그 명령 체인을 실행해봤더니** `PYTHONIOENCODING=utf-8` 없이는 Windows 콘솔 인코딩(cp949) 때문에 스크립트가 실제로 `UnicodeEncodeError`로 멈추는, Codex도 지적하지 않은 진짜 버그를 발견했다 — "재현 가능하다고 적어놓은 명령을 실제로 한 번 돌려보는 것"이 Codex의 정적 검토보다 더 많은 걸 잡아낼 수 있다는 걸 보여준 순간(Codex는 `song2.json`이 레포에 없어 직접 재실행을 못 했다고 스스로 명시했음).
 - **교훈**: "재현 가능한 증거"라는 이 프로젝트의 오래된 원칙(T2-6부터)이 이번엔 "그 증거가 실제로 재현되는지 직접 실행해보라"는 레벨까지 확장됐다 — 커밋해둔 로그가 "이론적으로 맞는 명령"이 아니라 "실제로 돌려서 바이트 단위로 같은 출력이 나오는 명령"이어야 한다는 걸 체득했다.
 
+## Separator 모듈(Demucs) + 작업 연결 (T3-1, 2026-10-25, Phase 3)
+Phase 3 첫 작업 — REQ-01(오디오 분리). "공개 API+외부 모델 연동"(위험 작업)이라 Codex 모드C 설계 검수 3라운드를 거쳤다.
+
+- **모듈 구조**: `app/server/modules/separator/demucs_separator.py`(순수 함수 `separate()`, 서브프로세스로 `python -m demucs` 실행, device 자동 선택 cuda→mps→cpu)·`handler.py`(`JobType.SEPARATE` 핸들러) — `intent/03-architecture-stack.md`가 이미 "교체 가능한 Separator 인터페이스"라고 명시해뒀던 걸 이 함수 시그니처로 구현(구현체 1개뿐이라 별도 추상 클래스는 안 둠).
+- **DB 스키마 변경 없음**: T1-2가 Phase 3를 내다보고 `AssetKind.STEM_*`·`JobType.SEPARATE`·`SongSourceType.AUDIO`를 이미 정의해뒀음 — 이번 작업은 순수하게 그 스키마를 "채워 넣는" 작업.
+- **업로드**: `POST /songs/audio`(REQ-01 명시 확장자 mp3/wav/m4a/flac만, mp4 등 비디오는 범위 밖). 100MB 상한, `file_storage.write_song_file_streaming()`으로 **진짜** 스트리밍 저장(청크 1개(1MB)만 메모리에, 상한 검사도 같은 루프 안에서) — 1차 구현은 청크를 리스트로 모은 뒤 넘겨서 이름만 스트리밍이었던 걸 Codex 모드A가 지적해 재설계.
+- **실패 처리 설계**: 핸들러가 Song.PROCESSING 선언 이후 모든 실패(ORIGINAL 조회 실패·임시 디렉터리 생성 실패·Demucs 실패·stem 쓰기 실패·Asset 커밋 실패)를 하나의 try/except 범위로 묶어 Song.FAILED+이번 시도에서 쓴 stem만 정리(ORIGINAL은 안 건드림) 후 재발생. `worker/runner.py`에 `_sync_song_status_with_job()` 공용 안전망 신규(핸들러의 Song 상태 커밋 자체가 실패하는 극히 드문 경우의 최종 방어선, job_type 무관 범용 로직이라 향후 다른 핸들러도 자동 혜택) — Codex 모드C 3차 BLOCKING 지적에 마스터가 직접 설계해 응답한 부분(`work/T3-1/plan.md` "마스터 최종 판단" 절).
+- **실제 버그 발견**: 실제 end-to-end QA(실제 mp4→wav 변환→실제 업로드→실제 워커→실제 Demucs) 중 Windows cp949 콘솔 환경에서 `subprocess.run(text=True)`가 Demucs 진행률 표시줄의 유니코드 문자를 디코딩하다 내부 리더 스레드가 죽는 버그를 발견 — `encoding="utf-8", errors="replace"` 명시로 수정. mp4(비디오) 입력도 ffmpeg 백엔드 덕에 Demucs가 바로 처리 가능함을 실측 확인(`qa-evidence/T3-1/demucs_mp4_spike.md`), 단 공식 업로드 API엔 반영 안 함(범위 밖).
+- 프런트엔드 음원 업로드 화면은 범위 밖(백엔드 모듈·API·큐 연결만).
+
 ## 아직 없는 것 (다음 작업)
-- 큐에 작업을 넣는 공개 API(업로드 트리거), 실제 처리 핸들러(Demucs/ADTOF/Audiveris) 등록 — Phase 3/4
+- 드럼 채보 핸들러(`JobType.TRANSCRIBE`, ADTOF) 등록 — T3-2(Phase 3). OMR(Audiveris)은 Phase 4. Demucs 분리(T3-1)는 완료.
 - 편집기 마우스 드래그 이동, 곡 중간 템포변경, OMR 원본 대조 패널, 왼손잡이 레인 반전 — 범위 밖으로 명시 보류(`work/T2-6/plan.md`, `work/T2-7/plan.md` §범위)
 - REQ-04 공식 ±30ms 측정(Q-05) — 분리 오디오 트랙(Phase 3)과 BPM UI 모두 있어야 가능. T2-8이 "초 단위" 구조적 버그는 제거했지만 "ms 단위" 실측은 여전히 미해소
 - 오디오-MIDI 오프셋 정렬 UI(T3-5) — 생기면 `audioOffsetMs`를 0 이외 값으로 쓸 수 있게 되는데, 그때 A-B 루프 경계와의 상호작용(Q-23)도 같이 설계해야 함
