@@ -104,6 +104,19 @@ python -m venv .venv   # 최초 1회
 - 드럼킷 일러스트는 `intent/07-open-questions.md` Q-09(의뢰인 디자인 승인 필요, 미해결)에 따라 정밀 그래픽이 아닌 단순 도형(원+글자) placeholder. 폰 세로의 "킷 축소 아이콘"은 완전히 숨김으로 단순화(아이콘 디자인은 범위 밖).
 - Codex 모드B가 1차 검수에서 fps·테스트 통과 수치가 QA 증거에 **원자료 없이 요약만** 있어 대조 불가하다고 REQUEST_CHANGES — 실제 명령 출력(`reverify-20261024.txt`)과 fps 실측 JSON(`raw_log.txt` §5)을 보강한 뒤 2차 APPROVE. 교훈: 측정값 주장은 요약 문장만으로는 검수자가 재현·대조할 수 없으므로 원자료를 QA 증거에 항상 같이 남길 것.
 
+## BPM 변경·A-B 루프 (T2-4, 2026-10-24)
+- `app/web/src/audio/timing.ts`에 순수 함수 3개 추가: `ticksPerBar`(한 마디의 틱 수), `barIndexForTick`(틱이 속한 마디 번호, 곡 전체 마디 수·루프 입력 범위 제한에 씀), `computePlaybackSchedule`(BPM·카운트인·A-B 루프 설정 → 실제 Transport 스케줄링에 필요한 초 단위 값). 루프가 있으면 카운트인을 곡 맨 앞이 아니라 **루프 시작 바로 앞**에 둬서, 루프 밖 구간을 처음부터 재생하지 않고 곧장 루프 구간으로 진입(`loop.startBar===0`이면 루프 없음과 수식상 동일).
+- `scorePlayer.ts`의 `playDrumScore`에 `playbackBpm`(연습 BPM, 기본 `score.meta.bpm`)·`loop`(0-기준 `[startBar,endBar)`) 옵션 추가. `transport.start(undefined, playbackStartSeconds)`로 재생 시작 위치를 직접 지정(루프가 중간 마디부터면 그 위치부터 바로 시작).
+- **A-B 루프는 Tone.js Transport의 네이티브 `loop`/`loopStart`/`loopEnd`를 그대로 사용** — 커스텀 재스케줄링 로직 없음. 근거(실제 설치된 버전 v15.1.22의 소스, `node_modules/tone/build/esm/core/clock/`로 직접 확인):
+  - `Transport.js` `_processTick()`: 루프 중 `ticks>=loopEnd`가 되면 클록 틱을 `loopStart`로 되돌리고 `_timeline.forEachAtTime(ticks,...)`로 그 위치의 이벤트를 호출 — `transport.schedule()`(드럼 노트·카운트인 클릭)로 예약한 이벤트는 `once:true`가 아닌 한 호출 후에도 제거되지 않아(`TransportEvent.invoke()`) 루프가 같은 위치를 다시 지나갈 때 자동 재발화.
+  - `TransportRepeatEvent.js`(`scheduleRepeat()`, 메트로놈이 씀)는 `transport.on("loopStart", this._boundRestart)`로 루프 시작을 직접 구독해 다음 이벤트들을 재계산·재스케줄 — 끊김·중복 없이 이어짐.
+  - 실제 브라우저로 16마디 중 2~3마디만 루프해 18초(~4.5바퀴) 재생, 콘솔 에러 0건으로 재확인.
+- `laneRenderer.ts`의 `render()`에 `playbackBpm` 선택 인자 추가(기본 `score.meta.bpm`) — 연습 BPM을 낮추면 레인 낙하 속도도 실제로 느려짐.
+- `PracticeCanvas.tsx`: BPM 슬라이더+숫자 입력(원곡 대비 50~150%), A-B 루프 켜기/끄기+마디 입력(UI는 1-기준, 내부는 0-기준), 마디 진행바. `playbackBpmRef`/`loopRef`로 rAF 루프가 리렌더 없이 최신 설정을 읽음(ref를 렌더 중 직접 쓰면 oxlint `react(refs)`가 걸려 effect에서 동기화).
+  - **Codex 모드A C-001(수정됨)**: 진행바가 루프 중에도 "곡 전체 대비"로 계산되면, 긴 곡의 짧은 루프(예: 16마디 중 2마디)는 진행바가 좁은 구간(12.5~18.75%)에서만 움직여 거의 멈춘 것처럼 보임 — 루프가 켜져 있으면 "루프 구간 안에서의 위치"(0~100%)로 계산하도록 변경.
+  - 재생 중엔 BPM·루프 입력을 `disabled={isPlaying}`로 잠금(Codex 모드B 권장) — 이미 시작한 재생은 재생 시작 시점 값으로만 스케줄돼 있어, 재생 중 바꿔도 지금 재생엔 반영 안 됨.
+- "오디오 트랙은 음정 유지 상태로 속도 변경"(REQ-04)은 Phase 2엔 분리된 원곡 오디오 트랙이 아직 없어(Demucs 분리는 Phase 3 T3-1) 범위 밖 — MIDI는 속도를 바꿔도 음정이 안 변해 적용 대상 자체가 없음. `preservesPitch` 채택(Q-04)은 실제 오디오 엘리먼트가 생기는 T3-3에서 적용 예정.
+
 ## 아직 없는 것 (다음 작업)
 - 큐에 작업을 넣는 공개 API(업로드 트리거), 실제 처리 핸들러(Demucs/ADTOF/Audiveris) 등록 — Phase 3/4
 - 파일 선택 UI(input/드래그앤드롭), 가져온 DrumScore의 서버 저장(원본+편집본) — T2-5(라이브러리 화면)

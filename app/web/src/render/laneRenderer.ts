@@ -24,7 +24,14 @@ export interface LaneRendererOptions {
 }
 
 export interface LaneRenderer {
-  render(score: DrumScore, currentTimeSeconds: number, barsVisible: number): Set<DrumNote['piece']>
+  /** `playbackBpm` 생략 시 `score.meta.bpm`(원곡 그대로) 사용 — 연습 BPM(T2-4,
+   * REQ-04)으로 재생 중이면 낙하 속도·노트 위치가 그 속도를 따라가도록 넘긴다. */
+  render(
+    score: DrumScore,
+    currentTimeSeconds: number,
+    barsVisible: number,
+    playbackBpm?: number,
+  ): Set<DrumNote['piece']>
   dispose(): void
 }
 
@@ -110,7 +117,7 @@ export function createLaneRenderer(
   }
 
   return {
-    render(score, currentTimeSeconds, barsVisible) {
+    render(score, currentTimeSeconds, barsVisible, playbackBpm = score.meta.bpm) {
       const width = canvas.clientWidth
       const height = canvas.clientHeight
       if (canvas.width !== width || canvas.height !== height) {
@@ -121,11 +128,11 @@ export function createLaneRenderer(
 
       const hitLineY = height - 24
       const laneWidth = width / LANES.length
-      const speed = pixelsPerSecond(hitLineY, barsVisible, score.meta.timeSignature, score.meta.bpm)
+      const speed = pixelsPerSecond(hitLineY, barsVisible, score.meta.timeSignature, playbackBpm)
       const lookaheadSeconds = hitLineY / speed
 
       const noteTimeOf = (note: DrumNote) =>
-        ticksToSeconds(note.tick, score.ppq, score.meta.bpm) + score.audioOffsetMs / 1000
+        ticksToSeconds(note.tick, score.ppq, playbackBpm) + score.audioOffsetMs / 1000
 
       // 레인 구분선
       ctx.strokeStyle = options.laneBorderColor
@@ -143,7 +150,7 @@ export function createLaneRenderer(
       const windowEnd = currentTimeSeconds + lookaheadSeconds
       for (const line of barBeatLines(
         score.meta.timeSignature,
-        score.meta.bpm,
+        playbackBpm,
         windowStart,
         windowEnd,
       )) {
