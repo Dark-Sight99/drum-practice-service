@@ -14,6 +14,7 @@ import { filterSongs } from './filterSongs'
 export interface LibraryScreenProps {
   onUpload: () => void
   onOpenSong: (song: SongSummary, drumScore: DrumScore) => void
+  onEditSong: (song: SongSummary, drumScore: DrumScore) => void
   onLoggedOut: () => void
 }
 
@@ -25,7 +26,12 @@ const SOURCE_LABEL: Record<string, string> = {
   omr: '종이 악보',
 }
 
-export function LibraryScreen({ onUpload, onOpenSong, onLoggedOut }: LibraryScreenProps) {
+export function LibraryScreen({
+  onUpload,
+  onOpenSong,
+  onEditSong,
+  onLoggedOut,
+}: LibraryScreenProps) {
   const [songs, setSongs] = useState<SongSummary[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -62,6 +68,19 @@ export function LibraryScreen({ onUpload, onOpenSong, onLoggedOut }: LibraryScre
     try {
       const drumScore = await fetchSongDrumScore(song.id)
       onOpenSong(song, drumScore)
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : '곡을 여는 데 실패했습니다')
+    } finally {
+      setOpeningId(null)
+    }
+  }
+
+  async function handleEdit(song: SongSummary) {
+    setOpeningId(song.id)
+    setError(null)
+    try {
+      const drumScore = await fetchSongDrumScore(song.id)
+      onEditSong(song, drumScore)
     } catch (err) {
       setError(err instanceof ApiError ? err.message : '곡을 여는 데 실패했습니다')
     } finally {
@@ -194,6 +213,9 @@ export function LibraryScreen({ onUpload, onOpenSong, onLoggedOut }: LibraryScre
               </div>
             </div>
             <div style={{ display: 'flex', gap: 'var(--space-1)' }}>
+              <button onClick={() => void handleEdit(song)} disabled={openingId === song.id}>
+                편집
+              </button>
               <button onClick={() => startRename(song)}>이름변경</button>
               <button onClick={() => void handleDelete(song)}>삭제</button>
             </div>

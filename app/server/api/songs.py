@@ -8,8 +8,19 @@ JSON을 저장만 한다(T1-5 결정: 경로 C 파싱은 브라우저 전담).
 
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Response, UploadFile, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    Form,
+    HTTPException,
+    Request,
+    Response,
+    UploadFile,
+    status,
+)
 from pydantic import BaseModel, Field, ValidationError
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from api.deps import get_current_user, get_db
@@ -189,3 +200,56 @@ def get_song_drumscore(song: Song = Depends(get_owned_song)) -> Response:
     if path is None or not path.exists():
         raise HTTPException(status.HTTP_404_NOT_FOUND, "DrumScore를 찾을 수 없습니다")
     return Response(content=path.read_bytes(), media_type="application/json")
+
+
+def _find_edited_asset(db: Session, song_id: int) -> Asset | None:
+    return (
+        db.query(Asset)
+        .filter(Asset.song_id == song_id, Asset.kind == AssetKind.DRUMSCORE_EDITED)
+        .first()
+    )
+
+
+@router.put("/{song_id}/drumscore", status_code=status.HTTP_204_NO_CONTENT)
+async def save_song_drumscore(
+    request: Request,
+    song: Song = Depends(get_owned_song),
+    db: Session = Depends(get_db),
+) -> None:
+    """T2-6(REQ-03) — 편집기가 수정한 DrumScore를 저장한다. 원문 바이트 그대로
+    저장(재직렬화 안 함, T2-5 업로드와 같은 원칙). `DrumScoreIn`으로 업로드와
+    동일한 구조+수치 불변식을 검증(work/T2-6/plan.md §설계 1).
+    """
+    raw_body = await request.body()
+    try:
+        DrumScoreIn.model_validate_json(raw_body)
+    except ValidationError as exc:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT, f"잘못된 DrumScore: {exc}"
+        ) from exc
+
+    file_path = write_song_file(song.id, "drumscore_edited.json", raw_body)
+
+    existing = _find_edited_asset(db, song.id)
+    if existing is not None:
+        existing.file_path = file_path
+        db.commit()
+        return
+
+    # Codex 모드C C-001(+2차 반영): 동시 요청이 그 사이 먼저 행을 만들었으면
+    # DRUMSCORE_EDITED 전용 부분 유니크 인덱스(db/models.py)가 두 번째 INSERT를
+    # IntegrityError로 거부한다 — 이 세션은 rollback() 전까지 추가 쿼리를 할 수
+    # 없으므로(PendingRollbackError, 실제 실행으로 확인) 먼저 rollback한 뒤
+    # 다시 조회해 UPDATE로 재시도한다(낙관적 upsert).
+    try:
+        db.add(Asset(song_id=song.id, kind=AssetKind.DRUMSCORE_EDITED, file_path=file_path))
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        existing = _find_edited_asset(db, song.id)
+        if existing is None:
+            raise HTTPException(
+                status.HTTP_500_INTERNAL_SERVER_ERROR, "저장 처리 중 오류가 발생했습니다"
+            ) from None
+        existing.file_path = file_path
+        db.commit()

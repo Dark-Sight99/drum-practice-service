@@ -1,0 +1,52 @@
+===== app/web: npx tsc -b =====
+EXIT=0
+
+===== app/web: npx oxlint =====
+EXIT=0
+
+===== app/web: npx prettier --check (T2-6 변경 파일만) =====
+Checking formatting...
+[[33mwarn[39m] src/features/editor/editHistory.test.ts
+[[33mwarn[39m] src/features/editor/EditorScreen.test.tsx
+[[33mwarn[39m] src/features/editor/EditorScreen.tsx
+[[33mwarn[39m] src/App.tsx
+[[33mwarn[39m] src/api/songs.ts
+[[33mwarn[39m] src/features/library/LibraryScreen.tsx
+[[33mwarn[39m] Code style issues found in 6 files. Run Prettier with --write to fix.
+EXIT=1
+
+===== app/web: npx vitest run =====
+
+ RUN  v5.0.5 C:/Users/Jaewoo/드럼연습서비스/app/web
+
+
+ Test Files  14 passed (14)
+      Tests  105 passed (105)
+   Start at  17:21:52
+   Duration  2.44s (environment 78%, setup 10%, import 6%, tests 3%, transform 2%, worker 1%)
+
+Environment  jsdom was created 14 times · 13.43s total, 78% of tracked time
+             create it once per worker with pool: 'vmThreads' (keeps per-file isolation) or isolate: false (shares it across files)
+             learn more: https://vitest.dev/guide/improving-performance#test-environments
+
+EXIT=0
+
+===== app/server: ruff check (T2-6 변경 파일만) =====
+All checks passed!
+EXIT=0
+
+===== app/server: ruff format --check (T2-6 변경 파일만) =====
+5 files already formatted
+EXIT=0
+
+===== app/server: pytest tests/ =====
+........................................................................ [ 93%]
+.....                                                                    [100%]
+77 passed in 5.66s
+EXIT=0
+
+===== app/server: alembic upgrade head (실제 dev DB) =====
+INFO  [alembic.runtime.migration] Context impl SQLiteImpl.
+INFO  [alembic.runtime.migration] Will assume non-transactional DDL.
+1424de118cb2 (head)
+EXIT=0

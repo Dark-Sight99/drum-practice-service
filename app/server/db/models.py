@@ -10,10 +10,12 @@ from sqlalchemy import (
     Float,
     ForeignKey,
     ForeignKeyConstraint,
+    Index,
     Integer,
     String,
     Text,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
@@ -148,6 +150,19 @@ class Asset(Base):
             "AND file_path NOT LIKE '\\%' "
             "AND file_path NOT LIKE '_:%'",
             name="ck_assets_file_path_no_traversal",
+        ),
+        # T2-6 Codex 모드C C-001: 곡 하나당 "편집본"은 하나만 있어야 하는데
+        # 애플리케이션 코드의 "찾아서 없으면 생성"만으론 동시 요청 경쟁 상태를
+        # 못 막는다 — DRUMSCORE_EDITED 종류에만 적용되는 부분 유니크 인덱스로
+        # DB가 직접 막는다. SHEET_IMAGE 등 한 곡에 여러 개가 정당한 종류와는
+        # 겹치지 않게 kind 조건을 둬서 전역 제약이 아니라 이 종류에만 한정한다
+        # (실제 SQLite에서 두 번째 삽입이 IntegrityError로 거부되고 다른 kind는
+        # 영향 안 받는 것을 직접 실행으로 확인함, work/T2-6/plan.md §설계 1).
+        Index(
+            "uq_assets_song_id_drumscore_edited",
+            "song_id",
+            unique=True,
+            sqlite_where=text("kind = 'drumscore_edited'"),
         ),
     )
 

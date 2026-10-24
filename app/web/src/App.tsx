@@ -6,18 +6,23 @@ import { LoginScreen } from './features/auth/LoginScreen'
 import { LibraryScreen } from './features/library/LibraryScreen'
 import { UploadScreen } from './features/upload/UploadScreen'
 import { PracticeCanvas } from './features/practice/PracticeCanvas'
+import { EditorScreen } from './features/editor/EditorScreen'
 import type { DrumScore } from './score/types'
 
-// 라우팅 라이브러리 없이 상태로 화면을 전환한다 — 화면 4개뿐이고 URL 딥링크
+// 라우팅 라이브러리 없이 상태로 화면을 전환한다 — 화면 수가 적고 URL 딥링크
 // 요구사항이 없어 react-router-dom 추가는 과한 설계로 판단
 // (work/T2-5/plan.md §설계 3, Codex 모드C 리스크 의견 C-007: 나중에 URL 공유·
 // 뒤로가기가 필요해지면 이 선택을 재검토).
-type Screen = 'checking' | 'login' | 'library' | 'upload' | 'practice'
+type Screen = 'checking' | 'login' | 'library' | 'upload' | 'practice' | 'editor'
 
 function App() {
   const [screen, setScreen] = useState<Screen>('checking')
   const [user, setUser] = useState<CurrentUser | null>(null)
   const [practiceSong, setPracticeSong] = useState<{
+    song: SongSummary
+    drumScore: DrumScore
+  } | null>(null)
+  const [editingSong, setEditingSong] = useState<{
     song: SongSummary
     drumScore: DrumScore
   } | null>(null)
@@ -73,12 +78,37 @@ function App() {
     )
   }
 
+  if (screen === 'editor' && editingSong) {
+    return (
+      <main
+        style={{ background: 'var(--bg)', color: 'var(--text)', minHeight: '100vh', padding: 16 }}
+      >
+        <h1 style={{ fontSize: '1.3rem' }}>
+          편집: {editingSong.song.title}
+          {editingSong.song.artist && (
+            <span style={{ color: 'var(--text-muted)' }}> — {editingSong.song.artist}</span>
+          )}
+        </h1>
+        <EditorScreen
+          song={editingSong.song}
+          initialScore={editingSong.drumScore}
+          onSaved={() => setScreen('library')}
+          onCancel={() => setScreen('library')}
+        />
+      </main>
+    )
+  }
+
   return (
     <LibraryScreen
       onUpload={() => setScreen('upload')}
       onOpenSong={(song, drumScore) => {
         setPracticeSong({ song, drumScore })
         setScreen('practice')
+      }}
+      onEditSong={(song, drumScore) => {
+        setEditingSong({ song, drumScore })
+        setScreen('editor')
       }}
       onLoggedOut={() => {
         setUser(null)

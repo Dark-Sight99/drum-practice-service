@@ -13,6 +13,7 @@ Codex 모드C C-001: 업로드 원본 파일명은 신뢰하지 않는다 — �
 """
 
 import os
+import uuid
 from pathlib import Path
 
 SERVER_ROOT = Path(__file__).resolve().parent
@@ -46,11 +47,23 @@ def write_song_file(song_id: int, fixed_filename: str, content: bytes) -> str:
 
     `fixed_filename`은 호출자가 allowlist로 검증한 확장자로 직접 구성해야 한다
     (예: "original.mid", "drumscore.json") — 사용자가 업로드 시 보낸 원본
-    파일명 문자열을 그대로 넘기면 안 된다(Codex 모드C C-001).
+    파일명 문자열을 그대로 넘기면 안 된다(T2-5 Codex 모드C C-001).
+
+    T2-6 Codex 모드C C-002(+3차: 임시 파일명 충돌): 같은 디렉터리에 요청마다
+    고유한 임시 파일(`<fixed_filename>.<uuid4>.tmp`)로 먼저 쓴 뒤 `Path.replace()`로
+    원자적으로 교체한다 — 같은 곡에 동시 저장 요청이 와도 서로 다른 임시 파일을
+    쓰므로 간섭하지 않고(각자 자기 임시 파일만 만들고 정리), 쓰기 도중 실패해도
+    "반쯤 쓰인 파일"이 최종 이름으로 남지 않는다(Path.replace는 같은 디렉터리=
+    같은 볼륨이라 POSIX rename()/Windows MoveFileEx로 원자적 — Python 공식 문서).
     """
     directory = song_storage_dir(song_id)
     target = _ensure_within_songs_root(directory / fixed_filename)
-    target.write_bytes(content)
+    tmp_target = _ensure_within_songs_root(directory / f"{fixed_filename}.{uuid.uuid4().hex}.tmp")
+    try:
+        tmp_target.write_bytes(content)
+        tmp_target.replace(target)
+    finally:
+        tmp_target.unlink(missing_ok=True)  # replace() 성공 후엔 이미 없음 — 실패 시에만 의미 있음
     return f"{song_id}/{fixed_filename}"
 
 
