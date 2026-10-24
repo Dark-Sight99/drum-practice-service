@@ -72,7 +72,10 @@ export function recommendSticking(
 
   // 하이햇/라이드가 있는 틱들(정확히 같은 틱이 아니라도 허용폭 이내면 "동시"로
   // 본다 — T2-12, 아래 SIMULTANEOUS_TICK_TOLERANCE_DIVISOR 설명 참조) 정렬된
-  // 배열로 보관해 이분 탐색으로 빠르게 찾는다.
+  // 배열로 보관 — 실제로는 호출마다 처음부터 선형 탐색한다(Codex 모드A 지적,
+  // "이분 탐색"이라던 이전 설명이 실제 구현과 달랐음). 한 곡의 하이햇/라이드
+  // 개수가 수백 개 수준이라 당장 성능 문제는 아니라고 판단해 그대로 둠 — 더
+  // 커지면 lower-bound 이분 탐색으로 바꿀 여지를 남겨둔다.
   const coincidenceTicksSorted = notes
     .filter((n) => COINCIDENCE_TRIGGER_PIECES.includes(n.piece))
     .map((n) => n.tick)
@@ -91,6 +94,10 @@ export function recommendSticking(
     .filter((n) => FIXED_HAND_PRIORITY.includes(n.piece) && !(n.handSource === 'user' && n.hand !== 'R'))
     .map((n) => ({ tick: n.tick, piece: n.piece }))
     .sort((a, b) => a.tick - b.tick)
+  // 이 루프도 위 hasCoincidenceWithinTolerance와 마찬가지로 호출마다 배열 처음부터
+  // 선형 탐색한다(윈도우 밖(이전 틱) 항목은 continue로 건너뛰지만 매번 처음부터
+  // 다시 지나간다는 뜻 — 인덱스를 기억해 재사용하지 않음). 고정 'R' 피스 개수가
+  // 한 곡에 수백 개 수준이라 당장은 문제 아니라고 판단.
   function hasHigherPriorityWithinTolerance(piece: DrumPiece, tick: number): boolean {
     const myRank = FIXED_HAND_PRIORITY.indexOf(piece)
     for (const entry of fixedHandNotes) {
