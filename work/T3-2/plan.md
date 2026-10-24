@@ -58,11 +58,15 @@ PITCH_TO_PIECE = {
 ### 3. `app/server/modules/transcriber/handler.py`의 `transcribe_handler(job)`
 T3-1 `separate_handler`와 같은 뼈대를 쓰되, 모드C가 지적한 "재채보" 고유 리스크(C-002/C-003)를 추가로 반영:
 - Song.PROCESSING 선언.
-- Song.PROCESSING 이후의 모든 실패(STEM_DRUMS 에셋 조회·파일 존재 확인 실패·임시 파일 생성 실패·ADTOF 실패·MIDI 파싱 실패·DrumScore 검증 실패·파일 쓰기 실패·Asset 커밋 실패)를 **하나의 try/except**로 묶어 Song.FAILED+재발생(T3-1 C-011과 동일 원칙, 처음부터 전체를 감쌈).
+- Song.PROCESSING 이후의 모든 실패(STEM_DRUMS 에셋 조회·파일 존재 확인 실패·임시 파일 생성 실패·ADTOF 실패·MIDI 파싱 실패·DrumScore 검증 실패·스테이징 파일 쓰기 실패·Asset/Song 커밋 실패·최종 승격(rename) 실패)를 **하나의 try/except**로 묶어 Song.FAILED+재발생(T3-1 C-011과 동일 원칙, 처음부터 전체를 감쌈). 이 except 블록은 **스테이징 파일(`drumscore.json.new`)이 남아있으면 지운다**(승격 전에 실패한 경우만 해당 — 승격 후 실패라면 이미 이름이 바뀌어 없음, `unlink(missing_ok=True)`라 어느 쪽이든 안전).
 - **임시 파일 처리(모드C C-005 반영)**: `fd, tmp_path = tempfile.mkstemp(suffix=".mid")` → **`os.close(fd)`를 즉시 호출**(ADTOF 서브프로세스가 `--out`으로 그 경로에 직접 쓰므로 우리가 그 파일 디스크립터로 쓸 일이 없음 — 열어둔 채로 두면 Windows에서 서브프로세스가 같은 파일에 쓰려 할 때 충돌 가능). `try/finally`로 `Path(tmp_path).unlink(missing_ok=True)` — ADTOF 실패·MIDI 파싱 실패 등 어느 단계에서 끊기든 이 임시 .mid 파일은 항상 정리됨(T3-1 C-003과 같은 원칙, 디렉터리가 아니라 파일 하나라 더 단순).
-- 성공 시: MIDI를 `pretty_midi`로 파싱 → `midi_to_drumscore()`로 dict 생성 → `DrumScoreIn.model_validate(dict)`로 검증(실패하면 버그이지 사용자 탓이 아니므로 그대로 예외 전파, T1-5가 예정해둔 "Python 생성 로직 교차검증"이 바로 이 지점) → JSON 직렬화 → `write_song_file(song.id, "drumscore.json", content)`(검증을 먼저 통과한 내용만 쓰므로, 쓰는 시점엔 이미 유효한 DrumScore라는 게 보장됨 — 아래 C-003 대응의 전제).
-- **기존 `DRUMSCORE_RAW` 에셋 처리(모드C C-002/C-003 반영)**: T2-6의 `_find_edited_asset`과 같은 "조회 후 있으면 그대로 두고, 없으면 생성" 패턴을 `DRUMSCORE_RAW`에도 적용 — `file_path`가 애초에 항상 고정값(`f"{song.id}/drumscore.json"`)이라 기존 행이 있으면 **DB에 새로 쓸 내용이 없음**(파일 경로가 안 바뀌므로), 없으면 새로 `Asset(kind=DRUMSCORE_RAW, ...)` 1행만 생성. 이렇게 하면: (a) 재채보를 여러 번 돌려도 `DRUMSCORE_RAW` 행이 중복 생성되지 않고(C-002 해소), (b) 재채보(기존 행 있음) 케이스는 파일 쓰기 이후 DB 쪽에 커밋할 내용이 사실상 없어(행이 이미 있으므로) "파일은 새로 바뀌었는데 DB 커밋이 실패해 상태가 꼬이는" 윈도우 자체가 거의 사라짐(C-003 대부분 해소) — 유일하게 남는 위험은 **그 곡의 첫 채보**(신규 Asset INSERT 필요)인데, 이건 T3-1의 stem 쓰기와 완전히 같은 위험 등급이라 새로운 리스크가 아님(기존에 이미 수용한 범위).
-- 마지막으로 `Song.status=COMPLETED` 커밋.
+- 성공 시: MIDI를 `pretty_midi`로 파싱 → `midi_to_drumscore()`로 dict 생성 → `DrumScoreIn.model_validate(dict)`로 검증(실패하면 버그이지 사용자 탓이 아니므로 그대로 예외 전파, T1-5가 예정해둔 "Python 생성 로직 교차검증"이 바로 이 지점) → JSON 직렬화.
+- **쓰기 순서(모드C C-003 2차 지적 반영 — "스테이징 후 승격")**: 검증을 통과한 내용을 기존 `drumscore.json`에 바로 덮어쓰지 않는다. 대신:
+  1. `write_song_file(song.id, "drumscore.json.new", content)`로 **별도 스테이징 파일**에 먼저 씀(기존 `drumscore.json`은 전혀 안 건드림 — write_song_file 자체도 내부적으로 원자적 임시파일→교체라 이중 보호).
+  2. `DRUMSCORE_RAW` Asset 조회(T2-6 `_find_edited_asset`과 같은 패턴) — 없으면 `Asset(kind=DRUMSCORE_RAW, file_path=f"{song.id}/drumscore.json")` 추가, 있으면 아무 변경 없음(파일 경로가 항상 고정값이라 DB에 새로 쓸 내용이 없음 — C-002 해소).
+  3. `Song.status=COMPLETED` 설정 후 **`db.commit()`** — 이 시점에 실패하면(신규 Asset INSERT든 Song 상태 갱신이든) `except`로 가서 스테이징 파일만 지우고 기존 `drumscore.json`은 **손 안 댄 채 그대로 남음**(C-003 핵심 요구사항 — "DB 커밋 실패 시 이전 파일을 보존"을 글자 그대로 충족).
+  4. DB 커밋이 성공한 **뒤에만** `Path(스테이징 파일 절대경로).replace(Path(최종 "drumscore.json" 절대경로))`로 승격 — 같은 디렉터리 내 원자적 rename이라 실패 가능성이 극히 낮고(Python 공식 문서, T2-6이 이미 같은 근거로 `Path.replace()`를 원자적 교체에 씀), 이 단계 자체가 실패하는 경우(디스크 사라짐 등)는 T3-1이 이미 수용한 "DB·Song 상태 커밋 자체가 실패하는 극히 드문 경우"와 같은 급의 잔여 위험으로 남김(동일한 `worker/runner.py`의 `_sync_song_status_with_job` 안전망이 이 경우도 커버 — Job은 성공했지만 Song이 PROCESSING에 남으면 안전망이 FAILED로 맞춤).
+- 이렇게 하면 기존 `drumscore.json`은 **새 버전이 DB에 완전히 반영된 게 확인된 뒤에만** 교체된다 — 재채보(기존 Asset 행 있음)·최초 채보(신규 INSERT) 두 경우 모두 동일하게 보호됨(1차 반영은 재채보만 사실상 보호했는데, 이번엔 최초 채보까지 포함해 C-003을 완전히 닫음).
 - **`DRUMSCORE_EDITED`는 절대 안 건드림**(사용자가 직접 편집한 결과). **모드C C-004 확인**: `GET /songs/{id}/drumscore`가 EDITED를 RAW보다 우선 반환하므로, 이미 편집본이 있는 곡을 재채보해도 사용자가 보는 화면은 안 바뀐다 — 이건 버그가 아니라 **의도된 동작으로 확정**한다(REQ-03 "편집 → 저장 → 재로드 시 동일" 원칙 연장, 자동 재채보가 수동 편집을 조용히 덮어쓰면 안 됨). 재채보 결과를 EDITED와 비교·병합하는 UI는 프런트엔드가 생길 때(범위 밖) 다룰 문제로 남김.
 
 ### 4. `POST /songs/{id}/transcribe` (`api/songs.py`에 추가)
