@@ -12,3 +12,10 @@ export { isDrumScore, validateDrumScore } from './validate'
 export type { ValidationResult } from './validate'
 export { importMidiBuffer, importNotationBytes, importScoreFile } from './import'
 export type { ImportResult } from './import'
+export {
+  alternateHandsByTick,
+  DEFAULT_START_HAND,
+  FILL_RUN_MAX_GAP_DIVISOR,
+  recommendSticking,
+  STICKING_PIECE_RULES,
+} from './sticking'

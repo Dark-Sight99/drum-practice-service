@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState } from 'react'
-import type { DrumNote, DrumPiece, DrumScore } from '../../score/types'
-import { validateDrumScore } from '../../score'
+import type { DrumNote, DrumPiece, DrumScore, Hand } from '../../score/types'
+import { alternateHandsByTick, recommendSticking, validateDrumScore } from '../../score'
 import { saveSongDrumScore, type SongSummary } from '../../api/songs'
 import { ApiError } from '../../api/client'
 import { barIndexForTick, ticksPerBar } from '../../audio'
@@ -15,6 +15,8 @@ import {
 } from './editHistory'
 import { EDITOR_ROWS, editorRowIndexForPiece, snapTick, ticksPerGridUnit, type GridUnit } from './grid'
 import { VELOCITY_TIERS, velocityTierOf, type VelocityTier } from './velocity'
+
+const HAND_LABEL: Record<Exclude<Hand, null>, string> = { R: '오른손', L: '왼손', RF: '오른발', LF: '왼발' }
 
 export interface EditorScreenProps {
   song: SongSummary
@@ -84,7 +86,11 @@ export function EditorScreen({ song, initialScore, onSaved, onCancel }: EditorSc
     createHistory(toEditorState(initialScore)),
   )
   const [gridUnit, setGridUnit] = useState<GridUnit>('8n')
-  const [selectedId, setSelectedId] = useState<number | null>(null)
+  // REQ-12 "여러 노트 선택 후 RLRL/LRLR 교대 일괄 적용" — 단일 선택(이동·셈여림·
+  // 삭제·손 1개 지정용)은 size===1일 때만 의미를 갖고, 다중 선택(size>=2)은
+  // 교대 일괄 적용에만 쓴다(work/T2-7/plan.md §설계 2, 범위 확장 안 함).
+  const [selectedIds, setSelectedIds] = useState<ReadonlySet<number>>(new Set())
+  const [startHand, setStartHand] = useState<'R' | 'L'>('R')
   const [saveError, setSaveError] = useState<string | null>(null)
   const [isSaving, setIsSaving] = useState(false)
   const nextIdRef = useRef(initialScore.notes.length)
@@ -131,10 +137,33 @@ export function EditorScreen({ song, initialScore, onSaved, onCancel }: EditorSc
       hand: null,
     }
     commit({ ...state, notes: [...state.notes, newNote] })
-    setSelectedId(id)
+    setSelectedIds(new Set([id]))
   }
 
-  const selectedNote = state.notes.find((n) => n._editorId === selectedId) ?? null
+  function handleNoteClick(e: React.MouseEvent, editorId: number) {
+    e.stopPropagation()
+    const isToggle = e.ctrlKey || e.metaKey
+    if (!isToggle) {
+      setSelectedIds(new Set([editorId]))
+      return
+    }
+    setSelectedIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(editorId)) next.delete(editorId)
+      else next.add(editorId)
+      return next
+    })
+  }
+
+  const selectedNote =
+    selectedIds.size === 1 ? (state.notes.find((n) => selectedIds.has(n._editorId)) ?? null) : null
+  const selectedMulti = useMemo(
+    () =>
+      selectedIds.size >= 2
+        ? state.notes.filter((n) => selectedIds.has(n._editorId)).sort((a, b) => a.tick - b.tick)
+        : [],
+    [selectedIds, state.notes],
+  )
 
   function updateSelectedNote(patch: Partial<DrumNote>) {
     if (selectedNote === null) return
@@ -149,7 +178,36 @@ export function EditorScreen({ song, initialScore, onSaved, onCancel }: EditorSc
   function deleteSelectedNote() {
     if (selectedNote === null) return
     commit({ ...state, notes: state.notes.filter((n) => n._editorId !== selectedNote._editorId) })
-    setSelectedId(null)
+    setSelectedIds(new Set())
+  }
+
+  function setSelectedHand(hand: Hand) {
+    updateSelectedNote({ hand, handSource: hand === null ? undefined : 'user' })
+  }
+
+  function applyAlternateHands(batchStartHand: 'R' | 'L') {
+    if (selectedMulti.length < 2) return
+    const updated = alternateHandsByTick(selectedMulti, batchStartHand)
+    const byId = new Map(updated.map((n, i) => [selectedMulti[i]._editorId, n]))
+    commit({
+      ...state,
+      notes: state.notes.map((n) => {
+        const replacement = byId.get(n._editorId)
+        return replacement ? { ...n, hand: replacement.hand, handSource: replacement.handSource } : n
+      }),
+    })
+  }
+
+  function applyAutoRecommend() {
+    const recommended = recommendSticking(state.notes, ppq, startHand)
+    commit({
+      ...state,
+      notes: state.notes.map((n, i) => ({
+        ...n,
+        hand: recommended[i].hand,
+        handSource: recommended[i].handSource,
+      })),
+    })
   }
 
   function moveSelected(deltaTicks: number, deltaRows: number) {
@@ -286,21 +344,45 @@ export function EditorScreen({ song, initialScore, onSaved, onCancel }: EditorSc
         <button onClick={() => setHistory((h) => redo(h))} disabled={!canRedo(history)}>
           다시실행
         </button>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-1)' }}>
+          필인 시작손
+          <select value={startHand} onChange={(e) => setStartHand(e.target.value as 'R' | 'L')}>
+            <option value="R">오른손</option>
+            <option value="L">왼손</option>
+          </select>
+        </label>
+        <button onClick={applyAutoRecommend}>자동 추천 재적용</button>
         <button onClick={() => void handleSave()} disabled={isSaving}>
           {isSaving ? '저장 중…' : '저장'}
         </button>
       </div>
 
       {selectedNote && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', flexWrap: 'wrap' }}>
           <span>
             선택됨: {EDITOR_ROWS[editorRowIndexForPiece(selectedNote.piece)]?.label} · 틱{' '}
-            {selectedNote.tick} · 셈여림 {velocityTierOf(selectedNote.velocity)}
+            {selectedNote.tick} · 셈여림 {velocityTierOf(selectedNote.velocity)} · 손:{' '}
+            {selectedNote.hand
+              ? `${HAND_LABEL[selectedNote.hand]}${selectedNote.handSource === 'user' ? '(지정)' : '(추천)'}`
+              : '미지정'}
           </span>
           <button onClick={() => setSelectedVelocityTier('soft')}>약</button>
           <button onClick={() => setSelectedVelocityTier('mid')}>중</button>
           <button onClick={() => setSelectedVelocityTier('strong')}>강</button>
+          <button onClick={() => setSelectedHand('R')}>R</button>
+          <button onClick={() => setSelectedHand('L')}>L</button>
+          <button onClick={() => setSelectedHand('RF')}>RF</button>
+          <button onClick={() => setSelectedHand('LF')}>LF</button>
+          <button onClick={() => setSelectedHand(null)}>손 지우기</button>
           <button onClick={deleteSelectedNote}>삭제</button>
+        </div>
+      )}
+
+      {selectedMulti.length >= 2 && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
+          <span>선택: {selectedMulti.length}개 노트</span>
+          <button onClick={() => applyAlternateHands('R')}>RLRL 교대</button>
+          <button onClick={() => applyAlternateHands('L')}>LRLR 교대</button>
         </div>
       )}
 
@@ -352,31 +434,46 @@ export function EditorScreen({ song, initialScore, onSaved, onCancel }: EditorSc
             </span>
             {state.notes
               .filter((n) => n.piece === row.piece)
-              .map((note) => (
-                <button
-                  key={note._editorId}
-                  aria-label={`${row.label} 노트, 틱 ${note.tick}${note._editorId === selectedId ? ' (선택됨)' : ''}`}
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    setSelectedId(note._editorId)
-                  }}
-                  style={{
-                    position: 'absolute',
-                    left: tickToPx(note.tick) - NOTE_SIZE / 2,
-                    top: (ROW_HEIGHT - NOTE_SIZE) / 2,
-                    width: NOTE_SIZE,
-                    height: NOTE_SIZE,
-                    borderRadius: '50%',
-                    border:
-                      note._editorId === selectedId
-                        ? '2px solid var(--warning)'
-                        : '1px solid var(--border)',
-                    background: readPieceColor(note.piece),
-                    padding: 0,
-                    cursor: 'pointer',
-                  }}
-                />
-              ))}
+              .map((note) => {
+                const isSelected = selectedIds.has(note._editorId)
+                return (
+                  <button
+                    key={note._editorId}
+                    aria-label={`${row.label} 노트, 틱 ${note.tick}${note.hand ? ` ${HAND_LABEL[note.hand]}${note.handSource === 'user' ? '(지정)' : '(추천)'}` : ''}${isSelected ? ' (선택됨)' : ''}`}
+                    onClick={(e) => handleNoteClick(e, note._editorId)}
+                    style={{
+                      position: 'absolute',
+                      left: tickToPx(note.tick) - NOTE_SIZE / 2,
+                      top: (ROW_HEIGHT - NOTE_SIZE) / 2,
+                      width: NOTE_SIZE,
+                      height: NOTE_SIZE,
+                      borderRadius: '50%',
+                      border: isSelected ? '2px solid var(--warning)' : '1px solid var(--border)',
+                      background: readPieceColor(note.piece),
+                      padding: 0,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    {note.hand && (
+                      <span
+                        style={{
+                          position: 'absolute',
+                          left: '50%',
+                          top: -12,
+                          transform: 'translateX(-50%)',
+                          fontSize: '0.6em',
+                          color: 'var(--text)',
+                          opacity: note.handSource === 'user' ? 1 : 0.5,
+                          pointerEvents: 'none',
+                          whiteSpace: 'nowrap',
+                        }}
+                      >
+                        {note.hand}
+                      </span>
+                    )}
+                  </button>
+                )
+              })}
           </div>
         ))}
       </div>

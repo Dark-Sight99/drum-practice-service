@@ -10,7 +10,7 @@ import {
   type LoopBars,
   type PlaybackHandle,
 } from '../../audio'
-import type { DrumPiece, DrumScore } from '../../score/types'
+import type { DrumPiece, DrumScore, Hand } from '../../score/types'
 import { createLaneRenderer, type LaneRenderer } from '../../render/laneRenderer'
 import { KitIllustration } from '../../render/KitIllustration'
 
@@ -60,8 +60,15 @@ export function PracticeCanvas({ score, barsVisible = 2 }: PracticeCanvasProps) 
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const rendererRef = useRef<LaneRenderer | null>(null)
   const rafIdRef = useRef<number | null>(null)
-  const [activePieces, setActivePieces] = useState<ReadonlySet<DrumPiece>>(new Set())
+  const [activeHandByPiece, setActiveHandByPiece] = useState<ReadonlyMap<DrumPiece, Hand>>(new Map())
   const [isPlaying, setIsPlaying] = useState(false)
+  // REQ-12 "상단 바에 R/L 표시 켜기/끄기" — 기본 켜짐(의뢰인이 요청한 핵심 학습
+  // 포인트라, 찾아서 켜야 하는 숨김 옵션보다는 기본 노출이 맞다고 판단).
+  const [showSticking, setShowSticking] = useState(true)
+  const showStickingRef = useRef(showSticking)
+  useEffect(() => {
+    showStickingRef.current = showSticking
+  }, [showSticking])
   const isPortraitPhone = usePortraitPhoneLayout()
   // 재생 중인 핸들·보이스를 들고 있다가 정지/언마운트 시 반드시 정리한다 —
   // 안 그러면 Transport에 예약된 이벤트가 남아 있다가 재생을 다시 시작했을 때
@@ -134,6 +141,7 @@ export function PracticeCanvas({ score, barsVisible = 2 }: PracticeCanvasProps) 
       hitLineColor: getComputedStyle(document.documentElement)
         .getPropertyValue('--hit-line')
         .trim(),
+      stickingTextColor: getComputedStyle(document.documentElement).getPropertyValue('--text').trim(),
       hitWindowSeconds: 0.06,
     })
   }, [])
@@ -153,21 +161,27 @@ export function PracticeCanvas({ score, barsVisible = 2 }: PracticeCanvasProps) 
           positionSeconds,
           barsVisible,
           playbackBpmRef.current,
+          showStickingRef.current,
         )
         // 정지 중에는 마스터 클록 위치가 고정돼 있어, 그 고정 위치 근처에 노트가
         // 있으면 계속 "히트"로 잡혀 킷이 켜진 채 남는다 — 재생 중일 때만 점등
         // 계산을 반영한다(Codex 모드A C-001).
-        const active: ReadonlySet<DrumPiece> = isPlayingRef.current ? rendered : new Set()
+        const active: ReadonlyMap<DrumPiece, Hand> = isPlayingRef.current
+          ? rendered.activeHandByPiece
+          : new Map()
         // 성능: 대부분의 프레임은 활성 피스가 없거나 직전 프레임과 동일함(판정선
-        // 근처에 노트가 있을 때만 바뀜) — 매 프레임 새 Set으로 setState하면
+        // 근처에 노트가 있을 때만 바뀜) — 매 프레임 새 Map으로 setState하면
         // KitIllustration이 매 프레임(최대 60회/초) 리렌더되며, 실제 측정해보니
         // 평균 fps가 30fps로 떨어지는 걸 확인(REQ-06 목표 60fps 미달). 내용이
         // 실제로 바뀔 때만 setState하도록 바꿔 불필요한 리렌더를 없앤다
         // (qa-evidence/T2-3/result.md §fps 측정).
-        const key = [...active].sort().join(',')
+        const key = [...active.entries()]
+          .map(([piece, hand]) => `${piece}:${hand ?? ''}`)
+          .sort()
+          .join(',')
         if (key !== lastActiveKeyRef.current) {
           lastActiveKeyRef.current = key
-          setActivePieces(active)
+          setActiveHandByPiece(active)
         }
       }
       // 마디 진행바 — activePieces와 같은 이유로, 정수 % 단위로 반올림해 실제로
@@ -218,7 +232,7 @@ export function PracticeCanvas({ score, barsVisible = 2 }: PracticeCanvasProps) 
     isPlayingRef.current = false
     lastActiveKeyRef.current = ''
     lastProgressKeyRef.current = -1
-    setActivePieces(new Set())
+    setActiveHandByPiece(new Map())
     setProgressPercent(0)
     setIsPlaying(false)
   }
@@ -318,6 +332,15 @@ export function PracticeCanvas({ score, barsVisible = 2 }: PracticeCanvasProps) 
           />
           ⟲ A-B 루프
         </label>
+
+        <label style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
+          <input
+            type="checkbox"
+            checked={showSticking}
+            onChange={(e) => setShowSticking(e.target.checked)}
+          />
+          R/L 표시
+        </label>
         {loopEnabled && (
           <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
             <span>마디</span>
@@ -355,7 +378,11 @@ export function PracticeCanvas({ score, barsVisible = 2 }: PracticeCanvasProps) 
       <canvas ref={canvasRef} style={{ width: '100%', height: 400, background: 'var(--bg)' }} />
       {!isPortraitPhone && (
         <div style={{ maxWidth: 320 }}>
-          <KitIllustration activePieces={activePieces} pieceColor={readPieceColor} />
+          <KitIllustration
+            activeHandByPiece={activeHandByPiece}
+            showSticking={showSticking}
+            pieceColor={readPieceColor}
+          />
         </div>
       )}
 

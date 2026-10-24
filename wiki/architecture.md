@@ -139,9 +139,19 @@ python -m venv .venv   # 최초 1회
 - **파일 쓰기 원자성**: `file_storage.write_song_file()`을 같은 디렉터리+요청별 고유(`uuid4`) 임시파일명으로 재작성(`Path.replace()`는 같은 디렉터리/볼륨 안에서만 원자적) — T2-5의 업로드 경로도 같은 함수를 공유해 함께 강화됨.
 - **편집→연습 연동**: `fetchSongDrumScore()`를 편집기·연습 화면이 동일하게 사용, `GET /songs/{id}/drumscore`가 T2-5에서 구현한 DRUMSCORE_EDITED 우선 로직을 그대로 타 저장한 편집본이 `PracticeCanvas`에도 반영됨을 확인(T2-5↔T2-6 end-to-end 최초 연결 확인).
 
+## 스티킹(R/L/RF/LF) 자동 추천·편집·표시 (T2-7, 2026-10-24)
+REQ-12. DB 스키마·공개 API 변경이 없어 "위험 작업"에 해당하지 않음(`intent/06-pipeline.md` §1-1) — T2-1~T2-3과 같은 패턴으로 Codex 모드C(구현 전 설계 검수) 생략, 구현 후 모드A/B만 적용.
+
+- **규칙 엔진**: `app/web/src/score/sticking.ts`(순수 함수) — `recommendSticking(notes, ppq, startHand)`가 전체 재분석, `alternateHandsByTick(notes, startHand)`이 편집기 다중선택 일괄 교대. 규칙은 전부 코드 상수(`STICKING_PIECE_RULES`, `FILL_RUN_MAX_GAP_DIVISOR`)로 분리(REQ-12 요구사항). 피스별 고정값(킥=RF, 하이햇/라이드/크래시=R) → 동시틱 스네어(하이햇/라이드와 같은 틱)=L → 필인(연속 스네어/탐, 틱 간격이 `ppq/4`(16분음표) 이내) 구간은 위치 기반 교대 → 그 외 고립 노트는 시작손 기본값. `handSource==='user'`인 노트는 순회 중 그대로 패스스루 — "덮어쓰지 않는 예외 처리"가 아니라 애초에 덮어쓸 경로가 없는 구조.
+- **"하이햇 페달→LF" 규칙 미구현**: 현재 9종 `DrumPiece` 분류(T1-5, `gmMapping.ts`)에 대상 피스가 없음(GM 노트 44 Pedal Hi-Hat 자체가 매핑 표에 없음) — 추측으로 새 피스를 추가하지 않고 Q-22로 등록.
+- **편집기 다중선택**: `EditorScreen.tsx`의 선택 상태를 `number | null` → `Set<number>`로 확장. 일반 클릭=교체(기존 동작 그대로, T2-6 테스트 회귀 없음), Ctrl/Cmd+클릭=토글(신규). 다중선택(2개 이상)은 "RLRL/LRLR 교대" 버튼만 활성화 — 이동/삭제/셈여림은 기존처럼 단일선택에만 반응(REQ-12가 요구한 건 교대뿐, 범위 확장 안 함).
+- **연습 화면 표시**: `render/layout.ts`에 `activeHandByPiece()`를 새로 추가(기존 `activePieces()`는 시그니처 그대로 — 회귀 없음). `laneRenderer.ts`가 노트 위에 R/L/RF/LF 글자를 그림(자동=반투명 50%, 사용자=불투명). `KitIllustration.tsx`는 `activePieces` prop을 `activeHandByPiece`+`showSticking`으로 교체, L/LF만 점선 테두리(`intent/08-design.md` §3 "왼손 점선"을 발까지 자연스럽게 확장). `PracticeCanvas.tsx`에 "R/L 표시" 체크박스(기본 켜짐) 추가 — 꺼지면 T2-3 때와 동일한 단순 실선 점등으로 복귀.
+- **백엔드**: `DrumNoteIn`에 `handSource` 필드 추가(검증 공백 메우기) — 업로드·저장 둘 다 원본 바이트를 그대로 저장(재직렬화 안 함)하는 기존 설계라 필드 선언 여부와 무관하게 이미 통과·보존돼 왔음을 재확인, 추가 이유는 `handSource: "bogus"` 같은 잘못된 값을 걸러내기 위함.
+- **QA 증거의 서술 vs 증명 구분**(Codex 모드B 3라운드 교훈): 수동 QA에서 "최종 데이터 상태"를 주장할 땐 그 순간의 스크립트 출력 텍스트보다, 별도 세션에서 재조회한 실제 응답 본문을 커밋하고 SHA-256으로 "이 파일이 실제로 받은 응답"임을 수학적으로 확정하는 쪽이 더 강한 증거다 — 다만 "그 응답이 서버 로그의 어느 요청인지"는 요청 ID·서버측 해시 없이는 시간 근접성 같은 정황 증거에 머문다는 것도 솔직히 구분해 써야 함(`qa-evidence/T2-7/cleanup-verification-correlation.md`).
+
 ## 아직 없는 것 (다음 작업)
 - 큐에 작업을 넣는 공개 API(업로드 트리거), 실제 처리 핸들러(Demucs/ADTOF/Audiveris) 등록 — Phase 3/4
-- 스티킹(hand 필드, 자동 추천, 편집기 일괄 교대, 레인·킷 R/L 표시) — T2-7
-- 편집기 마우스 드래그 이동, 곡 중간 템포변경, OMR 원본 대조 패널 — 범위 밖으로 명시 보류(`work/T2-6/plan.md` §범위)
+- 편집기 마우스 드래그 이동, 곡 중간 템포변경, OMR 원본 대조 패널, 왼손잡이 레인 반전 — 범위 밖으로 명시 보류(`work/T2-6/plan.md`, `work/T2-7/plan.md` §범위)
 - REQ-04 공식 ±30ms 측정(Q-05) — 분리 오디오 트랙(Phase 3)과 BPM UI 모두 있어야 가능
 - 관리자 콘솔 UI 없음(API만) — 계정 생성은 지금은 API 직접 호출 필요
+- 하이햇 페달(LF) 분류 — DrumPiece에 없어 자동 추천 규칙 하나가 구현 안 됨(Q-22)

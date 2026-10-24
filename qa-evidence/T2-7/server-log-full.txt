@@ -1,0 +1,21 @@
+INFO:     Started server process [48828]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)
+INFO:     127.0.0.1:51715 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63560 - "GET /docs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56602 - "GET /auth/me HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54636 - "GET /auth/me HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54638 - "GET /songs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65383 - "GET /songs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54408 - "GET /songs/2/drumscore HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55509 - "PUT /songs/2/drumscore HTTP/1.1" 204 No Content
+INFO:     127.0.0.1:59901 - "GET /songs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58736 - "GET /songs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63800 - "GET /songs/2/drumscore HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51040 - "GET /songs/2/drumscore HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51824 - "PUT /songs/2/drumscore HTTP/1.1" 204 No Content
+INFO:     127.0.0.1:62059 - "GET /songs/2/drumscore HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59514 - "PUT /songs/2/drumscore HTTP/1.1" 204 No Content
+INFO:     127.0.0.1:56545 - "GET /songs/2/drumscore HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52725 - "GET /songs/2/drumscore HTTP/1.1" 200 OK

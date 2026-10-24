@@ -217,6 +217,7 @@ def test_other_user_cannot_save_drumscore(client: TestClient, db_session) -> Non
         lambda d: d["meta"].update(bpm=0),
         lambda d: d["notes"][0].update(velocity=200),
         lambda d: d["notes"][0].update(piece="not_a_real_piece"),
+        lambda d: d["notes"][0].update(handSource="bogus"),  # T2-7(REQ-12)
     ],
 )
 def test_save_rejects_invalid_drumscore_invariants(client: TestClient, db_session, mutate) -> None:
@@ -229,6 +230,22 @@ def test_save_rejects_invalid_drumscore_invariants(client: TestClient, db_sessio
     mutate(score)
     resp = client.put(f"/songs/{song_id}/drumscore", content=json.dumps(score))
     assert resp.status_code == 422
+
+
+def test_save_accepts_and_round_trips_hand_source(client: TestClient, db_session) -> None:
+    # T2-7(REQ-12): handSource는 저장 시 검증만 하고(DrumNoteIn.handSource),
+    # 실제 저장은 원본 바이트 그대로라 재직렬화로 사라지지 않는다는 것을 확인.
+    _make_user(db_session, "u1")
+    _login(client, "u1")
+    song_id = _upload_song(client)
+
+    score = _valid_drumscore()
+    score["notes"][0].update(hand="R", handSource="user")
+    resp = client.put(f"/songs/{song_id}/drumscore", content=json.dumps(score))
+    assert resp.status_code == 204
+
+    reloaded = client.get(f"/songs/{song_id}/drumscore")
+    assert reloaded.json()["notes"][0]["handSource"] == "user"
 
 
 def test_write_song_file_atomic_replace_leaves_no_tmp_file(tmp_path, monkeypatch) -> None:

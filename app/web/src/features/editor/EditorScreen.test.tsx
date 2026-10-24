@@ -26,6 +26,19 @@ function makeScore(): DrumScore {
   }
 }
 
+function makeTwoSnareScore(): DrumScore {
+  return {
+    version: 1,
+    meta: { title: '테스트곡', bpm: 120, timeSignature: [4, 4], source: 'midi' },
+    ppq: 480,
+    audioOffsetMs: 0,
+    notes: [
+      { tick: 0, piece: 'snare', velocity: 90, hand: null },
+      { tick: 120, piece: 'snare', velocity: 90, hand: null },
+    ],
+  }
+}
+
 describe('EditorScreen', () => {
   afterEach(() => {
     vi.unstubAllGlobals()
@@ -193,5 +206,116 @@ describe('EditorScreen', () => {
 
     await waitFor(() => expect(screen.getByText('서버 오류')).toBeInTheDocument())
     expect(onSaved).not.toHaveBeenCalled()
+  })
+
+  it('assigns a hand to the selected note via the R/L/RF/LF buttons (REQ-12)', () => {
+    render(
+      <EditorScreen song={song} initialScore={makeScore()} onSaved={() => {}} onCancel={() => {}} />,
+    )
+    const kickRow = screen.getByTestId('editor-row-kick')
+    fireEvent.click(kickRow.querySelectorAll('button')[0])
+    expect(screen.getByText(/손: 미지정/)).toBeInTheDocument()
+
+    fireEvent.click(screen.getByText('RF'))
+
+    expect(screen.getByText(/손: 오른발\(지정\)/)).toBeInTheDocument()
+  })
+
+  it('clears the hand with the 손 지우기 button', () => {
+    render(
+      <EditorScreen song={song} initialScore={makeScore()} onSaved={() => {}} onCancel={() => {}} />,
+    )
+    const kickRow = screen.getByTestId('editor-row-kick')
+    fireEvent.click(kickRow.querySelectorAll('button')[0])
+    fireEvent.click(screen.getByText('RF'))
+    expect(screen.getByText(/손: 오른발/)).toBeInTheDocument()
+
+    fireEvent.click(screen.getByText('손 지우기'))
+
+    expect(screen.getByText(/손: 미지정/)).toBeInTheDocument()
+  })
+
+  it('does not show the multi-select batch bar for a plain (non-modifier) click — selection replaces, not toggles', () => {
+    render(
+      <EditorScreen
+        song={song}
+        initialScore={makeTwoSnareScore()}
+        onSaved={() => {}}
+        onCancel={() => {}}
+      />,
+    )
+    const snareRow = screen.getByTestId('editor-row-snare')
+    const notes = snareRow.querySelectorAll('button')
+    fireEvent.click(notes[0])
+    fireEvent.click(notes[1])
+
+    expect(screen.queryByText(/선택: \d+개 노트/)).not.toBeInTheDocument()
+    expect(screen.getByText(/선택됨: SN/)).toBeInTheDocument()
+  })
+
+  it('Ctrl+click adds a note to a multi-selection, showing the batch bar', () => {
+    render(
+      <EditorScreen
+        song={song}
+        initialScore={makeTwoSnareScore()}
+        onSaved={() => {}}
+        onCancel={() => {}}
+      />,
+    )
+    const snareRow = screen.getByTestId('editor-row-snare')
+    const notes = snareRow.querySelectorAll('button')
+    fireEvent.click(notes[0])
+    fireEvent.click(notes[1], { ctrlKey: true })
+
+    expect(screen.getByText('선택: 2개 노트')).toBeInTheDocument()
+  })
+
+  it('applies RLRL alternation by tick order to a multi-selection, marking them user-set', () => {
+    render(
+      <EditorScreen
+        song={song}
+        initialScore={makeTwoSnareScore()}
+        onSaved={() => {}}
+        onCancel={() => {}}
+      />,
+    )
+    const snareRow = screen.getByTestId('editor-row-snare')
+    const notes = snareRow.querySelectorAll('button')
+    fireEvent.click(notes[0])
+    fireEvent.click(notes[1], { ctrlKey: true })
+    expect(screen.getByText('선택: 2개 노트')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByText('RLRL 교대'))
+
+    // 다중선택 바가 사라지고(선택은 그대로 유지되지만 단일선택 바로는 안 뜸 —
+    // 다중선택 시 selectedNote는 null이라 손 상태는 각 노트를 다시 눌러 확인한다)
+    fireEvent.click(notes[0])
+    expect(screen.getByText(/손: 오른손\(지정\)/)).toBeInTheDocument()
+    fireEvent.click(notes[1])
+    expect(screen.getByText(/손: 왼손\(지정\)/)).toBeInTheDocument()
+  })
+
+  it('applies auto-recommended sticking without overwriting a user-set hand', () => {
+    render(
+      <EditorScreen
+        song={song}
+        initialScore={makeTwoSnareScore()}
+        onSaved={() => {}}
+        onCancel={() => {}}
+      />,
+    )
+    const snareRow = screen.getByTestId('editor-row-snare')
+    const notes = snareRow.querySelectorAll('button')
+    // 첫 노트를 사용자가 직접 L로 지정.
+    fireEvent.click(notes[0])
+    fireEvent.click(screen.getByText('L'))
+    expect(screen.getByText(/손: 왼손\(지정\)/)).toBeInTheDocument()
+
+    fireEvent.click(screen.getByText('자동 추천 재적용'))
+
+    fireEvent.click(notes[0])
+    expect(screen.getByText(/손: 왼손\(지정\)/)).toBeInTheDocument() // user 값 유지
+    fireEvent.click(notes[1])
+    expect(screen.getByText(/손: .+\(추천\)/)).toBeInTheDocument() // 자동 추천으로 채워짐
   })
 })

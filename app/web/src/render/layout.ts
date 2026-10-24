@@ -1,7 +1,7 @@
 // 레인/킷 렌더러의 순수 좌표·시간 계산(Canvas 의존 없음 — jsdom에서 단위 테스트 가능).
 // 근거: REQ-06, intent/04-ui-ux.md §3(레인 순서·낙하·마디/박선),
 // intent/08-design.md §3(피스별 모양), work/T2-3/plan.md §설계.
-import type { DrumNote, DrumPiece } from '../score/types'
+import type { DrumNote, DrumPiece, Hand } from '../score/types'
 import {
   barDurationSeconds,
   beatsPerBar,
@@ -127,4 +127,22 @@ export function activePieces(
     if (dt <= hitWindowSeconds) pieces.add(note.piece)
   }
   return pieces
+}
+
+/** 판정선 근처(±hitWindowSeconds) 노트의 피스별 손/발(REQ-12) — 킷 점등 테두리
+ * 실선(R/RF)·점선(L/LF) 트리거. `activePieces`와 같은 조건을 쓰되 손 정보도 함께
+ * 돌려준다(work/T2-7/plan.md §설계 3). 같은 피스에 다른 손의 노트가 동시에
+ * 판정창에 들어오면 마지막 값만 남음 — `activePieces`의 Set.add와 같은 단순화. */
+export function activeHandByPiece(
+  notes: readonly DrumNote[],
+  noteTimeSeconds: (note: DrumNote) => number,
+  currentTimeSeconds: number,
+  hitWindowSeconds: number,
+): Map<DrumPiece, Hand> {
+  const result = new Map<DrumPiece, Hand>()
+  for (const note of notes) {
+    const dt = Math.abs(noteTimeSeconds(note) - currentTimeSeconds)
+    if (dt <= hitWindowSeconds) result.set(note.piece, note.hand)
+  }
+  return result
 }
