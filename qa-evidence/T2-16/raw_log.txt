@@ -1,0 +1,17 @@
+재현 명령(실제 실행, 작업 디렉터리 기준):
+
+cd app/web
+PYTHONIOENCODING=utf-8 (해당 없음, 이 단계는 node) node ../../qa-evidence/T2-13/check_tempo.mjs ../../data/songs/2/original.mid
+  -> qa-evidence/T2-13/check_tempo_output.txt 와 동일 출력 재확인(2026-10-25)
+
+브라우저(로그인된 세션, http://localhost:5173)에서 콘솔/javascript_tool로 실행:
+  const res = await fetch('/api/songs/2/drumscore', {credentials: 'include'});
+  const score = await res.json();
+  score.notes.filter(n => n.piece === 'snare').map(n => n.tick).sort((a,b)=>a-b)
+  -> ppq=220, bpm=120, timeSignature=[4,4], snareCount=46, 틱 목록은 result.md 참조
+
+cd (repo root)
+PYTHONIOENCODING=utf-8 python qa-evidence/T2-16/compare_ticks.py
+  -> qa-evidence/T2-16/compare_ticks_output.txt (46/46 완전 일치)
+  -> PYTHONIOENCODING 없이 실행하면 cp949 콘솔에서 em-dash(—) 출력 시 UnicodeEncodeError로
+     크래시함(T2-14에서 이미 확인된 동일 함정) — 직접 재실행해 재현 확인함(2026-10-25).

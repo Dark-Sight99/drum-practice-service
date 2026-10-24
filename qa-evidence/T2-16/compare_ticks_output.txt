@@ -1,0 +1,5 @@
+원본 MIDI 스네어 개수: 46
+앱 DrumScore 스네어 개수: 46
+개수 일치: True
+틱 값이 다른 노트 수: 0 / 46
+=> 전부 완전히 일치(byte-identical) — import가 틱 값을 전혀 바꾸지 않음을 확인.
