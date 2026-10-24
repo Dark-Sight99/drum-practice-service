@@ -3,3 +3,4 @@ uvicorn[standard]
 sqlalchemy
 alembic
 argon2-cffi
+python-multipart

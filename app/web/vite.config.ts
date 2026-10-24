@@ -18,6 +18,18 @@ export default defineConfig({
       },
     }),
   ],
+  server: {
+    // work/T2-5/plan.md §설계 3 — 브라우저 입장에서 전부 동일 출처 요청이 되게 해
+    // CORS·크로스 포트 쿠키 문제를 피한다. FastAPI는 접두사 없이 그대로 두고
+    // 프록시가 /api 접두사만 벗겨서 전달한다.
+    proxy: {
+      '/api': {
+        target: 'http://localhost:8000',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/api/, ''),
+      },
+    },
+  },
   test: {
     environment: 'jsdom',
     globals: true,
