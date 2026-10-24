@@ -62,10 +62,16 @@ export function recommendSticking(
   }
 
   // 같은 틱에 고정 'R' 피스가 둘 이상 겹치는지 빠르게 찾기 위한 보조 맵(틱 →
-  // 그 틱에 있는 고정 'R' 피스 집합) — T2-11, 위 FIXED_HAND_PRIORITY 설명 참조.
+  // 그 틱에 실제로 'R'을 쥐고 있는 고정 피스 집합) — T2-11, 위 FIXED_HAND_PRIORITY
+  // 설명 참조. 사용자가 직접 'R'이 아닌 손으로 지정한 노트는 그 틱에서 'R'을 쥐고
+  // 있지 않으므로 제외한다 — 안 그러면(Codex 모드A 지적) 사용자가 하이햇을 'L'로
+  // 직접 바꿔놔도 그 틱의 크래시가 "하이햇이 R을 쥐고 있다"고 잘못 보고 'L'로
+  // 밀려나, 실제로는 비어 있는 'R' 대신 하이햇과 크래시가 둘 다 'L'로 겹치는
+  // 새 충돌을 만들 수 있었다.
   const fixedHandTicks = new Map<number, Set<DrumPiece>>()
   for (const note of notes) {
     if (!FIXED_HAND_PRIORITY.includes(note.piece)) continue
+    if (note.handSource === 'user' && note.hand !== 'R') continue
     const set = fixedHandTicks.get(note.tick) ?? new Set<DrumPiece>()
     set.add(note.piece)
     fixedHandTicks.set(note.tick, set)

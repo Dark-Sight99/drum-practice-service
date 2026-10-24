@@ -32,6 +32,19 @@ describe('recommendSticking', () => {
     expect(result.find((n) => n.piece === 'crash')?.hand).toBe('L')
   })
 
+  it('does not demote a coincident piece because of a higher-priority piece the user moved off R', () => {
+    // Codex 모드A 지적(T2-11) — 사용자가 하이햇을 'L'로 직접 지정해놨으면 그 틱의
+    // 'R'은 비어 있으므로, 같은 틱 크래시는 'R'을 그대로 유지해야 한다(하이햇이
+    // 여전히 'R'을 쥐고 있다고 잘못 보고 크래시까지 'L'로 밀어, 하이햇·크래시가
+    // 둘 다 'L'로 겹치는 새 충돌을 만들면 안 됨).
+    const result = recommendSticking(
+      [note(0, 'hihat_closed', { hand: 'L', handSource: 'user' }), note(0, 'crash')],
+      PPQ,
+    )
+    expect(result.find((n) => n.piece === 'hihat_closed')?.hand).toBe('L')
+    expect(result.find((n) => n.piece === 'crash')?.hand).toBe('R')
+  })
+
   it('recommends L for a snare that coincides with hihat/ride at the same tick', () => {
     const result = recommendSticking([note(0, 'hihat_closed'), note(0, 'snare')], PPQ)
     const snare = result.find((n) => n.piece === 'snare')
