@@ -59,16 +59,36 @@ def test_normalize_attenuates_loud_audio_to_target(tmp_path):
 
 
 def test_normalize_does_not_clip(tmp_path):
-    """목표 게인을 그대로 적용하면 피크가 1.0을 넘을 극단적으로 조용한 신호도
-    클리핑 없이(최대 절대값 <= 1.0) 처리돼야 한다."""
-    very_quiet_path = tmp_path / "very_quiet.wav"
-    very_quiet_rms_linear = 10 ** (-80.0 / 20)
-    _write_tone(very_quiet_path, very_quiet_rms_linear)
+    """목표 RMS로 증폭하면 피크가 1.0을 실제로 넘는 신호(사인파가 아니라, RMS 대비
+    피크가 훨씬 큰 짧은 "타격" 버스트 신호 — 드럼 트랜지언트를 흉내)를 넣어
+    클리핑 방지 분기가 진짜로 개입하는지 확인한다.
 
-    out_path = normalize_loudness(very_quiet_path, target_rms_dbfs=-18.0)
+    모드A 피드백 2차 1라운드 C-002: 기존엔 -80dBFS 사인파를 썼는데, 사인파는
+    크레스트 팩터(피크/RMS)가 항상 sqrt(2)로 고정이라 목표 -18dBFS로 맞춰도
+    피크가 ~0.18에 그쳐 클리핑 방지 분기를 절대 건드리지 못했음(그 분기를
+    통째로 지워도 이 테스트는 통과했을 것) — 그래서 사전에 "증폭 전 그대로
+    둔다면 피크가 1.0을 넘는다"는 전제 자체를 assert로 확인하도록 다시 작성."""
+    sr = 44100
+    n_total = sr  # 1초
+    n_burst = n_total // 1000  # 전체의 0.1%만 소리 있음 -> RMS는 아주 작지만 피크는 큼
+    burst_amplitude = 0.9
+    y = np.zeros(n_total, dtype=np.float64)
+    y[:n_burst] = burst_amplitude
+
+    rms = float(np.sqrt(np.mean(y**2)))
+    gain_linear_unclamped = (10 ** (-18.0 / 20)) / rms
+    unclamped_peak = burst_amplitude * gain_linear_unclamped
+    assert unclamped_peak > 1.0  # 전제: 클리핑 방지가 없으면 실제로 넘침
+
+    burst_path = tmp_path / "burst.wav"
+    sf.write(str(burst_path), y.astype(np.float32), sr)
+
+    out_path = normalize_loudness(burst_path, target_rms_dbfs=-18.0)
     try:
-        y, _ = sf.read(str(out_path))
-        assert np.max(np.abs(y)) <= 1.0 + 1e-6
+        y_out, _ = sf.read(str(out_path))
+        peak_out = float(np.max(np.abs(y_out)))
+        assert peak_out <= 1.0 + 1e-6  # 클리핑 방지가 실제로 캡을 걸었음
+        assert peak_out > 0.5  # 과도하게 깎아버리지도 않음(0.99 근처로만 낮춤)
     finally:
         out_path.unlink(missing_ok=True)
 

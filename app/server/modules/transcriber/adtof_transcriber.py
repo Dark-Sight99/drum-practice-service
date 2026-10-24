@@ -67,7 +67,14 @@ def normalize_loudness(
     fd, tmp_path_str = tempfile.mkstemp(suffix=".wav")
     os.close(fd)
     tmp_path = Path(tmp_path_str)
-    sf.write(str(tmp_path), y_out.T if y_out.ndim > 1 else y_out, sr)
+    try:
+        sf.write(str(tmp_path), y_out.T if y_out.ndim > 1 else y_out, sr)
+    except Exception:
+        # 모드A 피드백 2차 1라운드 C-001: mkstemp()가 만든 임시 파일은 sf.write()가
+        # 실패해도 OS에 이미 존재 — 여기서 못 지우면 호출자에게 경로가 전달되지
+        # 않아 영원히 못 지워지는 고아 파일이 됨.
+        tmp_path.unlink(missing_ok=True)
+        raise
     return tmp_path
 
 
