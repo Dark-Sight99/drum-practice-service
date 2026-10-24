@@ -12,7 +12,7 @@ import time
 from sqlalchemy.orm import Session
 
 from auth.security import utcnow_naive
-from db.models import Job, JobStatus
+from db.models import Job, JobStatus, Song, SongStatus
 from db.session import SessionLocal
 from worker.handlers import get_handler
 
@@ -34,6 +34,16 @@ def recover_orphaned_jobs(db: Session) -> int:
         job.status = JobStatus.FAILED
         job.error_message = "서버 재시작으로 처리가 중단됐습니다"
         job.completed_at = utcnow_naive()
+    db.commit()
+    # T3-1(REQ-01) 모드C C-001: 워커가 핸들러 실행 도중(예: Demucs 처리 중) 죽으면
+    # 핸들러의 except가 전혀 실행되지 못해 Song이 PROCESSING에 영원히 멈출 수 있다.
+    # 방금 FAILED로 되돌린 Job들의 Song도 같이 PROCESSING이면 FAILED로 맞춘다.
+    # job_type과 무관한 범용 로직 — 앞으로 생길 다른 핸들러도 "선점 직후 Song을
+    # PROCESSING으로 맞추는" 같은 패턴을 쓰면 자동으로 이 복구 혜택을 받는다.
+    for job in stuck:
+        song = db.get(Song, job.song_id)
+        if song is not None and song.status == SongStatus.PROCESSING:
+            song.status = SongStatus.FAILED
     db.commit()
     return len(stuck)
 
@@ -79,21 +89,47 @@ def _race_window_hook() -> None:
 
 
 def _run_job(db: Session, job: Job) -> None:
+    # 모드A 지적(C-001): "핸들러 없음" 분기가 _sync_song_status_with_job() 호출
+    # 전에 조기 return하면, 이 Job의 Song이 PROCESSING이었을 경우(다른 핸들러가
+    # 이미 그렇게 맞춰놓고 죽은 뒤 이 Job이 재시도되는 등) 안전망을 영영 못 받는다.
+    # 두 분기 다 끝에서 같은 안전망을 거치도록 공통 경로로 합친다.
     handler = get_handler(job.job_type)
     if handler is None:
         job.status = JobStatus.FAILED
         job.error_message = f"'{job.job_type.value}' 처리 로직이 아직 구현되지 않았습니다"
-        job.completed_at = utcnow_naive()
-        db.commit()
-        return
-
-    try:
-        handler(job)
-        job.status = JobStatus.COMPLETED
-    except Exception as exc:  # noqa: BLE001 — 작업 핸들러가 뭘 던지든 큐가 멈추면 안 된다
-        job.status = JobStatus.FAILED
-        job.error_message = str(exc)[:2000]
+    else:
+        try:
+            handler(job)
+            job.status = JobStatus.COMPLETED
+        except Exception as exc:  # noqa: BLE001 — 핸들러가 뭘 던지든 큐가 멈추면 안 된다
+            job.status = JobStatus.FAILED
+            job.error_message = str(exc)[:2000]
     job.completed_at = utcnow_naive()
+    db.commit()
+    _sync_song_status_with_job(db, job)
+
+
+def _sync_song_status_with_job(db: Session, job: Job) -> None:
+    """T3-1 모드C 3차 BLOCKING 지적 반영 — 핸들러가 자기 작업의 Song.status를
+    스스로 맞추는 게 기본 경로지만, 그 커밋 자체가 실패하는 극히 드문 경우(예:
+    핸들러의 "Song.FAILED" 커밋 도중 DB 연결이 끊김)를 대비한 공용 안전망.
+
+    Job이 끝난 상태(COMPLETED/FAILED)인데 Song이 아직 PROCESSING이면 FAILED로
+    강제 동기화한다 — Job이 COMPLETED여도 Song 쪽에 그 사실이 안 남았다는 건
+    핸들러가 "성공"을 끝까지 커밋하지 못했다는 뜻이라, 실제로 쓸 수 있는 산출물이
+    있다고 보장할 수 없어 COMPLETED로 낙관하지 않는다.
+
+    정상 흐름에서는 핸들러가 이미 Song.status를 맞춰놨으므로 이 함수는 항상 no-op
+    (song.status != PROCESSING 조건에서 바로 반환)이다. recover_orphaned_jobs()와
+    역할이 겹치지 않음 — 그쪽은 "워커 강제종료로 Job이 PROCESSING에 멈춘" 경우,
+    이쪽은 "Job은 정상적으로 끝났는데 핸들러의 Song 커밋만 실패한" 경우를 커버한다.
+    job_type과 무관한 범용 로직이라 향후 다른 핸들러도 자동으로 이 보호를 받는다."""
+    if job.status not in (JobStatus.COMPLETED, JobStatus.FAILED):
+        return
+    song = db.get(Song, job.song_id)
+    if song is None or song.status != SongStatus.PROCESSING:
+        return
+    song.status = SongStatus.FAILED
     db.commit()
 
 
@@ -130,8 +166,23 @@ def run_once() -> Job | None:
         db.close()
 
 
+def register_production_handlers() -> None:
+    """실제 작업 처리 함수들을 등록한다. 이 프로세스(`python -m worker.runner`)의
+    진입점에서만 호출한다 — `run_once()`/`run_forever()` 안에서 자동 등록하면
+    `tests/test_worker.py`의 `clear_handlers()` 기반 테스트 격리가 깨진다.
+
+    REQ-01(T3-1): Demucs 분리. Phase 3/4의 다른 작업(채보·OMR)은 핸들러가 생기면
+    여기 추가한다."""
+    from db.models import JobType
+    from modules.separator.handler import separate_handler
+    from worker.handlers import register_handler
+
+    register_handler(JobType.SEPARATE, separate_handler)
+
+
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
+    register_production_handlers()
     parser = argparse.ArgumentParser()
     parser.add_argument("--once", action="store_true", help="작업 하나만 처리하고 종료(수동 QA용)")
     args = parser.parse_args()

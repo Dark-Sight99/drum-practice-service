@@ -1,11 +1,16 @@
-"""곡 목록/상세/업로드/이름변경/삭제/DrumScore 조회(로그인한 사용자 자신의 곡만).
+"""곡 목록/상세/업로드(디지털 악보·음원)/이름변경/삭제/DrumScore 조회(로그인한
+사용자 자신의 곡만).
 
-근거: REQ-07(라이브러리), REQ-08(계정 간 데이터 분리), work/T2-5/plan.md.
-업로드는 Phase 2 범위(디지털 악보: MIDI/MusicXML/Guitar Pro)만 — 브라우저가
+근거: REQ-07(라이브러리), REQ-08(계정 간 데이터 분리), work/T2-5/plan.md,
+work/T3-1/plan.md(음원 업로드).
+디지털 악보(MIDI/MusicXML/Guitar Pro) 업로드는 Phase 2 범위 — 브라우저가
 T2-1 임포터로 이미 DrumScore JSON을 만들어 보내고, 서버는 원본 파일 + 그
 JSON을 저장만 한다(T1-5 결정: 경로 C 파싱은 브라우저 전담).
+음원(mp3/wav/m4a/flac) 업로드는 Phase 3(T3-1, REQ-01) 범위 — DrumScore 없이
+원본만 저장하고 Demucs 분리 작업을 큐에 넣는다(실제 분리는 worker가 비동기 처리).
 """
 
+from collections.abc import AsyncIterator
 from pathlib import Path
 
 from fastapi import (
@@ -25,8 +30,14 @@ from sqlalchemy.orm import Session
 
 from api.deps import get_current_user, get_db
 from api.schemas import DrumScoreIn
-from db.models import Asset, AssetKind, Song, SongSourceType, SongStatus, User
-from file_storage import delete_song_files, resolve_asset_path, write_song_file
+from db.models import Asset, AssetKind, Job, JobType, Song, SongSourceType, SongStatus, User
+from file_storage import (
+    UploadTooLargeError,
+    delete_song_files,
+    resolve_asset_path,
+    write_song_file,
+    write_song_file_streaming,
+)
 
 router = APIRouter(prefix="/songs", tags=["songs"])
 
@@ -43,6 +54,12 @@ ALLOWED_EXTENSIONS: dict[str, str] = {
     ".gpx": "gp",
 }
 MAX_UPLOAD_BYTES = 20 * 1024 * 1024  # work/T2-5/plan.md §설계 2 — 디스크 보호용 상한
+
+# REQ-01 명시 입력 형식 그대로(mp4 등 비디오는 범위 밖 — work/T3-1/plan.md §가정).
+ALLOWED_AUDIO_EXTENSIONS: frozenset[str] = frozenset({".mp3", ".wav", ".m4a", ".flac"})
+# 3~5분 음원은 수십 MB대라 디지털 악보용 20MB 상한보다 훨씬 커야 함 — REQ-01에
+# 수치 명시는 없어 디스크 보호 목적으로 정한 값(work/T3-1/plan.md §2).
+MAX_AUDIO_UPLOAD_BYTES = 100 * 1024 * 1024
 
 
 class SongOut(BaseModel):
@@ -161,6 +178,92 @@ async def upload_song(
 
     db.refresh(song)
     return song
+
+
+class AudioUploadOut(BaseModel):
+    song: SongOut
+    job_id: int
+
+
+async def _iter_upload_chunks(
+    file: UploadFile, chunk_size: int = 1024 * 1024
+) -> AsyncIterator[bytes]:
+    """`UploadFile.read()`를 청크 단위 비동기 이터레이터로 감싼다 — 호출자가
+    청크를 리스트에 모으지 않고 `write_song_file_streaming`에 그대로 넘겨
+    도착하는 즉시 디스크에 쓸 수 있게 한다(모드A C-002)."""
+    while True:
+        chunk = await file.read(chunk_size)
+        if not chunk:
+            break
+        yield chunk
+
+
+@router.post("/audio", response_model=AudioUploadOut, status_code=status.HTTP_201_CREATED)
+async def upload_audio(
+    file: UploadFile = File(...),
+    title: str = Form(..., min_length=1),
+    artist: str | None = Form(None),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> AudioUploadOut:
+    """REQ-01(T3-1) — 음원을 올려 Demucs 분리 작업을 큐에 넣는다. DrumScore는
+    아직 없음(분리·채보 전) — `upload_song`과 달리 Song.status는 PENDING에서
+    시작해 워커가 분리를 마치면 COMPLETED/FAILED로 바뀐다(진행률은 GET
+    /songs/{id}·GET /jobs/{id}로 조회, work/T3-1/plan.md).
+    """
+    ext = Path(file.filename or "").suffix.lower()
+    if ext not in ALLOWED_AUDIO_EXTENSIONS:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST, f"지원하지 않는 음원 형식: {ext or '(확장자 없음)'}"
+        )
+
+    song = Song(
+        user_id=user.id,
+        title=title,
+        artist=artist,
+        source_type=SongSourceType.AUDIO,
+        status=SongStatus.PENDING,
+    )
+    db.add(song)
+    db.commit()
+    db.refresh(song)
+
+    try:
+        # 모드A 지적 C-002: 이전 버전은 청크를 리스트에 전부 모았다가 넘겨서
+        # write_song_file_streaming이 받기 전에 이미 파일 크기만큼 메모리에
+        # 올라가 있었다(스트리밍이 이름뿐이었음) — 이제 file.read()를 그대로
+        # 비동기 제너레이터로 감싸 청크가 도착하는 즉시 디스크에 쓰고, 크기
+        # 초과 검사도 write_song_file_streaming 내부에서 같은 루프 중에 한다.
+        original_path = await write_song_file_streaming(
+            song.id,
+            f"original{ext}",
+            _iter_upload_chunks(file),
+            max_bytes=MAX_AUDIO_UPLOAD_BYTES,
+        )
+        db.add(Asset(song_id=song.id, kind=AssetKind.ORIGINAL, file_path=original_path))
+        job = Job(user_id=user.id, song_id=song.id, job_type=JobType.SEPARATE)
+        db.add(job)
+        db.commit()
+    except UploadTooLargeError:
+        db.rollback()
+        delete_song_files(song.id)
+        db.query(Song).filter(Song.id == song.id).delete()
+        db.commit()
+        raise HTTPException(
+            status.HTTP_413_CONTENT_TOO_LARGE, "파일이 너무 큽니다(100MB 제한)"
+        ) from None
+    except Exception as exc:
+        db.rollback()
+        delete_song_files(song.id)
+        db.query(Song).filter(Song.id == song.id).delete()
+        db.commit()
+        raise HTTPException(
+            status.HTTP_500_INTERNAL_SERVER_ERROR, "업로드 처리 중 오류가 발생했습니다"
+        ) from exc
+
+    db.refresh(song)
+    db.refresh(job)
+    return AudioUploadOut(song=SongOut.model_validate(song), job_id=job.id)
 
 
 @router.patch("/{song_id}", response_model=SongOut)
