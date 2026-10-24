@@ -11,11 +11,25 @@ const PPQ = 480 // 16분음표 구간 임계값 = 480/4 = 120틱
 describe('recommendSticking', () => {
   it('assigns fixed hand/foot per piece rule', () => {
     const result = recommendSticking(
-      [note(0, 'kick'), note(0, 'hihat_closed'), note(240, 'ride'), note(240, 'crash')],
+      [note(0, 'kick'), note(0, 'hihat_closed'), note(240, 'ride'), note(480, 'crash')],
       PPQ,
     )
     expect(result.map((n) => n.hand)).toEqual(['RF', 'R', 'R', 'R'])
     expect(result.every((n) => n.handSource === 'auto')).toBe(true)
+  })
+
+  it('demotes the lower-priority fixed-R piece to L when two coincide at the same tick', () => {
+    // T2-11 — 한 손이 같은 순간 두 악기를 칠 수 없음: 하이햇+크래시가 같은 틱이면
+    // 우선순위 낮은 크래시가 L로 밀려남(FIXED_HAND_PRIORITY).
+    const result = recommendSticking([note(0, 'hihat_closed'), note(0, 'crash')], PPQ)
+    expect(result.find((n) => n.piece === 'hihat_closed')?.hand).toBe('R')
+    expect(result.find((n) => n.piece === 'crash')?.hand).toBe('L')
+  })
+
+  it('keeps both hands distinct when ride and crash coincide (ride outranks crash)', () => {
+    const result = recommendSticking([note(0, 'crash'), note(0, 'ride')], PPQ)
+    expect(result.find((n) => n.piece === 'ride')?.hand).toBe('R')
+    expect(result.find((n) => n.piece === 'crash')?.hand).toBe('L')
   })
 
   it('recommends L for a snare that coincides with hihat/ride at the same tick', () => {

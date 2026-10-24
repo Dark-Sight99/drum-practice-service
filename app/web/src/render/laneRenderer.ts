@@ -226,8 +226,24 @@ export function createLaneRenderer(
         ctx.stroke()
       }
 
-      // 노트
+      // 노트 — 2-pass로 그린다: 먼저 레인 전체의 도형을 전부 그리고, 그 다음에
+      // R/L 글자를 전부 그린다(T2-11, Phase 2 게이트 4차 피드백 "R/L이 연속
+      // 노트에서 안 보임" — 영상으로 재현 확인). `score.notes`는 틱 오름차순이고
+      // 같은 레인에서 틱이 늦은(미래) 노트일수록 화면 위쪽(작은 y)에 그려지므로,
+      // 노트 단위로 "도형→글자"를 번갈아 그리던 기존 방식은 간격이 글자 높이보다
+      // 좁으면 다음 노트의 도형이 직전 노트의 글자를 그대로 덮어 지워버렸다.
+      // 글자를 항상 모든 도형보다 나중(위 레이어)에 그리면 이 문제가 없다.
       const noteSize = Math.min(laneWidth * 0.5, 28)
+      interface VisibleNote {
+        laneCenterX: number
+        shape: NoteShape
+        shapeY: number
+        topEdgeY: number
+        color: string
+        label: string | null
+        handSource: DrumNote['handSource']
+      }
+      const visibleNotes: VisibleNote[] = []
       for (let laneIndex = 0; laneIndex < LANES.length; laneIndex++) {
         const lane = LANES[laneIndex]
         const laneCenterX = laneIndex * laneWidth + laneWidth / 2
@@ -244,28 +260,37 @@ export function createLaneRenderer(
           // 계산하므로, 그리는 위치를 도형별 실제 하단 돌출 거리만큼 위로 올려
           // 하단이 정확히 그 시각에 판정선에 닿게 한다 — 도형마다 그려지는 범위가
           // 달라(예: x-ring은 더 아래까지) `noteSize/2` 하나로 통일하면 안 됨.
-          const y = yCenter - shapeBottomExtent(shape, noteSize)
-          drawNoteShape(ctx, shape, laneCenterX, y, noteSize, options.pieceColor(note.piece))
-
-          // REQ-12 — 노트 위 R/L(/RF/LF) 글자. 자동 추천 값은 반투명
-          // (intent/08-design.md §3 "자동 추천 값은 50% 투명도"), 사용자 지정은 불투명.
-          if (showSticking) {
-            const label = handLabel(note.hand)
-            if (label !== null) {
-              const prevAlpha = ctx.globalAlpha
-              ctx.globalAlpha = note.handSource === 'user' ? 1 : 0.5
-              ctx.fillStyle = options.stickingTextColor
-              // T2-10(Phase 2 게이트 3차 피드백 "RL이 잘 안보임") — 최소 크기를
-              // 10px→13px로 키움. 투명도(auto=50%)는 intent/08-design.md §3의
-              // 의뢰인 결정 수치라 임의로 안 건드림(바꾸려면 별도 확인 필요).
-              ctx.font = `bold ${Math.max(13, noteSize * 0.55)}px sans-serif`
-              ctx.textAlign = 'center'
-              ctx.textBaseline = 'bottom'
-              ctx.fillText(label, laneCenterX, y - shapeBottomExtent(shape, noteSize) - 2)
-              ctx.globalAlpha = prevAlpha
-            }
-          }
+          const extent = shapeBottomExtent(shape, noteSize)
+          const shapeY = yCenter - extent
+          visibleNotes.push({
+            laneCenterX,
+            shape,
+            shapeY,
+            topEdgeY: shapeY - extent,
+            color: options.pieceColor(note.piece),
+            label: showSticking ? handLabel(note.hand) : null,
+            handSource: note.handSource,
+          })
         }
+      }
+      for (const v of visibleNotes) {
+        drawNoteShape(ctx, v.shape, v.laneCenterX, v.shapeY, noteSize, v.color)
+      }
+      // REQ-12 — 노트 위 R/L(/RF/LF) 글자. 자동 추천 값은 반투명
+      // (intent/08-design.md §3 "자동 추천 값은 50% 투명도"), 사용자 지정은 불투명.
+      for (const v of visibleNotes) {
+        if (v.label === null) continue
+        const prevAlpha = ctx.globalAlpha
+        ctx.globalAlpha = v.handSource === 'user' ? 1 : 0.5
+        ctx.fillStyle = options.stickingTextColor
+        // T2-10(Phase 2 게이트 3차 피드백 "RL이 잘 안보임") — 최소 크기를
+        // 10px→13px로 키움. 투명도(auto=50%)는 intent/08-design.md §3의
+        // 의뢰인 결정 수치라 임의로 안 건드림(바꾸려면 별도 확인 필요).
+        ctx.font = `bold ${Math.max(13, noteSize * 0.55)}px sans-serif`
+        ctx.textAlign = 'center'
+        ctx.textBaseline = 'bottom'
+        ctx.fillText(v.label, v.laneCenterX, v.topEdgeY - 2)
+        ctx.globalAlpha = prevAlpha
       }
 
       // 판정선
@@ -276,11 +301,17 @@ export function createLaneRenderer(
       ctx.lineTo(width, hitLineY)
       ctx.stroke()
 
-      // 레인 머리글(HH/CR/SN/...) — 맨 마지막에 그려 낙하하는 노트가 뒤로
-      // 지나가도 항상 위에 보이게 한다. 뒤에 배경 띠를 깔아 노트와 겹쳐도
-      // 글자가 묻히지 않게 함(T2-10, Phase 2 게이트 3차 피드백).
+      // 레인 머리글(HH/CR/SN/...) — 판정선 바로 아래(캔버스 맨 하단)에 그린다.
+      // T2-10에선 캔버스 최상단에 그렸는데, 의뢰인이 실사용 중 상단 글자를 전혀
+      // 인지하지 못했다가 보고서를 읽고서야 알았다고 재보고(T2-11, Phase 2 게이트
+      // 4차 피드백) — 실제 시선은 낙하 노트를 눈으로 좇다 판정선 근처에 머무르므로
+      // 그 바로 아래가 더 눈에 띈다는 실사용 피드백을 그대로 반영(의뢰인 본인의
+      // 요청 = intent/ 문서 변경 승인, `intent/04-ui-ux.md` §3도 함께 갱신 예정).
+      // 맨 마지막에 그려 낙하하는 노트가 뒤로 지나가도 항상 위에 보이게 하고,
+      // 뒤에 배경 띠를 깔아 노트와 겹쳐도 글자가 묻히지 않게 함(T2-10에서 도입).
+      const laneHeaderY = height - LANE_HEADER_HEIGHT
       ctx.fillStyle = options.laneHeaderBackgroundColor
-      ctx.fillRect(0, 0, width, LANE_HEADER_HEIGHT)
+      ctx.fillRect(0, laneHeaderY, width, LANE_HEADER_HEIGHT)
       ctx.fillStyle = options.stickingTextColor
       ctx.font = 'bold 14px sans-serif' // intent/08-design.md §4 "레인 머리글 18px 700" 기준에서,
       // 레인 폭이 좁을 수 있어 14px로 축소(가로 겹침 방지) — 폭이 넓으면 자동으로 여유 생김.
@@ -288,7 +319,7 @@ export function createLaneRenderer(
       ctx.textBaseline = 'middle'
       for (let laneIndex = 0; laneIndex < LANES.length; laneIndex++) {
         const laneCenterX = laneIndex * laneWidth + laneWidth / 2
-        ctx.fillText(LANES[laneIndex].label, laneCenterX, LANE_HEADER_HEIGHT / 2)
+        ctx.fillText(LANES[laneIndex].label, laneCenterX, laneHeaderY + LANE_HEADER_HEIGHT / 2)
       }
 
       return {

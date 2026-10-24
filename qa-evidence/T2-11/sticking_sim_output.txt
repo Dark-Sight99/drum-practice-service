@@ -1,0 +1,27 @@
+tick=4550 area:
+  4550 snare L
+  4550 hihat_closed R
+  4550 crash L
+
+tick=17200..17350 area:
+  17270 crash R
+  17274 hihat_closed R
+
+hand=R smallest cross-piece gaps (different piece only):
+  9.1ms crash@17270 -> hihat_closed@17274
+  118.2ms hihat_closed@3340 -> snare@3392
+  120.5ms snare@3287 -> hihat_closed@3340
+  129.5ms hihat_closed@4193 -> snare@4250
+  129.5ms hihat_closed@4308 -> snare@4365
+
+hand=L smallest cross-piece gaps (different piece only):
+  0.0ms snare@4550 -> crash@4550
+  1070.5ms tom_mid@726 -> snare@1197
+  1088.6ms crash@4550 -> snare@5029
+
+--- same-tick same-hand collisions across ALL pieces (any remaining) ---
+total colliding (tick,hand) groups: 1
+ tick 4550 hand L pieces ['snare', 'crash']
+
+--- all ticks where 2+ FIXED_PRIORITY pieces coincide ---
+ tick 4550 pieces {'crash', 'hihat_closed'} snare_also_here= True
