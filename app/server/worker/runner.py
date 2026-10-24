@@ -171,13 +171,15 @@ def register_production_handlers() -> None:
     진입점에서만 호출한다 — `run_once()`/`run_forever()` 안에서 자동 등록하면
     `tests/test_worker.py`의 `clear_handlers()` 기반 테스트 격리가 깨진다.
 
-    REQ-01(T3-1): Demucs 분리. Phase 3/4의 다른 작업(채보·OMR)은 핸들러가 생기면
-    여기 추가한다."""
+    REQ-01(T3-1): Demucs 분리. REQ-02 경로 A(T3-2): ADTOF 채보. OMR(Phase 4)은
+    핸들러가 생기면 여기 추가한다."""
     from db.models import JobType
     from modules.separator.handler import separate_handler
+    from modules.transcriber.handler import transcribe_handler
     from worker.handlers import register_handler
 
     register_handler(JobType.SEPARATE, separate_handler)
+    register_handler(JobType.TRANSCRIBE, transcribe_handler)
 
 
 if __name__ == "__main__":

@@ -266,6 +266,46 @@ async def upload_audio(
     return AudioUploadOut(song=SongOut.model_validate(song), job_id=job.id)
 
 
+class TranscribeOut(BaseModel):
+    job_id: int
+
+
+@router.post(
+    "/{song_id}/transcribe", response_model=TranscribeOut, status_code=status.HTTP_201_CREATED
+)
+def transcribe_song(
+    song: Song = Depends(get_owned_song),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> TranscribeOut:
+    """REQ-02 경로 A(T3-2) — 이미 분리된(T3-1) 곡의 drums 스템으로 자동 채보
+    작업을 큐에 넣는다. T3-1과 자동 연결 안 함(명시적 트리거, work/T3-2/plan.md
+    "T3-1과의 관계" 참조) — 프런트엔드가 생기면 "분리 완료" 버튼으로 이걸 호출.
+    """
+    stem_asset = (
+        db.query(Asset)
+        .filter(Asset.song_id == song.id, Asset.kind == AssetKind.STEM_DRUMS)
+        .first()
+    )
+    if stem_asset is None:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST, "먼저 음원 분리를 완료해야 합니다"
+        )
+    # 모드C C-006: 에셋 행 존재만 보지 않고 실제 파일도 확인(행은 있는데 파일이
+    # 지워졌거나 경로가 안전 범위 밖이면 Job을 큐에 넣지 않고 바로 거부).
+    stem_path = resolve_asset_path(stem_asset.file_path)
+    if stem_path is None or not stem_path.exists():
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST, "드럼 스템 파일을 찾을 수 없습니다"
+        )
+
+    job = Job(user_id=user.id, song_id=song.id, job_type=JobType.TRANSCRIBE)
+    db.add(job)
+    db.commit()
+    db.refresh(job)
+    return TranscribeOut(job_id=job.id)
+
+
 @router.patch("/{song_id}", response_model=SongOut)
 def rename_song(
     body: RenameSongRequest,

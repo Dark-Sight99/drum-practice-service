@@ -301,3 +301,20 @@ def test_concurrent_workers_cannot_claim_the_same_job(tmp_path, monkeypatch) -> 
     # 동작"과 "한쪽이 깨짐"을 구분 못할 수 있음 — 예외를 모아 명시적으로 검증한다.
     assert errors == []
     assert claimed == [job_id]  # 둘 중 정확히 하나만 작업을 가져가야 함
+
+
+def test_register_production_handlers_registers_separate_and_transcribe() -> None:
+    """T3-1/T3-2 모드C C-001류 지적에 대한 회귀 테스트 — 프로덕션 등록 함수가
+    실제로 두 작업 유형 모두에 핸들러를 연결하는지 직접 확인. 이게 빠지면
+    `worker/handlers.get_handler()`가 None을 반환해 큐가 "핸들러 없음"으로
+    영원히 실패 처리한다(조용한 버그가 아니라 바로 드러나긴 하지만, 그래도
+    배포 전에 테스트로 잡는 게 맞음)."""
+    from worker.handlers import get_handler
+    from worker.runner import register_production_handlers
+
+    register_production_handlers()
+    try:
+        assert get_handler(JobType.SEPARATE) is not None
+        assert get_handler(JobType.TRANSCRIBE) is not None
+    finally:
+        clear_handlers()
