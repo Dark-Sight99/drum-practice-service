@@ -33,5 +33,16 @@
 - **편집기 다중선택이 기존 단일선택 동작을 깨지 않음**: 일반 클릭(수정키 없음)은 "교체"(기존 동작 그대로), Ctrl/Cmd+클릭만 "토글"(신규) — 기존 `EditorScreen.test.tsx`의 10개 테스트가 수정 없이 그대로 통과함으로 회귀 없음을 확인, 수동 QA에서도 일반 클릭 연속 2회가 다중선택을 만들지 않음을 별도 확인.
 - **백엔드 `handSource` 검증 공백 메우기**: 업로드(`POST /songs`)·저장(`PUT /songs/{id}/drumscore`) 둘 다 Pydantic 검증은 통과 여부 판단에만 쓰고 저장은 원본 바이트 그대로임을 코드로 재확인(T2-5/T2-6과 동일 원칙) — `handSource` 필드가 선언에 없어도 실제로는 이미 통과·보존돼 왔다는 걸 실제 저장→재조회 테스트(`test_save_accepts_and_round_trips_hand_source`)로 증명. 추가하는 이유는 `handSource: "bogus"` 같은 값도 조용히 통과시키던 공백을 메우기 위함(새 테스트로 422 거부 확인).
 
+## Codex 모드A(독립 코드 검수) 반영
+판정: 지적 없음(깨끗함) — "스티킹 추천·사용자 override·일괄 교대·연습 화면 표시를 명백한 정합성 결함 없이 구현했고, 추가된 테스트가 주요 동작과 서버측 `handSource` 검증을 커버한다"는 평.
+
+원문: `qa-evidence/T2-7/codex-modeA.md`
+
+## Codex 모드B(보고서 대조) 반영
+**1회차: needs-attention.** 서버 접근 로그는 PUT 3건의 총횟수만 증명하고, "어느 PUT이 어느 조작인지"·"정리 후 175개 노트 전부 hand:null"이라는 서술형 주장까지는 로그만으로 뒷받침되지 않음(medium) — PASS 판정이 증거 범위보다 강하다는 지적.
+→ "정리"(최종 상태) 주장을 완전히 별도의 새 서버 세션에서 재조회한 실제 응답 본문(`response-body-after-cleanup.json`, `handSource` 0건·non-null hand 0건을 파일 자체에서 직접 확인 가능)으로 교체, 그 검증 세션의 로그(`server-log-cleanup-verification.txt`, GET만 있고 PUT 없음)도 함께 커밋. PUT 귀속 서술은 "로그로 증명되지 않는, 수행 당시 설명"이라고 result.md에 명시해 로그가 증명하는 것(건수·최종 상태)과 서술(어느 PUT이 어느 조작인지)을 구분.
+
+원문: `qa-evidence/T2-7/codex-modeB.md`
+
 ## 실행한 검증
-`qa-evidence/T2-7/result.md`, `raw_log.txt` — 프론트 tsc/oxlint/vitest(129/129), 백엔드 ruff/pytest(79/79) 전부 PASS. 실제 FastAPI 서버+브라우저로 자동 추천(피스 규칙·동시타·필인 교대)·사용자 지정 보존·다중선택 RLRL 교대·저장→연습 화면 R/L 표시(레인 글자+킷 실선/점선) 켜기/끄기까지 end-to-end 확인. 서버 접근 로그 전체(21줄, 프로세스 종료까지)를 증거로 커밋.
+`qa-evidence/T2-7/result.md`, `raw_log.txt` — 프론트 tsc/oxlint/vitest(129/129), 백엔드 ruff/pytest(79/79) 전부 PASS. 실제 FastAPI 서버+브라우저로 자동 추천(피스 규칙·동시타·필인 교대)·사용자 지정 보존·다중선택 RLRL 교대·저장→연습 화면 R/L 표시(레인 글자+킷 실선/점선) 켜기/끄기까지 end-to-end 확인. 서버 접근 로그 전체(21줄, 프로세스 종료까지)와, 별도 검증 세션에서 재확인한 최종 데이터 상태(응답 본문 그대로 커밋)를 증거로 남겼다.
