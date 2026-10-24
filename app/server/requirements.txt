@@ -18,3 +18,8 @@ numpy
 #   pip install -e ../../data/repos/ADTOF-pytorch
 # (torch는 위 Demucs 설치로 이미 있어야 함, wiki/tools.md "ADTOF-pytorch" 절 참조)
 pretty_midi
+# T3-2 게이트 피드백 2차 — 채보 전 드럼 스템 음량 정규화(modules/transcriber/
+# adtof_transcriber.py의 normalize_loudness())에 직접 씀. adtof-pytorch의 전이
+# 의존성으로 이미 깔리지만, 우리 코드가 직접 import하므로 명시적으로 기록.
+librosa
+soundfile
