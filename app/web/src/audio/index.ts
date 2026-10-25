@@ -6,7 +6,10 @@ export { createMetronome } from './metronome'
 export type { Metronome, MetronomeOptions } from './metronome'
 export { playDrumScore } from './scorePlayer'
 export type { PlaybackHandle, PlayDrumScoreOptions } from './scorePlayer'
+export { createTrackPlayer } from './trackPlayer'
+export type { TrackPlayer, TrackSource } from './trackPlayer'
 export {
+  audioTrackPositionSeconds,
   barDurationSeconds,
   barIndexForTick,
   beatsPerBar,

@@ -66,6 +66,17 @@ class AssetKind(enum.StrEnum):
     MIDI_EXPORT = "midi_export"
 
 
+# T3-3(REQ-04) — 실제 오디오로 재생 가능한 종류만(work/T3-3/plan.md §1). 새 공개
+# API(`GET /songs/{id}/audio/{kind}`)가 받을 수 있는 kind를 이 집합으로 제한한다.
+AUDIO_ASSET_KINDS = (
+    AssetKind.ORIGINAL,
+    AssetKind.STEM_DRUMS,
+    AssetKind.STEM_BASS,
+    AssetKind.STEM_VOCALS,
+    AssetKind.STEM_OTHER,
+)
+
+
 class JobType(enum.StrEnum):
     SEPARATE = "separate"
     TRANSCRIBE = "transcribe"
@@ -135,6 +146,15 @@ class Song(Base):
     practice_setting: Mapped["PracticeSetting | None"] = relationship(
         back_populates="song", uselist=False, cascade="all, delete-orphan"
     )
+
+    @property
+    def available_audio_kinds(self) -> list[str]:
+        """T3-3(REQ-04) — 프런트가 어떤 오디오 트랙을 `GET /songs/{id}/audio/{kind}`로
+        가져올 수 있는지 매 kind를 시도해보지 않고 바로 알 수 있게(work/T3-3/plan.md
+        §2). SQLAlchemy 매핑 컬럼이 아닌 일반 Python 속성이라도 Pydantic이
+        `from_attributes=True`일 때 getattr로 읽으므로(`SongOut` 직렬화 시 자동
+        포함) 다른 엔드포인트의 반환 코드를 손댈 필요가 없다."""
+        return sorted({a.kind.value for a in self.assets if a.kind in AUDIO_ASSET_KINDS})
 
 
 class Asset(Base):

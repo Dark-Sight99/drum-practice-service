@@ -1,7 +1,9 @@
 import * as Tone from 'tone'
 import type { DrumScore } from '../score/types'
 import type { DrumVoiceMap } from './drumVoices'
+import type { TrackPlayer } from './trackPlayer'
 import {
+  audioTrackPositionSeconds,
   computePlaybackSchedule,
   metronomeBeatTimes,
   ticksToSeconds,
@@ -20,6 +22,10 @@ export interface PlayDrumScoreOptions {
   /** A-B 구간 반복(REQ-04). 지정 시 그 구간만 반복 재생 — 끊김·중복 클릭 없이
    * 루프되는 근거는 work/T2-4/plan.md §설계 "Tone.js 루프 동작 근거" 참고. */
   loop?: LoopBars
+  /** T3-3(REQ-04) — 분리된 오디오 트랙(이미 `prime()`까지 끝난 상태). 없으면
+   * 기존과 동일하게 MIDI만 재생(분리 안 된 곡·`audioOffsetMs≠0` 가드가 켜진
+   * 경우 — work/T3-3/plan.md §범위경계, 호출자 `PracticeCanvas`가 결정). */
+  tracks?: TrackPlayer
 }
 
 /** DrumScore를 재생한다: 마스터 클록(Transport)에 BPM/박자표를 맞추고, 카운트인
@@ -36,6 +42,10 @@ export function playDrumScore(
 ): PlaybackHandle {
   const countInBars = options.countInBars ?? 1
   const playbackBpm = options.playbackBpm ?? score.meta.bpm
+  // T3-3(REQ-04) — score.meta.bpm은 원곡 BPM(위 playbackBpm 기본값과 같은 값에서
+  // 확인). 오디오 트랙(원곡 그대로 녹음된 파일)의 재생 속도 비율 — audio.playbackRate
+  // 에 그대로 쓰임(work/T3-3/plan.md §4 유도).
+  const playbackRate = playbackBpm / score.meta.bpm
   const transport = Tone.getTransport()
   // Transport는 싱글턴이라 이전에 메트로놈 등으로 이미 돌고 있을 수 있음 — 노트를
   // 절대 시각(0초 기준)으로 예약하므로 재생 시작 전 항상 0으로 되돌린다. 실제
@@ -99,6 +109,27 @@ export function playDrumScore(
     transport.loop = true
   }
 
+  // T3-3(REQ-04, work/T3-3/plan.md §4) — audioStartSeconds는 "최초 진입"과
+  // "매 루프 재진입" 둘 다를 가리킨다(루프가 없으면 songStartSeconds 한 번만,
+  // 있으면 Tone 네이티브 루프가 이 schedule() 콜백을 경계마다 재발화함 — 위
+  // 주석과 같은 근거). 같은 일반식(audioTrackPositionSeconds)을 그대로 써서
+  // 루프 시작 지점이 0마디가 아니어도 오디오가 올바른 위치로 이동한다(모드C
+  // 1라운드에서 "항상 0으로 틀던" 설계 오류를 고친 자리).
+  const tracks = options.tracks
+  if (tracks) {
+    const audioStartSeconds = schedule.loopStartSeconds ?? schedule.songStartSeconds
+    scheduledIds.push(
+      transport.schedule(() => {
+        const positionSeconds = audioTrackPositionSeconds(
+          audioStartSeconds,
+          schedule.songStartSeconds,
+          playbackRate,
+        )
+        tracks.playFrom(positionSeconds, playbackRate)
+      }, audioStartSeconds),
+    )
+  }
+
   transport.start(undefined, schedule.playbackStartSeconds)
 
   return {
@@ -107,6 +138,7 @@ export function playDrumScore(
       transport.loop = false
       transport.stop()
       countInSynth.dispose()
+      tracks?.stop()
     },
   }
 }

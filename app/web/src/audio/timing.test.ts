@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  audioTrackPositionSeconds,
   barDurationSeconds,
   barIndexForTick,
   beatsPerBar,
@@ -153,5 +154,56 @@ describe('computePlaybackSchedule', () => {
     expect(() => computePlaybackSchedule([4, 4], 180, 1, { startBar: 0, endBar: 4 })).not.toThrow()
     const slow = computePlaybackSchedule([4, 4], 60, 1, { startBar: 2, endBar: 6 })
     expect(slow.loopEndSeconds! > slow.loopStartSeconds!).toBe(true)
+  })
+})
+
+describe('audioTrackPositionSeconds', () => {
+  // T3-3(REQ-04, work/T3-3/plan.md §4) — scorePlayer.ts의 노트 스케줄 식에서
+  // 직접 유도. 모드C 1라운드에서 "루프 재진입마다 0으로 틀던" 설계 오류를 이
+  // 일반식으로 고쳤으므로, 루프가 0마디부터가 아닌 경우를 반드시 회귀로 둔다.
+
+  it('is zero exactly at song start regardless of playback rate', () => {
+    expect(audioTrackPositionSeconds(2, 2, 1)).toBe(0)
+    expect(audioTrackPositionSeconds(2, 2, 2.5)).toBe(0)
+  })
+
+  it('at rate 1 (practice bpm == original bpm), position equals elapsed transport time', () => {
+    expect(audioTrackPositionSeconds(5, 2, 1)).toBeCloseTo(3, 5)
+  })
+
+  it('scales elapsed time by playbackRate (2x speed halves the original-file duration elapsed)', () => {
+    // 1초 경과(연습 BPM 기준) * 2배속 = 원곡 파일에서는 2초 지점
+    expect(audioTrackPositionSeconds(3, 2, 2)).toBeCloseTo(2, 5)
+    // 0.6배속(느리게): 1초 경과해도 원곡 파일에서는 0.6초만 지나감
+    expect(audioTrackPositionSeconds(3, 2, 0.6)).toBeCloseTo(0.6, 5)
+  })
+
+  it('loop re-entry at a non-zero bar must NOT collapse to 0 (regression for the 모드C 1라운드 bug)', () => {
+    // 8마디 곡에서 4~6마디를 루프: songStartSeconds=2(1마디 카운트인, 120bpm),
+    // loopStartSeconds = songStart + 4마디*2s/마디 = 10초.
+    const songStartSeconds = 2
+    const loopStartSeconds = 10
+    const playbackRate = 1
+    const position = audioTrackPositionSeconds(loopStartSeconds, songStartSeconds, playbackRate)
+    expect(position).toBeCloseTo(8, 5) // 4마디*2s/마디 — 0이면 안 됨
+    expect(position).not.toBe(0)
+  })
+
+  it('is consistent with ticksToSeconds: a note scheduled via songStartSeconds+ticksToSeconds(…,playbackBpm) maps back to ticksToSeconds(…,originalBpm) in the audio file', () => {
+    const ppq = 960
+    const tick = 1920 // 2 quarter notes in
+    const originalBpm = 100
+    const playbackBpm = 130 // 130% 연습 속도
+    const songStartSeconds = 1.5
+    const playbackRate = playbackBpm / originalBpm
+
+    const noteTransportSeconds = songStartSeconds + ticksToSeconds(tick, ppq, playbackBpm)
+    const audioFilePositionSeconds = audioTrackPositionSeconds(
+      noteTransportSeconds,
+      songStartSeconds,
+      playbackRate,
+    )
+    const expectedOriginalFilePositionSeconds = ticksToSeconds(tick, ppq, originalBpm)
+    expect(audioFilePositionSeconds).toBeCloseTo(expectedOriginalFilePositionSeconds, 10)
   })
 })

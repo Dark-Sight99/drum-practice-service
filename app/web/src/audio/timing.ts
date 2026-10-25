@@ -50,6 +50,26 @@ export function barIndexForTick(tick: number, timeSignature: TimeSignature, ppq:
   return Math.floor(tick / ticksPerBar(timeSignature, ppq))
 }
 
+/** T3-3(REQ-04) — Transport 절대 시각(초)을, 분리된 오디오 트랙 파일 안에서의
+ * 위치(초, 원곡 기준)로 환산한다. `scorePlayer.ts`의 노트 스케줄 식
+ * `songStartSeconds + ticksToSeconds(tick, ppq, playbackBpm)`과
+ * `ticksToSeconds(tick,ppq,bpm) = (tick/ppq)*(60/bpm)`에서 유도(work/T3-3/plan.md
+ * §4): 틱 `T`가 연습 BPM 기준으로 `ticksToSeconds(T,ppq,playbackBpm)`초 뒤에
+ * 울리는데, 같은 틱이 "원곡 그대로 녹음된" 오디오 파일에서는 원곡 BPM 기준으로
+ * `ticksToSeconds(T,ppq,originalBpm)`초 지점이다. 두 식의 비율이 정확히
+ * `playbackRate = playbackBpm/originalBpm`이므로, Transport가 `songStartSeconds`를
+ * 지난 뒤 경과한 시간에 `playbackRate`를 곱하면 오디오 파일 내 위치가 나온다
+ * (루프 유무와 무관한 일반식 — `audioStartSeconds`에 `songStartSeconds` 대신
+ * `loopStartSeconds`를 넣으면 루프 재진입 시점의 올바른 위치도 그대로 나옴,
+ * 모드C 1라운드에서 "루프 재진입마다 0으로 틀던" 설계 오류를 이 일반식으로 수정). */
+export function audioTrackPositionSeconds(
+  transportSeconds: number,
+  songStartSeconds: number,
+  playbackRate: number,
+): number {
+  return (transportSeconds - songStartSeconds) * playbackRate
+}
+
 export interface MetronomeBeat {
   timeSeconds: number
   accent: boolean

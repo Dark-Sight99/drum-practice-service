@@ -11,6 +11,16 @@ export interface SongSummary {
   status: string
   original_bpm: number | null
   source_type: string
+  /** T3-3(REQ-04) — `GET /songs/{id}/audio/{kind}`로 가져올 수 있는 종류
+   * (`AssetKind`의 오디오 전용 부분집합). 분리가 아직 안 된 곡은 빈 배열. */
+  available_audio_kinds: string[]
+}
+
+/** T3-3(REQ-04) — 분리된 오디오 트랙(스템/원본)의 URL. 서버가 쿠키 기반 인증을
+ * 그대로 쓰므로(`client.ts` 주석 — Vite 프록시로 동일 출처) 토큰을 붙일 필요
+ * 없음. */
+export function songAudioUrl(songId: number, kind: string): string {
+  return `/api/songs/${songId}/audio/${kind}`
 }
 
 export async function listSongs(): Promise<SongSummary[]> {

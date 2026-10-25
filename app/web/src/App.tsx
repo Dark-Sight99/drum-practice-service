@@ -73,7 +73,11 @@ function App() {
             <span style={{ color: 'var(--text-muted)' }}> — {practiceSong.song.artist}</span>
           )}
         </h1>
-        <PracticeCanvas score={practiceSong.drumScore} />
+        <PracticeCanvas
+          score={practiceSong.drumScore}
+          songId={practiceSong.song.id}
+          availableAudioKinds={practiceSong.song.available_audio_kinds}
+        />
       </main>
     )
   }

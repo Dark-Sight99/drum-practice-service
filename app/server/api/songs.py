@@ -10,6 +10,8 @@ JSON을 저장만 한다(T1-5 결정: 경로 C 파싱은 브라우저 전담).
 원본만 저장하고 Demucs 분리 작업을 큐에 넣는다(실제 분리는 worker가 비동기 처리).
 """
 
+import enum
+import mimetypes
 from collections.abc import AsyncIterator
 from pathlib import Path
 
@@ -24,6 +26,7 @@ from fastapi import (
     UploadFile,
     status,
 )
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field, ValidationError
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -31,6 +34,7 @@ from sqlalchemy.orm import Session
 from api.deps import get_current_user, get_db
 from api.schemas import DrumScoreIn
 from db.models import (
+    AUDIO_ASSET_KINDS,
     Asset,
     AssetKind,
     Job,
@@ -50,6 +54,14 @@ from file_storage import (
 )
 
 router = APIRouter(prefix="/songs", tags=["songs"])
+
+# T3-3(REQ-04) — `GET /songs/{id}/audio/{kind}`의 경로 파라미터 전용 enum.
+# `AUDIO_ASSET_KINDS`(db/models.py)에서 자동 생성해 값이 어긋날 일이 없게 한다
+# (work/T3-3/plan.md §1 — DRUMSCORE_*·SHEET_IMAGE·MIDI_EXPORT는 여기 못 들어와
+# FastAPI가 자동으로 422 처리).
+AudioAssetKind = enum.StrEnum(
+    "AudioAssetKind", {kind.name: kind.value for kind in AUDIO_ASSET_KINDS}
+)
 
 # 확장자 → DrumScore meta.source 기대값(Phase 2 범위: 디지털 악보만).
 ALLOWED_EXTENSIONS: dict[str, str] = {
@@ -79,6 +91,10 @@ class SongOut(BaseModel):
     status: str
     original_bpm: float | None
     source_type: str
+    # T3-3(REQ-04) — `Song.available_audio_kinds`(db/models.py) 프로퍼티를 그대로
+    # 읽는다. 프런트가 `GET /songs/{id}/audio/{kind}`를 매 kind마다 시도해 404를
+    # 흡수하지 않고, 이 목록으로 바로 알 수 있게(work/T3-3/plan.md §2).
+    available_audio_kinds: list[str]
 
     model_config = {"from_attributes": True}
 
@@ -370,6 +386,35 @@ def get_song_drumscore(song: Song = Depends(get_owned_song)) -> Response:
     if path is None or not path.exists():
         raise HTTPException(status.HTTP_404_NOT_FOUND, "DrumScore를 찾을 수 없습니다")
     return Response(content=path.read_bytes(), media_type="application/json")
+
+
+@router.get("/{song_id}/audio/{kind}")
+def get_song_audio(
+    kind: AudioAssetKind, song: Song = Depends(get_owned_song), db: Session = Depends(get_db)
+) -> FileResponse:
+    """T3-3(REQ-04) — 분리된 스템·원본을 브라우저 `<audio>`가 재생할 수 있게
+    서빙한다(work/T3-3/plan.md §1). `kind`가 `AudioAssetKind`가 아니면 FastAPI가
+    자동으로 422 처리(DRUMSCORE_*·SHEET_IMAGE·MIDI_EXPORT는 이 enum에 없음).
+
+    `FileResponse`가 Range 요청(iOS Safari의 `<audio>` 재생에 중요)을 이미
+    처리한다 — `app/server/.venv`에 실제로 설치된 Starlette 1.9.0의
+    `FileResponse.__call__` 소스를 직접 읽어 `Range`/`If-Range` 헤더를 파싱해
+    206으로 응답하는 로직이 내장돼 있음을 확인했고(`_parse_range_header` 등),
+    `tests/test_songs_audio.py`가 실제 `TestClient`로 `Range` 요청을 보내
+    206+`Content-Range`를 받는지까지 검증한다 — 소스를 읽어봤다는 것만으로
+    끝내지 않음."""
+    asset = (
+        db.query(Asset)
+        .filter(Asset.song_id == song.id, Asset.kind == AssetKind(kind.value))
+        .first()
+    )
+    if asset is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "오디오 트랙을 찾을 수 없습니다")
+    path = resolve_asset_path(asset.file_path)
+    if path is None or not path.exists():
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "오디오 트랙을 찾을 수 없습니다")
+    media_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+    return FileResponse(path, media_type=media_type)
 
 
 def _find_edited_asset(db: Session, song_id: int) -> Asset | None:
