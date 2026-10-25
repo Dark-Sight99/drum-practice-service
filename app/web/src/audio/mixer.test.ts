@@ -99,6 +99,16 @@ describe('toggleDrumlessPreset — T3-8(2026-10-25, 의뢰인 요청): 신스 �
     expect(off.synth_drums.muted).toBe(false) // muted가 안 풀리면 volume=1이어도 안 들림
     expect(effectiveGain(off.synth_drums)).toBe(1) // 실제로 들리는지까지 확인
   })
+
+  it('모드A 2라운드 의견 — 대칭 케이스: stem_drums를 미리 음소거해둔 경우도 켜질 때 실제로 들림', () => {
+    const state = defaultMixerState()
+    state.stem_drums.muted = true // 사용자가 미리 M 체크박스로 음소거해둔 상태(기본 volume은 0)
+
+    const on = toggleDrumlessPreset(state) // 원곡 드럼 켜짐 → volume 1로
+
+    expect(on.stem_drums.muted).toBe(false)
+    expect(effectiveGain(on.stem_drums)).toBe(1)
+  })
 })
 
 describe('music 묶음(stem_bass/stem_vocals/stem_other) — T3-4 게이트 피드백 3차', () => {
