@@ -1,6 +1,20 @@
-// T3-3(REQ-04) — 분리된 오디오 트랙(T3-1 스템) 재생. Tone.js를 모르는 순수
-// HTMLAudioElement 래퍼(책임 분리 — clock.ts/drumVoices.ts와 같은 "작은 책임"
-// 모듈 원칙, work/T3-3/plan.md §3). Transport 스케줄링은 scorePlayer.ts가 맡는다.
+// T3-3(REQ-04) — 분리된 오디오 트랙(T3-1 스템) 재생. 원래는 Tone.js를 모르는
+// 순수 HTMLAudioElement 래퍼였음(책임 분리 — clock.ts/drumVoices.ts와 같은
+// "작은 책임" 모듈 원칙, work/T3-3/plan.md §3). Transport 스케줄링은
+// scorePlayer.ts가 맡는다.
+// T3-12(2026-10-25, 의뢰인 피드백 "모바일 믹서 수치 변경해도 적용 안됨 — UI는
+// 바뀌는데 실제 소리는 안 바뀜, PC는 정상") — iOS(모든 iOS 브라우저는 WebKit
+// 기반)는 `HTMLMediaElement.volume`을 JS로 설정해도 실제 출력 음량에 반영하지
+// 않는다(Apple 공식 문서: "The volume property is not settable in JavaScript.
+// Reading the volume property always returns 1." — WebKit 소스에도 이를
+// 강제하는 코드가 있었음, 2022년에야 플랫폼별 플래그로 정리됨). 그래서 이
+// 모듈도 Web Audio API로 옮겨 `GainNode.gain`으로 음량을 조절한다(Tone.js가
+// synth_drums/metronome에 이미 쓰는 것과 같은 방식 — `createDrumVoices()`가
+// 호출하는 `Tone.start()`와 같은 AudioContext를 공유해 이중 unlock이 필요
+// 없음). "순수 HTMLAudioElement 래퍼"였던 전제는 이걸로 깨짐 — play/pause/seek/
+// rate 제어는 여전히 엘리먼트 자신이 맡고(MediaElementAudioSourceNode는 출력
+// *경로*만 바꿀 뿐 재생 제어 API는 그대로), 음량만 GainNode로 이전.
+import * as Tone from 'tone'
 
 export interface TrackSource {
   kind: string
@@ -10,6 +24,12 @@ export interface TrackSource {
 interface TrackState {
   kind: string
   element: HTMLAudioElement
+  /** T3-12 — `element`의 디코딩된 출력을 Web Audio 그래프로 연결하는 소스
+   * 노드. 한 번 연결되면 그 뒤로 `element`의 소리는 이 노드를 거쳐야만
+   * 들린다(스펙 동작) — `gainNode`가 항상 destination에 연결돼 있어야 함. */
+  sourceNode: MediaElementAudioSourceNode
+  /** T3-12 — 음량 제어 지점(이전엔 `element.volume`이었음, iOS에서 무시됨). */
+  gainNode: GainNode
   unlocked: boolean
   // T3-6(REQ-04, 모드A 지적 반영) — playFrom()이 이 트랙을 실제로 재생
   // 시작했는지. unlocked는 prime() 성공 여부만 나타내 "카운트인 중 일시정지
@@ -47,8 +67,8 @@ export interface TrackPlayer {
    * 받지 않는다. */
   resync(expectedSongPositionSeconds: number, thresholdSeconds: number): void
   /** T3-4(REQ-05) — 믹서가 mute/solo까지 반영해 계산한 "최종 게인"(0~1)을
-   * 그대로 적용. `<audio>`의 `.volume`은 네이티브 0~1 선형이라 변환 불필요
-   * — 이 모듈은 mute/solo 개념을 모른다(책임 분리, work/T3-4/plan.md §3).
+   * 그대로 적용(T3-12부터 GainNode 기반 — 선형 0~1 단위라 변환 불필요는
+   * 그대로 유지). 이 모듈은 mute/solo 개념을 모른다(책임 분리, work/T3-4/plan.md §3).
    * `kind`가 이 플레이어에 없으면 조용히 무시(다른 트랙 종류가 아직 분리
    * 안 된 곡 등 — 호출자가 존재 여부를 매번 확인할 필요 없게). */
   setChannelGain(kind: string, gain: number): void
@@ -69,10 +89,23 @@ export interface TrackPlayer {
 }
 
 export function createTrackPlayer(sources: TrackSource[]): TrackPlayer {
+  // T3-12 — Tone.js가 synth_drums/metronome에 이미 쓰고 있는 것과 같은
+  // AudioContext를 공유(실제 설치된 Tone.js 15.1.22 타입 선언으로
+  // `Context.rawContext`가 네이티브 `AudioContext`를 돌려줌을 확인) — 이
+  // context는 `createDrumVoices()`의 `Tone.start()`가 같은 사용자 제스처
+  // 흐름(handlePlay()) 안에서 이미 resume시키므로 별도 unlock 로직이 필요
+  // 없다. `createMediaElementSource()`는 context가 suspended 상태여도 그래프
+  // 구성 자체는 바로 되고, 실제로 소리가 나는 시점(훨씬 뒤, Transport가
+  // playFrom()을 트리거할 때)엔 이미 resume된 뒤다.
+  const context = Tone.getContext().rawContext as unknown as AudioContext
   const tracks: TrackState[] = sources.map((source) => {
     const element = new Audio(source.url)
     element.preload = 'auto'
-    return { kind: source.kind, element, unlocked: false, started: false }
+    const sourceNode = context.createMediaElementSource(element)
+    const gainNode = context.createGain()
+    sourceNode.connect(gainNode)
+    gainNode.connect(context.destination)
+    return { kind: source.kind, element, sourceNode, gainNode, unlocked: false, started: false }
   })
 
   async function prime(): Promise<{ kind: string; ok: boolean }[]> {
@@ -137,7 +170,9 @@ export function createTrackPlayer(sources: TrackSource[]): TrackPlayer {
   function setChannelGain(kind: string, gain: number): void {
     const track = tracks.find((t) => t.kind === kind)
     if (!track) return
-    track.element.volume = Math.min(1, Math.max(0, gain))
+    // T3-12 — 이전엔 `track.element.volume`(iOS에서 무시됨)이었음. GainNode는
+    // Tone.js의 synth_drums/metronome 게인과 같은 선형(0~1) 단위라 변환 불필요.
+    track.gainNode.gain.value = Math.min(1, Math.max(0, gain))
   }
 
   function pause(): void {
@@ -175,6 +210,10 @@ export function createTrackPlayer(sources: TrackSource[]): TrackPlayer {
     for (const track of tracks) {
       track.element.pause()
       track.element.src = ''
+      // T3-12 — Web Audio 그래프 연결 해제(메모리 누수 방지, Tone 노드가
+      // 아닌 네이티브 노드라 `.dispose()`가 아니라 `.disconnect()`).
+      track.gainNode.disconnect()
+      track.sourceNode.disconnect()
     }
   }
 

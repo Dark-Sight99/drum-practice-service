@@ -1,11 +1,50 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { createTrackPlayer } from './trackPlayer'
 
 // jsdom의 HTMLMediaElement.play()는 실제로 "Not implemented"만 찍고 끝나(실제
 // 실행으로 확인) 성공/실패 분기를 전혀 재현하지 못한다 — 그래서 prototype의
 // play()/pause()를 직접 통제해 트랙별 언락 성공/실패를 의도적으로 만들어
 // 검증한다(실제 재생 자체는 이 테스트의 범위 밖 — qa-evidence/T3-3/의 수동
 // 실기기 QA로 확인, work/T3-3/plan.md §QA계획 1).
+// T3-12 — trackPlayer.ts가 음량 제어를 `element.volume`(iOS에서 무시됨, 실제
+// Apple 문서로 확인)에서 Web Audio GainNode로 옮기면서 Tone.js의
+// AudioContext(`Tone.getContext().rawContext`)를 가져다 쓰게 됐다. jsdom엔
+// Web Audio API 자체가 없어 Tone.js가 메서드 없는 빈 객체를 돌려주는
+// DummyContext로 빠지므로(실제 실행으로 확인), 'tone' 모듈 전체를 가짜
+// AudioContext로 모킹한다(이 파일은 createTrackPlayer()만 가져다 쓰므로 다른
+// Tone export는 필요 없음). `vi.hoisted()`로 감싸는 이유 — vi.mock()의 팩토리는
+// 호이스팅돼 파일 맨 위에서 먼저 실행되므로, 그 안에서 참조할 변수는
+// `vi.hoisted()`로 먼저 선언해야 한다(Vitest 공식 패턴).
+const FAKE_DESTINATION = { marker: 'destination' }
+const { gainNodes, sourceNodes, createGainMock, createMediaElementSourceMock } = vi.hoisted(() => {
+  const gainNodes: {
+    gain: { value: number }
+    connect: ReturnType<typeof vi.fn>
+    disconnect: ReturnType<typeof vi.fn>
+  }[] = []
+  const sourceNodes: { connect: ReturnType<typeof vi.fn>; disconnect: ReturnType<typeof vi.fn> }[] = []
+  const createGainMock = vi.fn(() => {
+    const node = { gain: { value: 1 }, connect: vi.fn(), disconnect: vi.fn() }
+    gainNodes.push(node)
+    return node
+  })
+  const createMediaElementSourceMock = vi.fn(() => {
+    const node = { connect: vi.fn(), disconnect: vi.fn() }
+    sourceNodes.push(node)
+    return node
+  })
+  return { gainNodes, sourceNodes, createGainMock, createMediaElementSourceMock }
+})
+vi.mock('tone', () => ({
+  getContext: () => ({
+    rawContext: {
+      createMediaElementSource: createMediaElementSourceMock,
+      createGain: createGainMock,
+      destination: FAKE_DESTINATION,
+    },
+  }),
+}))
+
+const { createTrackPlayer } = await import('./trackPlayer')
 
 describe('createTrackPlayer', () => {
   let playMock: ReturnType<typeof vi.fn>
@@ -16,10 +55,39 @@ describe('createTrackPlayer', () => {
     pauseMock = vi.fn()
     vi.spyOn(HTMLMediaElement.prototype, 'play').mockImplementation(playMock)
     vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(pauseMock)
+    // afterEach의 vi.restoreAllMocks()가 일반 vi.fn()의 구현까지 비워버리므로
+    // (spyOn 대상이 아니라 "복원할 원본"이 없어 매번 다시 설정해야 함), 매
+    // 테스트 시작마다 구현을 다시 붙인다.
+    gainNodes.length = 0
+    sourceNodes.length = 0
+    createGainMock.mockReset().mockImplementation(() => {
+      const node = { gain: { value: 1 }, connect: vi.fn(), disconnect: vi.fn() }
+      gainNodes.push(node)
+      return node
+    })
+    createMediaElementSourceMock.mockReset().mockImplementation(() => {
+      const node = { connect: vi.fn(), disconnect: vi.fn() }
+      sourceNodes.push(node)
+      return node
+    })
   })
 
   afterEach(() => {
     vi.restoreAllMocks()
+  })
+
+  it('T3-12: wires each track through Web Audio (source → gain → destination)', () => {
+    createTrackPlayer([
+      { kind: 'stem_drums', url: 'http://x/drums.wav' },
+      { kind: 'stem_bass', url: 'http://x/bass.wav' },
+    ])
+
+    expect(createMediaElementSourceMock).toHaveBeenCalledTimes(2)
+    expect(createGainMock).toHaveBeenCalledTimes(2)
+    expect(sourceNodes[0].connect).toHaveBeenCalledWith(gainNodes[0])
+    expect(sourceNodes[1].connect).toHaveBeenCalledWith(gainNodes[1])
+    expect(gainNodes[0].connect).toHaveBeenCalledWith(FAKE_DESTINATION)
+    expect(gainNodes[1].connect).toHaveBeenCalledWith(FAKE_DESTINATION)
   })
 
   it('prime() reports ok:true for every source when play() succeeds', async () => {
@@ -205,6 +273,15 @@ describe('createTrackPlayer', () => {
     expect(pauseMock).toHaveBeenCalledTimes(1)
   })
 
+  it('dispose() disconnects the Web Audio graph nodes (T3-12)', async () => {
+    const player = createTrackPlayer([{ kind: 'stem_drums', url: 'http://x/drums.wav' }])
+    await player.prime()
+
+    player.dispose()
+
+    expect(gainNodes[0].disconnect).toHaveBeenCalledTimes(1)
+  })
+
   describe('seekTo() — T3-9(REQ-04): 위치만 옮기고 재생은 시작하지 않음', () => {
     it('repositions unlocked tracks (currentTime/playbackRate/preservesPitch) without calling play()', async () => {
       const player = createTrackPlayer([{ kind: 'stem_drums', url: 'http://x/drums.wav' }])
@@ -352,34 +429,29 @@ describe('createTrackPlayer', () => {
     })
   })
 
-  describe('setChannelGain()', () => {
-    it('sets .volume on the matching track only, clamped to [0,1]', async () => {
+  describe('setChannelGain() — T3-12: element.volume(iOS 무시됨) 대신 GainNode 사용', () => {
+    it('sets gainNode.gain.value on the matching track only, clamped to [0,1]', async () => {
       const player = createTrackPlayer([
         { kind: 'stem_drums', url: 'http://x/drums.wav' },
         { kind: 'stem_bass', url: 'http://x/bass.wav' },
       ])
       await player.prime()
-      const setSpy = vi.spyOn(HTMLMediaElement.prototype, 'volume', 'set')
-      setSpy.mockClear()
 
       player.setChannelGain('stem_bass', 0.3)
 
-      expect(setSpy).toHaveBeenCalledTimes(1)
-      expect(setSpy).toHaveBeenCalledWith(0.3)
+      expect(gainNodes[0].gain.value).toBe(1) // stem_drums는 안 건드림(기본값 유지)
+      expect(gainNodes[1].gain.value).toBe(0.3) // stem_bass만 변경
     })
 
     it('clamps out-of-range gain to [0,1]', async () => {
       const player = createTrackPlayer([{ kind: 'stem_drums', url: 'http://x/drums.wav' }])
       await player.prime()
-      const setSpy = vi.spyOn(HTMLMediaElement.prototype, 'volume', 'set')
-      setSpy.mockClear()
 
       player.setChannelGain('stem_drums', 1.5)
-      expect(setSpy).toHaveBeenCalledWith(1)
+      expect(gainNodes[0].gain.value).toBe(1)
 
-      setSpy.mockClear()
       player.setChannelGain('stem_drums', -0.5)
-      expect(setSpy).toHaveBeenCalledWith(0)
+      expect(gainNodes[0].gain.value).toBe(0)
     })
 
     it('silently ignores an unknown kind', async () => {
