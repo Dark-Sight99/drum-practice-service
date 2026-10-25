@@ -75,6 +75,23 @@ describe('createTrackPlayer', () => {
     expect(playMock).toHaveBeenCalledTimes(1)
   })
 
+  it('playFrom() pauses the element when play() rejects mid-session (T3-6 모드A 2라운드 지적 — A-B 루프 재진입 중 거부돼도 소리가 안 남아야 함)', async () => {
+    // 루프 재진입 시나리오: 이미 언락된 트랙에 playFrom()을 다시 불렀는데
+    // (예: 네트워크 문제 등으로) 이번엔 거부되는 경우. unlocked=false가 되면
+    // 이후 pause()/resume()이 전부 이 트랙을 건너뛰므로, play() 거부 시점에
+    // 명시적으로 pause()해두지 않으면 끌 방법이 없는 소리가 남을 수 있었다.
+    const player = createTrackPlayer([{ kind: 'stem_drums', url: 'http://x/drums.wav' }])
+    await player.prime()
+    playMock.mockClear()
+    pauseMock.mockClear()
+    playMock.mockRejectedValueOnce(new DOMException('', 'AbortError'))
+
+    player.playFrom(5, 1)
+    await Promise.resolve().then(() => Promise.resolve()) // catch 핸들러가 돌 때까지 마이크로태스크 양보
+
+    expect(pauseMock).toHaveBeenCalledTimes(1)
+  })
+
   it('playFrom() sets preservesPitch/playbackRate/currentTime on unlocked tracks', async () => {
     const player = createTrackPlayer([{ kind: 'stem_drums', url: 'http://x/drums.wav' }])
     await player.prime()
@@ -235,6 +252,20 @@ describe('createTrackPlayer', () => {
       player.resume()
 
       expect(playMock).not.toHaveBeenCalled()
+    })
+
+    it('resume() pauses the element when play() rejects (T3-6 모드A 2라운드 지적)', async () => {
+      const player = createTrackPlayer([{ kind: 'stem_drums', url: 'http://x/drums.wav' }])
+      await player.prime()
+      player.playFrom(0, 1) // started=true로 만든다
+      playMock.mockClear()
+      pauseMock.mockClear()
+      playMock.mockRejectedValueOnce(new DOMException('', 'AbortError'))
+
+      player.resume()
+      await Promise.resolve().then(() => Promise.resolve())
+
+      expect(pauseMock).toHaveBeenCalledTimes(1)
     })
 
     it('resume() skips a track that failed to unlock', async () => {

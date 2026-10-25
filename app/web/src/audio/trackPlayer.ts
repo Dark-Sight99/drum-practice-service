@@ -95,8 +95,14 @@ export function createTrackPlayer(sources: TrackSource[]): TrackPlayer {
       void track.element.play().catch(() => {
         // 재생 도중 거부되면(드물게 발생 가능) 이번 세션 동안 이 트랙만 계속
         // 건너뛴다 — 위 prime()과 같은 "조용히 무시하지 않되 전체를 막지도
-        // 않는다" 원칙.
+        // 않는다" 원칙. T3-6 모드A 2라운드 지적(High) — 루프 재진입처럼 이
+        // 호출 시점에 엘리먼트가 이미 재생 중이었을 수 있어(직전 루프 구간의
+        // 소리), 거부돼도 재생이 그대로 이어질 수 있다. unlocked=false가 된
+        // 트랙은 이후 pause()/resume()이 전부 건너뛰므로, 여기서 명시적으로
+        // pause()해 "unlocked=false ⇒ 소리 안 남"을 보장해야 pause()로 끌 수
+        // 없는 트랙이 생기지 않는다.
         track.unlocked = false
+        track.element.pause()
       })
     }
   }
@@ -134,7 +140,10 @@ export function createTrackPlayer(sources: TrackSource[]): TrackPlayer {
       // 하면 카운트인이 끝나기도 전에 원곡 오디오가 먼저 들리는 버그가 된다.
       if (!track.unlocked || !track.started) continue
       void track.element.play().catch(() => {
+        // T3-6 모드A 2라운드 지적(High) — playFrom()의 catch와 같은 이유로
+        // 명시적 pause() 추가(위 playFrom() 주석 참고).
         track.unlocked = false
+        track.element.pause()
       })
     }
   }

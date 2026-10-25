@@ -16,11 +16,14 @@
 ## 모드A 1라운드 지적(High, 반영함)
 `trackPlayer.ts`의 `resume()`이 `unlocked`(=prime() 성공)인 트랙에 무조건 `.play()`를 불렀는데, `unlocked`는 "이 세션에서 실제로 playFrom()으로 시작된 적 있는지"와는 다른 조건 — 카운트인 중(아직 `playFrom()`이 한 번도 안 불린 시점)에 일시정지→재개하면 Transport의 예약된 `playFrom()` 콜백이 실행되기 전에 `resume()`이 먼저 `.play()`를 불러, 카운트인이 끝나기도 전에 원곡 오디오가 들리는 버그였음. `TrackState`에 `started: boolean`(기본 false, `playFrom()`이 설정)을 추가하고 `resume()`을 `!unlocked || !started`면 건너뛰도록 수정 — 아직 안 시작된 트랙은 Transport가 재개돼 원래 예약된 `playFrom()`이 때가 되면 알아서 시작시키게 둠(기존 T2-4/T3-3 경로 그대로, 추가 개입 없음).
 
+## 모드A 2라운드 지적(High, 반영함)
+1라운드 수정이 count-in 조기 재생은 막았지만, A-B 루프 재진입 시나리오에서 또 다른 틈을 지적받음: `playFrom()`/`resume()`의 `.play()` 거부 핸들러(`.catch(() => { track.unlocked = false })`)가 `unlocked`만 내리고 엘리먼트 자체는 멈추지 않음 — 루프 재진입처럼 그 시점에 트랙이 이미 재생 중이었다면(직전 루프 구간의 소리), 거부돼도 재생이 그대로 이어질 수 있는데 이후 `pause()`/`resume()`은 둘 다 `unlocked=false`인 트랙을 건너뛰므로 끌 방법이 없는 소리가 남을 수 있었음(T3-3부터 있던 기존 `unlocked` 의미를 pause/resume에 재사용하면서 드러난 기존 패턴의 빈틈 — T3-6이 새로 만든 버그는 아니지만 pause/resume 기능이 그 빈틈을 실제로 체감 가능하게 만듦). 두 `.catch()` 핸들러 모두에 `track.element.pause()`를 추가 — `unlocked=false`가 "이 트랙은 이제부터 확실히 조용하다"를 항상 보장하도록 수정.
+
 ## 자동 테스트
 ```
 cd app/web
 npx tsc --noEmit        # 통과
-npm test -- --run       # 17 test files / 177 tests 모두 통과(기존 173 + pause/resume 신규 4 — started 가드 회귀 테스트 포함)
+npm test -- --run       # 17 test files / 179 tests 모두 통과(기존 173 + pause/resume 신규 6 — started 가드 + play() 거부 시 pause() 보장 회귀 테스트 포함)
 npm run lint            # oxlint 통과, 경고 없음
 ```
 `drumVoices.test.ts`에는 `stopAllRinging()` 자동 테스트를 추가하지 않음 — `sampleVoice()`가 비공개라 단위 테스트하려면 Tone.Player/ToneAudioBuffer 전체를 모킹해야 하는데, 이 파일은 애초에 `trigger()`/`dispose()`도 전혀 단위 테스트하지 않는 기존 선례(jsdom에 Web Audio 디코딩이 없음)를 그대로 유지(plan.md §QA계획에 명시, 구현 중 범위 조정).
