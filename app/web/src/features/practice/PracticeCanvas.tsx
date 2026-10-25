@@ -55,7 +55,11 @@ const CHANNEL_LABELS: Record<ChannelKey, string> = {
   stem_drums: '드럼(원곡)',
   stem_bass: '베이스',
   stem_vocals: '보컬',
-  stem_other: '기타 악기',
+  // T3-4 게이트 피드백 3차(2026-10-25) — "기타 악기"가 "기타(guitar)"로
+  // 오해될 수 있다는 의뢰인 지적 반영. "기타"는 원래 "그 외(etc.)"의 뜻 —
+  // Demucs 4-스템 분리는 드럼/베이스/보컬/그 외(멜로디 악기 전부 포함, 더
+  // 세분화 불가)로만 나뉜다는 걸 명확히 하려고 "그 외 악기"로 바꿈.
+  stem_other: '그 외 악기',
   synth_drums: '신스 드럼',
   metronome: '메트로놈',
 }
@@ -988,7 +992,7 @@ export function PracticeCanvas({
               rows.push(
                 <MixerRow
                   key="music"
-                  label="음악(베이스·보컬·기타)"
+                  label="음악(베이스·보컬·그 외)"
                   volume={musicVolume(mixerState)}
                   muted={isMusicMuted(mixerState)}
                   solo={isMusicSolo(mixerState)}
