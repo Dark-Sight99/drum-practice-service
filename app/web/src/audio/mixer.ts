@@ -41,42 +41,50 @@ export function defaultMixerState(): MixerState {
   return state
 }
 
-/** work/T3-4/plan.md §2 "솔로/음소거 규칙" — 표준 DAW 관례.
- * - 솔로인 채널이 하나도 없으면: muted면 0, 아니면 volume.
- * - 솔로인 채널이 1개 이상 있으면: 솔로인 채널만 자기 volume으로 들림(그
- *   채널 자신의 muted는 무시 — "솔로가 음소거를 이김"). 솔로 아닌 채널은
- *   자신의 muted와 무관하게 전부 0. 여러 채널을 동시에 솔로할 수 있고,
- *   서로 영향 없음(평균·boost 없음). */
-export function effectiveGain(channel: ChannelState, allChannels: MixerState): number {
-  const anySoloed = Object.values(allChannels).some((c) => c.solo)
-  if (anySoloed) {
-    return channel.solo ? channel.volume : 0
-  }
+/** T3-8(2026-10-25, 의뢰인 요청) — 솔로(S) 기능 제거. `muted`면 0, 아니면
+ * `volume` 그대로. `ChannelState.solo` 필드 자체는 그대로 둔다(백엔드
+ * `ChannelStateIn.solo`가 필수값이라 PUT마다 계속 `false`로 보내야 함 —
+ * 필드를 지우면 "공개 API 변경"이 되어 범위가 커짐, work/T3-8/plan.md
+ * §범위경계). 혹시 이 기능이 있던 시절 저장된 `solo: true` 레거시 값이
+ * 남아있어도 여기서 완전히 무시해 무해하게 만든다(S 체크박스가 이제
+ * UI에 없어서 사용자가 직접 끌 방법이 없으므로, 반드시 여기서 중립화해야
+ * "채널 하나만 들리고 나머지는 무음"인 채로 영원히 고정되는 버그를 막음). */
+export function effectiveGain(channel: ChannelState): number {
   return channel.muted ? 0 : channel.volume
 }
 
-/** "원곡 드럼 켜기/끄기" 프리셋 — 의뢰인 확인(2026-10-25, work/T3-4/plan.md
- * §범위경계): stem_drums(실제 원곡 녹음)만 건드림, 다른 채널(신스 드럼·
- * 메트로놈·다른 스템)은 전혀 안 건드림.
- * T3-4 게이트 피드백 2차(2026-10-25) — `defaultMixerState()`가 stem_drums를
- * 볼륨 0으로 기본 설정하도록 바뀌면서, 이 프리셋도 `muted`가 아니라
- * **볼륨 자체를 0↔1로 토글**하도록 맞춤(기본값과 같은 "볼륨" 축을 써야
- * 토글이 실제로 의미 있음 — muted만 토글하면 이미 볼륨 0인 기본 상태에서
- * 눌러도 체감 변화가 없었을 것). */
+/** "원곡 드럼 켜기/끄기" 프리셋. 원래(work/T3-4/plan.md §범위경계)는
+ * stem_drums(실제 원곡 녹음)만 건드리고 신스 드럼은 그대로 뒀는데,
+ * T3-8(2026-10-25, 의뢰인 요청)에서 "버튼을 두 번 눌러야 하니까"라는
+ * 이유로 신스 드럼을 반대 방향으로 자동 전환하도록 변경 — 원곡 드럼을
+ * 켜면 신스 드럼은 자동으로 꺼지고(겹쳐 들릴 필요 없음), 원곡 드럼을
+ * 끄면 신스 드럼이 자동으로 다시 켜짐(기존 연습 모드로 복귀). 사용자가
+ * 그 사이 신스 드럼 볼륨을 따로 조절해뒀어도 이 버튼을 누르면 0/1로
+ * 덮어씀(의뢰인이 요청한 "자동 전환" 자체가 핵심이라 중간값 보존은
+ * 범위 밖으로 판단).
+ * 모드A 지적(필수, 반영) — `volume`만 바꾸고 `muted`를 그대로 두면,
+ * 사용자가 미리 신스 드럼을 M 체크박스로 음소거해둔 상태에서 이 버튼을
+ * 눌렀다 다시 누를 때 volume은 1로 돌아와도 `muted`가 여전히 true라
+ * `effectiveGain()`이 계속 0을 반환 — "꺼짐→다시 켜짐" 복귀가 실제로는
+ * 안 들리는 버그였음. 이 프리셋이 눌리는 순간엔 두 채널의 가청 상태를
+ * 전부 이 버튼이 책임진다는 원칙으로, `muted`도 항상 `false`로 같이
+ * 리셋(볼륨 0/1 덮어쓰기와 같은 "이 버튼이 전적으로 결정한다" 원칙). */
 export function toggleDrumlessPreset(state: MixerState): MixerState {
   const isSilent = state.stem_drums.volume === 0
+  const nextStemDrumsVolume = isSilent ? 1 : 0
   return {
     ...state,
-    stem_drums: { ...state.stem_drums, volume: isSilent ? 1 : 0 },
+    stem_drums: { ...state.stem_drums, volume: nextStemDrumsVolume, muted: false },
+    synth_drums: { ...state.synth_drums, volume: isSilent ? 0 : 1, muted: false },
   }
 }
 
 /** T3-4 게이트 피드백 3차(2026-10-25, 의뢰인 요청) — "원곡 음악 소리가
  * 드럼보다 너무 크다"는 지적에, 베이스·보컬·기타 악기(=원곡에서 드럼 뺀
- * 나머지 전체)를 UI에서 슬라이더 하나·M·S 하나로 묶어 조작한다. 저장되는
- * 데이터 구조(6채널 각각의 volume/muted/solo)는 그대로 — 이 3개 함수가
- * 그 3채널을 한꺼번에 같은 값으로 맞출 뿐이라 백엔드 스키마·`effectiveGain()`
- * 모두 무수정. */
+ * 나머지 전체)를 UI에서 슬라이더 하나·M 하나로 묶어 조작한다(T3-8에서
+ * 솔로 기능 자체가 제거돼 S는 더 이상 없음). 저장되는 데이터 구조(6채널
+ * 각각의 volume/muted/solo)는 그대로 — 이 함수들이 그 3채널을 한꺼번에
+ * 같은 값으로 맞출 뿐이라 백엔드 스키마·`effectiveGain()` 모두 무수정. */
 export const MUSIC_STEM_KEYS: readonly ChannelKey[] = ['stem_bass', 'stem_vocals', 'stem_other']
 
 /** "음악 전체" 슬라이더에 표시할 대표 볼륨 — 평균(저장된 예전 값이 서로
@@ -93,10 +101,6 @@ export function isMusicMuted(state: MixerState): boolean {
   return MUSIC_STEM_KEYS.every((key) => state[key].muted)
 }
 
-export function isMusicSolo(state: MixerState): boolean {
-  return MUSIC_STEM_KEYS.every((key) => state[key].solo)
-}
-
 export function setMusicVolume(state: MixerState, volume: number): MixerState {
   const next = { ...state }
   for (const key of MUSIC_STEM_KEYS) next[key] = { ...state[key], volume }
@@ -106,12 +110,6 @@ export function setMusicVolume(state: MixerState, volume: number): MixerState {
 export function setMusicMuted(state: MixerState, muted: boolean): MixerState {
   const next = { ...state }
   for (const key of MUSIC_STEM_KEYS) next[key] = { ...state[key], muted }
-  return next
-}
-
-export function setMusicSolo(state: MixerState, solo: boolean): MixerState {
-  const next = { ...state }
-  for (const key of MUSIC_STEM_KEYS) next[key] = { ...state[key], solo }
   return next
 }
 

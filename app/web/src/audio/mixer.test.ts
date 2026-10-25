@@ -4,14 +4,11 @@ import {
   defaultMixerState,
   effectiveGain,
   isMusicMuted,
-  isMusicSolo,
   linearGainToDb,
   musicVolume,
   setMusicMuted,
-  setMusicSolo,
   setMusicVolume,
   toggleDrumlessPreset,
-  type MixerState,
 } from './mixer'
 
 describe('defaultMixerState', () => {
@@ -38,97 +35,79 @@ describe('defaultMixerState', () => {
   })
 })
 
-describe('effectiveGain — no channel soloed', () => {
+describe('effectiveGain — T3-8(2026-10-25, 의뢰인 요청)로 솔로 제거, muted/volume만 봄', () => {
   it('returns volume for an unmuted channel', () => {
     const state = defaultMixerState()
     state.stem_bass.volume = 0.6
-    expect(effectiveGain(state.stem_bass, state)).toBe(0.6)
+    expect(effectiveGain(state.stem_bass)).toBe(0.6)
   })
 
   it('returns 0 for a muted channel', () => {
     const state = defaultMixerState()
     state.stem_vocals.muted = true
-    expect(effectiveGain(state.stem_vocals, state)).toBe(0)
+    expect(effectiveGain(state.stem_vocals)).toBe(0)
+  })
+
+  it('ignores a lingering solo:true from legacy saved data (무해화 — S 체크박스가 이제 없어 사용자가 끌 방법이 없으므로 반드시 무시해야 함)', () => {
+    const state = defaultMixerState()
+    state.stem_drums.solo = true // 과거 저장된 값이라고 가정
+    state.stem_drums.volume = 0.8
+    state.stem_bass.volume = 0.5 // 솔로가 살아있었다면 무음이었을 채널
+    expect(effectiveGain(state.stem_drums)).toBe(0.8)
+    expect(effectiveGain(state.stem_bass)).toBe(0.5) // 솔로 무시 — 정상적으로 들림
   })
 })
 
-describe('effectiveGain — one channel soloed', () => {
-  it('the soloed channel plays at its own volume', () => {
+describe('toggleDrumlessPreset — T3-8(2026-10-25, 의뢰인 요청): 신스 드럼도 반대로 자동 전환', () => {
+  it('turning stem_drums ON mutes(0) synth_drums, leaving stems/metronome untouched', () => {
     const state = defaultMixerState()
-    state.stem_drums.solo = true
-    state.stem_drums.volume = 0.7
-    expect(effectiveGain(state.stem_drums, state)).toBe(0.7)
-  })
-
-  it('a non-soloed channel is silent regardless of its own muted/volume', () => {
-    const state = defaultMixerState()
-    state.stem_drums.solo = true
-    state.stem_bass.volume = 1
-    state.stem_bass.muted = false
-    expect(effectiveGain(state.stem_bass, state)).toBe(0)
-  })
-
-  it('solo overrides mute on the soloed channel itself (plan.md §2, DAW convention)', () => {
-    const state = defaultMixerState()
-    state.metronome.solo = true
     state.metronome.muted = true
-    state.metronome.volume = 0.9
-    expect(effectiveGain(state.metronome, state)).toBe(0.9)
-  })
-})
-
-describe('effectiveGain — multiple channels soloed', () => {
-  it('each soloed channel plays independently at its own volume (no averaging/boost)', () => {
-    const state = defaultMixerState()
-    state.stem_drums.solo = true
-    state.stem_drums.volume = 0.3
-    state.synth_drums.solo = true
-    state.synth_drums.volume = 0.9
-    expect(effectiveGain(state.stem_drums, state)).toBe(0.3)
-    expect(effectiveGain(state.synth_drums, state)).toBe(0.9)
-  })
-
-  it('channels not among the soloed set stay silent', () => {
-    const state = defaultMixerState()
-    state.stem_drums.solo = true
-    state.synth_drums.solo = true
-    expect(effectiveGain(state.stem_bass, state)).toBe(0)
-    expect(effectiveGain(state.metronome, state)).toBe(0)
-  })
-})
-
-describe('effectiveGain — recomputed fresh each time (no transition state needed)', () => {
-  it('reverts to the no-solo rule automatically once no channel is soloed', () => {
-    const state: MixerState = defaultMixerState()
-    state.stem_drums.solo = true
-    expect(effectiveGain(state.stem_bass, state)).toBe(0) // 솔로 중엔 무음
-
-    // "마지막 솔로를 끔" — 상태를 그대로 다시 계산만 해도 규칙이 자동 전환됨
-    const afterUnsolo: MixerState = { ...state, stem_drums: { ...state.stem_drums, solo: false } }
-    expect(effectiveGain(afterUnsolo.stem_bass, afterUnsolo)).toBe(1) // 다시 들림
-  })
-})
-
-describe('toggleDrumlessPreset', () => {
-  it('toggles only stem_drums.volume (0↔1), leaving every other channel untouched', () => {
-    const state = defaultMixerState()
-    state.synth_drums.volume = 0.5
-    state.metronome.solo = true
 
     const toggled = toggleDrumlessPreset(state)
 
     expect(toggled.stem_drums.volume).toBe(1) // 기본값 0에서 켜기로 토글
+    expect(toggled.synth_drums.volume).toBe(0) // 자동으로 꺼짐 — "버튼 두 번 안 눌러도 됨"
     expect(toggled.stem_bass).toEqual(state.stem_bass)
     expect(toggled.stem_vocals).toEqual(state.stem_vocals)
     expect(toggled.stem_other).toEqual(state.stem_other)
-    expect(toggled.synth_drums).toEqual(state.synth_drums)
     expect(toggled.metronome).toEqual(state.metronome)
   })
 
-  it('toggling twice returns stem_drums.volume to its original value (default 0)', () => {
-    const state = defaultMixerState()
+  it('toggling twice returns both stem_drums and synth_drums to their original values', () => {
+    const state = defaultMixerState() // stem_drums:0, synth_drums:1
     const twice = toggleDrumlessPreset(toggleDrumlessPreset(state))
     expect(twice.stem_drums.volume).toBe(0)
+    expect(twice.synth_drums.volume).toBe(1)
+  })
+
+  it('overwrites a custom synth_drums volume with the auto-toggled 0/1 value', () => {
+    const state = defaultMixerState()
+    state.synth_drums.volume = 0.5 // 사용자가 따로 조절해둔 값
+
+    const toggled = toggleDrumlessPreset(state)
+
+    expect(toggled.synth_drums.volume).toBe(0) // 중간값 보존 안 함 — 의도된 동작
+  })
+
+  it('모드A 지적 회귀 — 꺼짐→다시 켜짐 복귀 시 미리 음소거해둔 채널도 실제로 들리게 함(muted도 같이 리셋)', () => {
+    const state = defaultMixerState()
+    state.synth_drums.muted = true // 사용자가 미리 M 체크박스로 음소거해둔 상태
+
+    const on = toggleDrumlessPreset(state) // 원곡 드럼 켜짐 → 신스 드럼 volume 0
+    const off = toggleDrumlessPreset(on) // 다시 꺼짐 → 신스 드럼 volume 1로 복귀
+
+    expect(off.synth_drums.muted).toBe(false) // muted가 안 풀리면 volume=1이어도 안 들림
+    expect(effectiveGain(off.synth_drums)).toBe(1) // 실제로 들리는지까지 확인
+  })
+
+  it('모드A 2라운드 의견 — 대칭 케이스: stem_drums를 미리 음소거해둔 경우도 켜질 때 실제로 들림', () => {
+    const state = defaultMixerState()
+    state.stem_drums.muted = true // 사용자가 미리 M 체크박스로 음소거해둔 상태(기본 volume은 0)
+
+    const on = toggleDrumlessPreset(state) // 원곡 드럼 켜짐 → volume 1로
+
+    expect(on.stem_drums.muted).toBe(false)
+    expect(effectiveGain(on.stem_drums)).toBe(1)
   })
 })
 
@@ -214,24 +193,6 @@ describe('music 묶음(stem_bass/stem_vocals/stem_other) — T3-4 게이트 피�
     })
   })
 
-  describe('isMusicSolo / setMusicSolo', () => {
-    it('isMusicSolo is true only when all 3 stems are soloed', () => {
-      const state = defaultMixerState()
-      state.stem_bass.solo = true
-      state.stem_vocals.solo = true
-      state.stem_other.solo = true
-      expect(isMusicSolo(state)).toBe(true)
-    })
-
-    it('setMusicSolo(true) solos all 3 stems together (verified via effectiveGain)', () => {
-      const state = defaultMixerState()
-      const next = setMusicSolo(state, true)
-      // 솔로 규칙(work/T3-4/plan.md §2)과 합성 — 3개가 같이 솔로되면 나머지
-      // (드럼 원곡·신스 드럼·메트로놈)는 전부 무음이 됨.
-      expect(effectiveGain(next.stem_bass, next)).toBe(next.stem_bass.volume)
-      expect(effectiveGain(next.synth_drums, next)).toBe(0)
-    })
-  })
 })
 
 describe('linearGainToDb', () => {
