@@ -442,6 +442,11 @@ export function PracticeCanvas({
               setPlaybackBpm(clampBpm(Number(e.target.value)))
               setIsEditingBpm(false)
             }}
+            // 의뢰인 피드백(2026-10-25) — 엔터를 눌러도 바로 반영되게. blur()를
+            // 호출해 위 onBlur의 커밋 로직을 그대로 재사용(로직 중복 없음).
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') e.currentTarget.blur()
+            }}
             disabled={isPlaying}
             style={{ width: 56 }}
           />
@@ -503,6 +508,9 @@ export function PracticeCanvas({
                 if (next >= loopEndBar1) setLoopEndBar1(Math.min(totalBars, next + 1))
                 setIsEditingLoopStart(false)
               }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') e.currentTarget.blur()
+              }}
               disabled={isPlaying}
               style={{ width: 48 }}
             />
@@ -522,6 +530,9 @@ export function PracticeCanvas({
                 setLoopEndBar1(next)
                 if (next <= loopStartBar1) setLoopStartBar1(Math.max(1, next - 1))
                 setIsEditingLoopEnd(false)
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') e.currentTarget.blur()
               }}
               disabled={isPlaying}
               style={{ width: 48 }}
