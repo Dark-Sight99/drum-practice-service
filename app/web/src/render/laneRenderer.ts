@@ -2,8 +2,6 @@
 // 실제 실행으로 확인) 실제 브라우저에서만 동작·검증 가능(work/T2-3/plan.md).
 import type { DrumNote, DrumPiece, DrumScore, Hand } from '../score/types'
 import {
-  activeHandByPiece,
-  activePieces,
   barBeatLines,
   LANES,
   noteYPosition,
@@ -11,6 +9,16 @@ import {
   type NoteShape,
 } from './layout'
 import { ticksToSeconds } from '../audio/timing'
+
+interface VisibleNote {
+  laneCenterX: number
+  shape: NoteShape
+  shapeY: number
+  topEdgeY: number
+  color: string
+  label: string | null
+  handSource: DrumNote['handSource']
+}
 
 function handLabel(hand: Hand): string | null {
   return hand === 'R' || hand === 'L' || hand === 'RF' || hand === 'LF' ? hand : null
@@ -205,6 +213,32 @@ export function createLaneRenderer(
     throw new Error('2D canvas context를 가져올 수 없습니다(브라우저가 Canvas를 지원해야 함)')
   }
 
+  // T3-15(성능, 2026-10-26) — 의뢰인이 Safari 웹 속성 관리자(실기기 프로파일러)로
+  // 직접 잡아낸 실측 병목: `render()`가 매 프레임(최대 60회/초) 보이는 노트 수만큼
+  // 새 객체를 담은 새 배열을 만들고 있었음 — "부분 가비지 모음"이 프레임마다 몇
+  // ms씩 찍히는 걸 확인(가비지 생성 → GC가 메인 스레드를 막음 → 캔버스 그리기 지연
+  // → "몇 프레임 멈췄다 건너뛰는" 체감 버벅임, 정확히 일치). 배열을 매번 새로
+  // 만드는 대신, 객체를 재사용하는 풀(아래 `visibleNotePool`)을 만들어 프레임마다
+  // `visibleNoteCount`만 리셋하고 기존 객체를 덮어쓴다 — 노트 수가 늘어도(이번에
+  // 풀이 커진 뒤로는) 가비지가 전혀 안 생긴다. 이 풀은 render() 호출 밖으로 절대
+  // 안 나가므로(React state 등에 저장 안 됨) 재사용해도 안전함.
+  const visibleNotePool: VisibleNote[] = []
+  let visibleNoteCount = 0
+  function nextPooledNote(): VisibleNote {
+    if (visibleNoteCount >= visibleNotePool.length) {
+      visibleNotePool.push({
+        laneCenterX: 0,
+        shape: 'x',
+        shapeY: 0,
+        topEdgeY: 0,
+        color: '',
+        label: null,
+        handSource: undefined,
+      })
+    }
+    return visibleNotePool[visibleNoteCount++]
+  }
+
   return {
     render(
       score,
@@ -267,16 +301,21 @@ export function createLaneRenderer(
       // 좁으면 다음 노트의 도형이 직전 노트의 글자를 그대로 덮어 지워버렸다.
       // 글자를 항상 모든 도형보다 나중(위 레이어)에 그리면 이 문제가 없다.
       const noteSize = Math.min(laneWidth * 0.5, 28)
-      interface VisibleNote {
-        laneCenterX: number
-        shape: NoteShape
-        shapeY: number
-        topEdgeY: number
-        color: string
-        label: string | null
-        handSource: DrumNote['handSource']
-      }
-      const visibleNotes: VisibleNote[] = []
+      visibleNoteCount = 0
+      // T3-15(성능) — 원래 `activePieces()`/`activeHandByPiece()`(layout.ts)를
+      // 따로 호출해 `score.notes` 전체(이 레인 루프와 별개로)를 두 번 더
+      // 훑었음 — 매 프레임 994개 노트 스캔을 최대 3번(그리기용 1번 + 이 2번)
+      // 하던 셈. 판정 허용범위(`hitWindowSeconds`, 보통 0.06초)는 이 루프가
+      // 이미 쓰는 그리기 가시창(`windowStart`~`windowEnd`, lookbehind
+      // 0.15초+lookahead 수 초)보다 항상 좁아서, 이 루프 안에서 같이 체크해도
+      // 놓치는 노트가 없다 — 그리기용 `shape` 존재 체크보다 먼저(= 원래
+      // activePieces 등이 shape를 신경 안 쓰던 것과 동일하게) 둬서 의미상
+      // 완전히 같게 유지. 다만 이 결과(Set/Map)는 호출자가 React state에
+      // 저장하므로(PracticeCanvas.tsx) 위 `visibleNotePool`과 달리 프레임마다
+      // 새로 만든다(재사용하면 이미 state로 넘어간 이전 프레임 결과까지
+      // 뒤늦게 바뀌어버림 — React의 불변성 전제를 깨는 버그가 됨).
+      const activePiecesResult = new Set<DrumPiece>()
+      const activeHandResult = new Map<DrumPiece, Hand>()
       for (let laneIndex = 0; laneIndex < LANES.length; laneIndex++) {
         const lane = LANES[laneIndex]
         const laneCenterX = laneIndex * laneWidth + laneWidth / 2
@@ -284,6 +323,10 @@ export function createLaneRenderer(
           if (!lane.pieces.includes(note.piece)) continue
           const t = noteTimeOf(note)
           if (t < windowStart || t > windowEnd) continue
+          if (Math.abs(t - currentTimeSeconds) <= options.hitWindowSeconds) {
+            activePiecesResult.add(note.piece)
+            activeHandResult.set(note.piece, note.hand)
+          }
           const yCenter = noteYPosition(t, currentTimeSeconds, speed, hitLineY)
           const shape = lane.shapeByPiece[note.piece]
           if (!shape) continue
@@ -295,26 +338,25 @@ export function createLaneRenderer(
           // 달라(예: x-ring은 더 아래까지) `noteSize/2` 하나로 통일하면 안 됨.
           const extent = shapeBottomExtent(shape, noteSize)
           const shapeY = yCenter - extent
-          visibleNotes.push({
-            laneCenterX,
-            shape,
-            shapeY,
-            topEdgeY: shapeY - extent,
-            color: options.pieceColor(note.piece),
-            label: showSticking ? handLabel(note.hand) : null,
-            handSource: note.handSource,
-          })
+          const v = nextPooledNote()
+          v.laneCenterX = laneCenterX
+          v.shape = shape
+          v.shapeY = shapeY
+          v.topEdgeY = shapeY - extent
+          v.color = options.pieceColor(note.piece)
+          v.label = showSticking ? handLabel(note.hand) : null
+          v.handSource = note.handSource
         }
       }
       // T3-11 피드백 2차(2026-10-25, 의뢰인 질문) — 같은 레인에서 노트끼리
       // 겹치면 "나중에 칠(미래, 화면 위쪽)" 노트가 위 레이어라 "곧 칠(판정선에
-      // 가까운)" 노트의 halo 일부가 가려졌음(`visibleNotes`는 틱 오름차순이라
-      // 배열 뒤쪽일수록 미래 노트 — 위 setup 주석 참고). 지금 당장 쳐야 하는
-      // 노트가 더 중요하므로, 배열을 거꾸로 돌아 "곧 칠" 노트를 나중에(=위
-      // 레이어) 그린다 — 리듬게임에서 판정선에 가까운 노트가 시각 우선권을
-      // 갖는 통념과도 일치.
-      for (let i = visibleNotes.length - 1; i >= 0; i--) {
-        const v = visibleNotes[i]
+      // 가까운)" 노트의 halo 일부가 가려졌음(`visibleNotePool`은 틱 오름차순
+      // 순서로 채워지고 배열 뒤쪽일수록 미래 노트 — 위 setup 주석 참고). 지금
+      // 당장 쳐야 하는 노트가 더 중요하므로, 거꾸로 돌아 "곧 칠" 노트를
+      // 나중에(=위 레이어) 그린다 — 리듬게임에서 판정선에 가까운 노트가 시각
+      // 우선권을 갖는 통념과도 일치.
+      for (let i = visibleNoteCount - 1; i >= 0; i--) {
+        const v = visibleNotePool[i]
         drawNoteShape(
           ctx,
           v.shape,
@@ -327,7 +369,8 @@ export function createLaneRenderer(
       }
       // REQ-12 — 노트 위 R/L(/RF/LF) 글자. 자동 추천 값은 반투명
       // (intent/08-design.md §3 "자동 추천 값은 50% 투명도"), 사용자 지정은 불투명.
-      for (const v of visibleNotes) {
+      for (let i = 0; i < visibleNoteCount; i++) {
+        const v = visibleNotePool[i]
         if (v.label === null) continue
         const prevAlpha = ctx.globalAlpha
         ctx.globalAlpha = v.handSource === 'user' ? 1 : 0.5
@@ -382,13 +425,8 @@ export function createLaneRenderer(
       }
 
       return {
-        activePieces: activePieces(score.notes, noteTimeOf, currentTimeSeconds, options.hitWindowSeconds),
-        activeHandByPiece: activeHandByPiece(
-          score.notes,
-          noteTimeOf,
-          currentTimeSeconds,
-          options.hitWindowSeconds,
-        ),
+        activePieces: activePiecesResult,
+        activeHandByPiece: activeHandResult,
       }
     },
     dispose() {
