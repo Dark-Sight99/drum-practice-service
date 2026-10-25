@@ -773,18 +773,26 @@ export function PracticeCanvas({
     const stemKinds = availableAudioKinds.filter((kind) => kind !== 'original')
     const canUseAudioTracks =
       songId !== undefined && score.audioOffsetMs === 0 && stemKinds.length > 0
-    const tracks = canUseAudioTracks
-      ? createTrackPlayer(stemKinds.map((kind) => ({ kind, url: songAudioUrl(songId, kind) })))
-      : null
 
     // T3-4 모드A 1라운드 지적(High/Medium) — 아래 셋업 구간에서 (a) stop()/
     // 다른 handlePlay()가 끼어들거나(세션 id가 바뀜) (b) 생성 자체가 실패하면,
     // 그때까지 만든 리소스(트랙·Gain·voices·메트로놈)를 전부 정리하고
     // 중단한다 — 안 그러면 취소된 세션의 오디오가 계속 돌거나 리소스가 샌다.
+    // T3-13 모드A 2라운드 지적(Medium) — `tracks`를 `createTrackPlayer()`
+    // 호출과 함께 `const`로 선언하면, 그 호출 자체가 던질 때(예: Web Audio
+    // 그래프 생성 실패) `tracks` 바인딩이 아예 안 만들어져 `cleanupAbortedSetup`
+    // 안의 `tracks?.dispose()`가 TDZ 참조 에러를 낸다 — `let`으로 미리
+    // `null` 선언해두고 try 안에서 대입(아래 synthGain 등과 같은 패턴).
+    let tracks: TrackPlayer | null = null
     let synthGain: Tone.Gain | undefined
     let limiter: Tone.Limiter | undefined
     let voices: DrumVoiceMap | undefined
     let metronome: Metronome | undefined
+    // T3-13 모드A 2라운드 수정 중 발견·수정(실제 실행으로 재현, 자체 QA) —
+    // `loop`도 try 안에서만 선언하면, try 밖(아래 "루프면 자동 정지 타이머
+    // 안 걺" 분기)에서 더 이상 못 봐서 `ReferenceError`가 났음. tracks 등과
+    // 같은 패턴으로 바깥에 선언.
+    let loop: LoopBars | undefined
     function cleanupAbortedSetup(): void {
       tracks?.dispose()
       synthGain?.dispose()
@@ -799,6 +807,12 @@ export function PracticeCanvas({
     }
 
     try {
+      // T3-13 모드A 2라운드 지적 — 이 호출이 try 밖에 있으면 여기서 던질 때
+      // isStarting 플래그가 영영 안 풀려 재생 버튼이 계속 비활성 상태로
+      // 멈춘다(원래 버그보다 더 나쁜 회귀) — try 안으로 이동.
+      tracks = canUseAudioTracks
+        ? createTrackPlayer(stemKinds.map((kind) => ({ kind, url: songAudioUrl(songId, kind) })))
+        : null
       const primePromise = tracks?.prime()
       // T3-4(REQ-05, work/T3-4/plan.md §3) — 신스 드럼 9종이 공용으로 거치는
       // Gain(linear 게인, Tone.Gain 기본 단위가 "gain" — 실제 설치된 Tone.js
@@ -837,23 +851,27 @@ export function PracticeCanvas({
         cleanupAbortedSetup()
         return
       }
+      // T3-13 모드A 2라운드 지적 — playDrumScore()/playbackRef.current 대입도
+      // 같은 이유로 try 안으로 이동(여기서 던지면 isStarting이 안 풀리는
+      // 문제가 똑같이 생김). voices는 바로 위에서 성공적으로 대입됐으므로
+      // 이 시점엔 항상 값이 있음(DrumVoiceMap | undefined가 아님).
+      loop = loopEnabled
+        ? { startBar: loopStartBar1 - 1, endBar: loopEndBar1 }
+        : undefined
+      const handle = playDrumScore(score, voices, {
+        countInBars: COUNT_IN_BARS,
+        playbackBpm,
+        loop,
+        tracks: tracks ?? undefined,
+      })
+      playbackRef.current = { handle, voices, tracks, synthGain, limiter, metronome }
+      isStartingRef.current = false
+      setIsStarting(false)
     } catch (err) {
       cleanupAbortedSetup()
       throw err
     }
 
-    const loop: LoopBars | undefined = loopEnabled
-      ? { startBar: loopStartBar1 - 1, endBar: loopEndBar1 }
-      : undefined
-    const handle = playDrumScore(score, voices, {
-      countInBars: COUNT_IN_BARS,
-      playbackBpm,
-      loop,
-      tracks: tracks ?? undefined,
-    })
-    playbackRef.current = { handle, voices, tracks, synthGain, limiter, metronome }
-    isStartingRef.current = false
-    setIsStarting(false)
     // 방금 만든 세션에 지금 믹서 상태를 바로 적용(처음부터 맞게 시작 —
     // work/T3-4/plan.md §4, "handlePlay()가 세션을 만들 때는 그 시점의
     // mixerStateRef.current를 그대로 읽어 처음부터 맞게 구성").
