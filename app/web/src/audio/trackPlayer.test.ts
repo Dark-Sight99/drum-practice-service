@@ -96,11 +96,11 @@ describe('createTrackPlayer', () => {
     // 테스트였음(모드A가 정확히 지적한 약점) — 이번엔 `currentTime` setter를
     // 직접 스파이해(call-through 유지) 실제로 보정됐는지/안 됐는지를
     // 값으로 검증한다.
-    async function primedUnpausedPlayer(initialCurrentTime: number) {
+    async function primedUnpausedPlayer(initialCurrentTime: number, playbackRate = 1) {
       const player = createTrackPlayer([{ kind: 'stem_drums', url: 'http://x/drums.wav' }])
       await player.prime()
       vi.spyOn(HTMLMediaElement.prototype, 'paused', 'get').mockReturnValue(false)
-      player.playFrom(initialCurrentTime, 1)
+      player.playFrom(initialCurrentTime, playbackRate)
       return player
     }
 
@@ -125,11 +125,13 @@ describe('createTrackPlayer', () => {
     })
 
     it('does NOT correct when currentTime already equals the expected position (0.5x-speed unit-bug regression)', async () => {
-      // 0.5배속에서 currentTime(원곡 파일 기준)이 expectedSongPositionSeconds와
-      // 정확히 같은, "완벽히 동기"인 상태를 흉내 — 수정 전 버그였다면
-      // playbackRate=0.5를 곱해 실제 위치를 0.25로 잘못 계산해 드리프트가
-      // 있다고 오판, 불필요하게 currentTime을 다시 썼을 것.
-      const player = await primedUnpausedPlayer(0.5)
+      // 모드A 2라운드 지적 반영 — 트랙의 playbackRate를 실제로 0.5로 둬서
+      // "0.5배속" 시나리오를 이름 그대로 재현한다(1차 수정 때는 1배속으로
+      // 돌려놓고 이름만 0.5배속이라고 적었던 약점). currentTime(원곡 파일
+      // 기준)이 expectedSongPositionSeconds와 정확히 같은 "완벽히 동기" 상태 —
+      // 수정 전 버그였다면 playbackRate=0.5를 곱해 실제 위치를 0.25로 잘못
+      // 계산해 드리프트가 있다고 오판, 불필요하게 currentTime을 다시 썼을 것.
+      const player = await primedUnpausedPlayer(0.5, 0.5)
       const setSpy = vi.spyOn(HTMLMediaElement.prototype, 'currentTime', 'set')
       setSpy.mockClear()
 

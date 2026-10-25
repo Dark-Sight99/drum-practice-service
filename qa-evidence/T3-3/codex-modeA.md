@@ -16,5 +16,13 @@ Finding:
 
 재검증: `vitest` 154개 전부 통과(기존 150 + 리싱크 테스트 재작성으로 +4), `oxlint`·`tsc --noEmit` 0건. 실제 브라우저(Chromium)로 **연습 BPM 60(원곡 120의 50%)**에서 재생해 리싱크 폴링 주기(750ms)를 여러 번 지나도 콘솔 에러 없음을 확인(1배속에서는 숨겨져 있던 버그라 일부러 배속을 바꿔 확인).
 
+## 라운드 2 — APPROVE(나이트픽 1건)
+Target: 커밋 `ec4ad53`(`f60d560` 대비) 단독 diff.
+
+- 수정 확인: `resync()`가 `currentTime`을 그대로 쓰고 `playbackRate` 매개변수도 제거됨(호출부 `PracticeCanvas.tsx`도 일치) — **CORRECT**.
+- 나이트픽(과장 아님, 즉시 반영): 0.5배속 회귀 테스트가 `playFrom(0.5, 1)`로 **1배속**인 채 이름만 "0.5배속"이라 적었던 약점 지적. `primedUnpausedPlayer`가 playbackRate를 받도록 바꿔 실제로 `playFrom(0.5, 0.5)`로 그 트랙의 playbackRate를 0.5로 두고 재검증(`resync()` 자체는 playbackRate를 더 이상 안 받으므로 버그 재발 가능성은 이미 없지만, 테스트 서술의 정확성을 위해 반영).
+
+재검증: `vitest` 154개 전부 통과, `tsc --noEmit`·`oxlint` 0건.
+
 ## 결론
-모드A 지적 반영 완료. 추가 지적 없음(API 소유권/404/kind 제한, 노트 스케줄·루프 재진입 위치 계산은 이상 없음으로 확인됨).
+모드A 지적 전부 반영 완료(2라운드 APPROVE). 추가 지적 없음(API 소유권/404/kind 제한, 노트 스케줄·루프 재진입 위치 계산은 이상 없음으로 확인됨).
