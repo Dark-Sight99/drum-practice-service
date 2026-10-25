@@ -519,7 +519,12 @@ export function PracticeCanvas({
     })
   }, [])
 
-  const lastActiveKeyRef = useRef('')
+  // T3-16(성능, 2026-10-26) — 의뢰인이 Safari 실기기 프로파일러로 T3-15 수정
+  // 후에도 GC가 여전히 보인다고 재확인 — 원래 이 "바뀐 것만 반영" 체크
+  // 자체가(배열 스프레드+map+sort+join으로 매 프레임 문자열을 새로 만듦)
+  // 가비지를 만들고 있었음. 직전 Map을 그대로 들고 있다가 크기+항목을 직접
+  // 비교(할당 없음)하는 방식으로 교체.
+  const lastActiveMapRef = useRef<ReadonlyMap<DrumPiece, Hand>>(new Map())
   const [progressPercent, setProgressPercent] = useState(0)
   const lastProgressKeyRef = useRef(-1)
   // T3-3(REQ-04) — 오디오 트랙 리싱크 폴링 스로틀(위 TRACK_RESYNC_INTERVAL_MS).
@@ -599,12 +604,17 @@ export function PracticeCanvas({
         // 평균 fps가 30fps로 떨어지는 걸 확인(REQ-06 목표 60fps 미달). 내용이
         // 실제로 바뀔 때만 setState하도록 바꿔 불필요한 리렌더를 없앤다
         // (qa-evidence/T2-3/result.md §fps 측정).
-        const key = [...active.entries()]
-          .map(([piece, hand]) => `${piece}:${hand ?? ''}`)
-          .sort()
-          .join(',')
-        if (key !== lastActiveKeyRef.current) {
-          lastActiveKeyRef.current = key
+        let activeChanged = active.size !== lastActiveMapRef.current.size
+        if (!activeChanged) {
+          for (const [piece, hand] of active) {
+            if (lastActiveMapRef.current.get(piece) !== hand) {
+              activeChanged = true
+              break
+            }
+          }
+        }
+        if (activeChanged) {
+          lastActiveMapRef.current = active
           setActiveHandByPiece(active)
         }
       }
@@ -704,7 +714,7 @@ export function PracticeCanvas({
     playbackRef.current.tracks?.dispose()
     playbackRef.current = null
     isPlayingRef.current = false
-    lastActiveKeyRef.current = ''
+    lastActiveMapRef.current = new Map()
     lastProgressKeyRef.current = -1
     setActiveHandByPiece(new Map())
     setProgressPercent(0)
