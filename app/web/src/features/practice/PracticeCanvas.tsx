@@ -938,28 +938,27 @@ export function PracticeCanvas({
           gap: 'var(--space-4)',
         }}
       >
-        <div style={{ display: 'flex', gap: 'var(--space-2)' }}>
-          <button onClick={handlePlay} disabled={isPlaying}>
-            ▶ 재생
-          </button>
-          <button onClick={handlePause} disabled={!isPlaying}>
-            ⏸ 일시정지
-          </button>
-          <button onClick={handleStop} disabled={!isPlaying && !isPaused}>
-            ⏹ 정지
-          </button>
-        </div>
-
-        {/* T3-9(REQ-04, 의뢰인 피드백) — "A-B 루프를 마디 번호로 입력하는
-         * 방식은 악보 없이는 못 쓰겠다"는 지적에, 재생 위치를 ±10초 이동하는
-         * 탐색 버튼을 추가. 재생/일시정지 둘 다 활성 — 일시정지 중에도 점프
-         * 가능(work/T3-9/plan.md §1). */}
+        {/* T3-13(2026-10-25, 의뢰인 요청 — 이미지 첨부) — 재생/일시정지를
+         * 토글 버튼 하나로 합치고(표준 미디어 플레이어 패턴), 양옆에 ±10초
+         * 탐색 버튼을 둔다. "정지"는 "리셋"으로 이름만 바꿔(동작은 기존
+         * handleStop 그대로 — 처음으로 되돌아감) 옆에 유지. 토글 버튼은
+         * 항상 클릭 가능 — 정지 상태면 handlePlay()(새 세션 시작), 재생
+         * 중이면 handlePause(), 일시정지 중이면 handlePlay()가 isPaused
+         * 분기로 알아서 재개한다(기존 로직 무변경, 버튼 묶음만 재구성). */}
         <div style={{ display: 'flex', gap: 'var(--space-2)' }}>
           <button onClick={() => handleSeek(-10)} disabled={!isPlaying && !isPaused}>
             ◀◀ 10초
           </button>
+          {isPlaying ? (
+            <button onClick={handlePause}>⏸ 일시정지</button>
+          ) : (
+            <button onClick={handlePlay}>▶ 재생</button>
+          )}
           <button onClick={() => handleSeek(10)} disabled={!isPlaying && !isPaused}>
             10초 ▶▶
+          </button>
+          <button onClick={handleStop} disabled={!isPlaying && !isPaused}>
+            ↺ 리셋
           </button>
         </div>
 

@@ -119,6 +119,10 @@
   - 완료(2026-10-25): 의뢰인 피드백 — "모바일 믹서 수치 변경해도 적용 안됨. UI상 수치는 바뀌는데 실제 적용은 안되는듯... 믹서는 PC에서는 정상 반응한다." 원인: `trackPlayer.ts`(분리 오디오 스템)가 `HTMLMediaElement.volume`으로 음량을 조절했는데, **iOS(모든 iOS 브라우저는 WebKit 기반)는 이 프로퍼티를 JS로 설정해도 무시**함(Apple 공식 문서로 확인, PC는 이 제한이 없어 정상 동작했던 것과 증상 일치). synth_drums/metronome(Tone.js, GainNode 기반)은 이 제한을 안 받아 영향 없었을 것으로 추정. `<audio>` 엘리먼트를 `Tone.getContext().rawContext`(synth_drums/metronome과 같은 AudioContext 공유)의 `createMediaElementSource()`→`GainNode`→`destination`으로 연결, `setChannelGain()`이 `element.volume` 대신 `gainNode.gain.value`를 씀. play/pause/seek/rate 제어는 전혀 안 건드림(출력 경로만 바뀜, 스펙 동작).
   - 위험 분류: 재생 타이밍·동기 로직 무변경(출력 라우팅만 변경) — Codex 모드C 불필요, 모드A만 진행.
   - 테스트 197개 전부 통과(trackPlayer.test.ts에 Web Audio 그래프 연결 검증 신규 2건 추가, 기존 `setChannelGain` 테스트 3건은 GainNode 값 검증으로 재작성 — jsdom엔 Web Audio API가 없어 `'tone'` 모듈 전체를 가짜 AudioContext로 모킹), 타입체크/린트 0건. 브라우저(PC/Chromium)에서 `AudioParam.value` setter를 몽키패치해 믹서 슬라이더 조작 시 실제 값(0.77)이 전달됨을 직접 증거로 확인. **한계(솔직히 밝힘)**: WebSearch로 조사한 과거 WebKit 버그 이력상 GainNode도 iOS에서 코덱에 따라 무시된 사례가 있어(이 앱은 WAV라 영향 가능성 낮다고 추정하나 미확정), Claude가 접근 가능한 브라우저가 Chromium이라 실제 iOS Safari 검증은 못 함 — 의뢰인 모바일 재테스트 필요(Q-32). 증거: `qa-evidence/T3-12/`
+- [x] T3-13 재생/일시정지 토글 통합 + 정지→리셋 이름 변경 + ±10초 버튼 재배치 (REQ-04)
+  - 완료(2026-10-25): 의뢰인 요청(이미지 2장 첨부) — "재생하고 일시정지를 같은 버튼으로 써서 두 기능이 번갈아가면서 적용되게 할 수 없을까. 정지라는 단어대신 리셋으로 바꾸고. 이미지처럼 하나의 버튼으로 시작 일시정지 가능하게 양옆에 10초 뒤로 앞으로 하고." "▶ 재생"/"⏸ 일시정지" 두 버튼을 `isPlaying` 조건부 렌더링으로 토글 버튼 하나로 통합(표준 미디어 플레이어 패턴, `handlePlay()`/`handlePause()` 로직은 무변경 — `handlePlay()`가 이미 `isPaused` 분기로 재개를 처리해 토글에 그대로 맞음), "⏹ 정지"→"↺ 리셋"(이름만 변경), 버튼 순서를 "◀◀10초 — 토글 — 10초▶▶ — 리셋"로 재배치.
+  - 위험 분류: 순수 UI 재구성(조건부 렌더링·라벨·배치), 재생 제어 로직 무변경 — 모드C 생략, 모드A만 진행.
+  - 테스트 197개 전부 통과(핸들러 로직 무변경이라 신규 테스트 불필요), 타입체크/린트 0건. 브라우저로 재생→일시정지→재개(멈춘 지점부터 이어짐)→리셋 전체 흐름과 버튼 활성/비활성 전환을 직접 확인, 콘솔 에러 0건. 증거: `qa-evidence/T3-13/`
 - [ ] **게이트**: 의뢰인 음원 2곡으로 연습, 정확도 측정값 보고
 
 ## Phase 4 — 종이 악보로 연습
