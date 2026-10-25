@@ -9,11 +9,25 @@ import {
 } from './mixer'
 
 describe('defaultMixerState', () => {
-  it('has all 6 channels at full volume, unmuted, not soloed', () => {
+  it('has all 6 channels present, unmuted, not soloed', () => {
     const state = defaultMixerState()
     expect(Object.keys(state).sort()).toEqual([...CHANNEL_KEYS].sort())
     for (const key of CHANNEL_KEYS) {
-      expect(state[key]).toEqual({ volume: 1, muted: false, solo: false })
+      expect(state[key].muted).toBe(false)
+      expect(state[key].solo).toBe(false)
+    }
+  })
+
+  it('defaults stem_drums volume to 0 — T3-4 게이트 피드백 2차: 신스 드럼과 겹치지 않게', () => {
+    const state = defaultMixerState()
+    expect(state.stem_drums.volume).toBe(0)
+  })
+
+  it('defaults every other channel to full volume (1)', () => {
+    const state = defaultMixerState()
+    for (const key of CHANNEL_KEYS) {
+      if (key === 'stem_drums') continue
+      expect(state[key].volume).toBe(1)
     }
   })
 })
@@ -90,14 +104,14 @@ describe('effectiveGain — recomputed fresh each time (no transition state need
 })
 
 describe('toggleDrumlessPreset', () => {
-  it('toggles only stem_drums.muted, leaving every other channel untouched', () => {
+  it('toggles only stem_drums.volume (0↔1), leaving every other channel untouched', () => {
     const state = defaultMixerState()
     state.synth_drums.volume = 0.5
     state.metronome.solo = true
 
     const toggled = toggleDrumlessPreset(state)
 
-    expect(toggled.stem_drums.muted).toBe(true)
+    expect(toggled.stem_drums.volume).toBe(1) // 기본값 0에서 켜기로 토글
     expect(toggled.stem_bass).toEqual(state.stem_bass)
     expect(toggled.stem_vocals).toEqual(state.stem_vocals)
     expect(toggled.stem_other).toEqual(state.stem_other)
@@ -105,10 +119,10 @@ describe('toggleDrumlessPreset', () => {
     expect(toggled.metronome).toEqual(state.metronome)
   })
 
-  it('toggling twice returns stem_drums.muted to its original value', () => {
+  it('toggling twice returns stem_drums.volume to its original value (default 0)', () => {
     const state = defaultMixerState()
     const twice = toggleDrumlessPreset(toggleDrumlessPreset(state))
-    expect(twice.stem_drums.muted).toBe(false)
+    expect(twice.stem_drums.volume).toBe(0)
   })
 })
 
