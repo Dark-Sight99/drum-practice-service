@@ -1,6 +1,15 @@
-> 한 줄 요약: T3-9(REQ-04) 설계안 v3 — 재생 위치 탐색(±10초) + "여기서 시작/여기까지" 버튼으로 현재 위치를 A-B 루프 마디로 바로 지정. 1라운드 BLOCKING 2건(C-001 루프 즉시 반영, C-002 자동 정지 타이머 재계산) → §6·§7. 2라운드 BLOCKING(C-007: §7이 일시정지 중 seek에서도 무조건 실시간 타이머를 거는 바람에 일시정지 중인데도 자동 정지가 발동할 수 있었음) → §7을 pause-aware로 재설계. "오디오 타이밍·동기" 위험 작업 — 구현 전 Codex 모드C 검수 대상.
+> 한 줄 요약: T3-9(REQ-04) 설계안 v4(모드C 3라운드 완료 — 마스터 최종 판단 포함) — 재생 위치 탐색(±10초) + "여기서 시작/여기까지" 버튼으로 현재 위치를 A-B 루프 마디로 바로 지정. 1라운드 BLOCKING 2건(C-001 루프 즉시 반영, C-002 타이머 재계산) → §6·§7. 2라운드 BLOCKING(C-007 일시정지 중 타이머 오발동) → §7 pause-aware 재설계. 3라운드 BLOCKING(C-008 일시정지 중 seek하면 분리 오디오 트랙만 재생 시작) → §2에 `seekTo()` 신설로 해소, 이게 파이프라인 최대 재검수 3회 — 마스터가 직접 판단해 반영·근거를 문서화.
 
-# T3-9 재생 위치 탐색 + 현재 위치로 A-B 구간 지정 — 설계 v3
+# T3-9 재생 위치 탐색 + 현재 위치로 A-B 구간 지정 — 설계 v4
+
+## 모드C 3라운드 반영 + 마스터 최종 판단(이 리비전 v4)
+3라운드(파이프라인 최대 자동 재검수) 지적 — `intent/06-pipeline.md` "재검수 최대 3회" 규칙에 따라 이번이 마지막 자동 재검수이고, 이후는 마스터가 직접 판단해 근거를 문서에 남긴다(T3-6·T3-7과 같은 절차).
+
+- **C-008(필수, 반영함)**: §7에서 자동 정지 타이머는 일시정지를 인지하도록 고쳤지만(2라운드), §2/§5의 분리 오디오 트랙 재배치는 그대로 뒀음 — `playFrom()`이 내부적으로 항상 `.play()`를 부르기 때문에, 일시정지 중 탐색 버튼을 누르면 Transport·신스 드럼은 멈춰있는데 **분리 오디오 트랙만 다시 들리기 시작**하는 모순 상태가 생길 수 있었음. 정확한 지적 — §2에 재생을 시작하지 않고 위치만 옮기는 `TrackPlayer.seekTo()`를 신설하고, `handleSeek()`이 `isPaused` 여부에 따라 `playFrom()`/`seekTo()`를 분기하도록 §5를 갱신해 해소. 타이머 쪽(§7)과 똑같은 "일시정지 인지" 패턴을 트랙 쪽에도 일관되게 적용한 것 — 이번 라운드에서 놓쳤던 "일시정지 인지가 필요한 곳이 하나 더 있었다"는 점만 보완, 설계 전체의 새로운 메커니즘은 아님.
+- 이번 라운드는 환경 문제(한글 경로·`rg`/`python` 부재로 인한 읽기 실패)로 2차례 재시도가 필요했으나, 세 번째 시도에서 실제로 `plan.md`·`PracticeCanvas.tsx`를 읽고 C-001·C-002·C-007을 전부 "해결"로 재확인했고, C-008을 새로 찾아냄 — 내용 기반의 정당한 지적으로 판단, 반영함.
+- §1·§6의 Tone.js `Transport.js` 내부 동작(루프 경계 판정이 매 틱 최신값을 읽는다는 주장)은 이번 3라운드에서 직접 재대조되지 못했다고 명시했으나, 1·2라운드에서 이미 각각 독립적으로 같은 내용을 확인했고(1라운드는 직접 Transport.js를 읽어 인용, 2라운드도 "검토한 자료와 맞다"고 확인) 이번에 새로운 반박이 나온 것도 아니므로, 추가 라운드 없이 기존 확인을 그대로 유지(마스터 판단).
+
+이 결정으로 설계는 종료하고 구현으로 넘어간다. 구현 중 추가로 발견되는 문제는 Codex 모드A(코드 기반 검수)에서 다시 걸러진다.
 
 ## 모드C 2라운드 반영 내역
 2라운드 BLOCKING 지적(C-007, 필수): §7의 `handleSeek()`가 일시정지 여부와 무관하게 항상 새 `setTimeout`을 건다 — 탐색 버튼은 일시정지 중에도 활성(§5)인데, 일시정지 중 seek하면 "일시정지 중엔 타이머가 실시간으로 안 흐른다"는 T3-6의 핵심 불변식을 깨고 타이머가 실시간으로 다시 돌기 시작해, 사용자가 그냥 멈춰서 보고 있는 동안에도 자동 정지가 발동할 수 있었음. §7을 `isPaused` 분기로 재설계 — 일시정지 중엔 `autoStopRemainingMsRef`만 새 값으로 갱신하고 `setTimeout`은 걸지 않음(T3-6의 `pauseAutoStopTimer()`가 이미 하는 "멈춰있을 땐 값만 저장" 패턴과 동일한 상태로 귀결 — 나중에 "▶ 재생"을 누르면 기존 `resumeAutoStopTimer()`가 이 갱신된 값을 그대로 집어서 정상적으로 타이머를 건다). C-001은 2라운드에서 해결로 판단됨, C-002는 이번 수정으로 완전 해소.
@@ -32,9 +41,35 @@ REQ-04(2026-10-25 추가, 의뢰인 실사용 피드백): "A-B 루프 이거 마
 - 결론: **`transport.seconds = target`만으로 즉시 점프 + 이미 지난 구간으로 되감아도 노트가 다시 들리는 동작이 전부 공짜로 된다.** T3-6처럼 "원샷이 Transport와 독립적으로 계속 울릴 수 있다"는 문제는 여기선 해당 없음(점프는 pause와 달리 "지금 울리는 소리를 그대로 두고 틱만 얼리는" 게 아니라 틱 자체가 이동하는 것이라 다른 범주의 동작) — 다만 점프하는 "그 순간" 울리고 있던 소리(디케이 중인 크래시 등)는 자연스럽게 끊기지 않고 계속 울릴 수 있음(§가정·한계에 명시, 수용 가능한 수준으로 판단).
 - **(모드C 1라운드 C-003 반영, 범위 명확화)** "재발화가 보장된다"는 건 **"그 틱에 걸린 `schedule()` 이벤트가 다시 호출된다"**는 뜻이지, 모든 seek 상황에서 완벽히 끊김 없는 재생을 보장한다는 뜻이 아니다 — 앞으로 건너뛴 구간의 노트는 (불연속 점프라 그 틱을 "지나가지" 않으므로) 원래 의도대로 안 울리고, 점프하는 순간 이미 울리고 있던 소리의 꼬리는 seek 자체로 끊기지 않는다(바로 위 문단과 같은 내용, QA 항목에도 명시 — 아래 §QA계획).
 
-### 2. 분리 오디오 트랙 — 기존 `playFrom()` 재사용(새 메서드 불필요)
-`trackPlayer.ts`의 `playFrom(songPositionSeconds, playbackRate)`는 이미 "주어진 위치로 이동 후 재생 시작"을 하는 함수(T3-3에서 루프 재진입에 쓰던 것과 정확히 같은 책임) — `.play()`를 다시 불러도 이미 재생 중인 엘리먼트엔 해가 없음(표준 동작). 점프 시 `tracks.playFrom(newPositionInTrackSeconds, playbackRate)`를 그대로 호출하면 끝 — 새 메서드 불필요.
-- `newPositionInTrackSeconds`는 기존 `audioTrackPositionSeconds(audioStartSeconds, songStartSeconds, playbackRate)` 공식(work/T3-3/plan.md §4, 루프 유무와 무관한 일반식으로 이미 검증됨)을 그대로 재사용 — `audioStartSeconds`에 새 점프 목표 위치를 넣으면 됨.
+### 2. 분리 오디오 트랙 — 재생 중엔 `playFrom()` 재사용, 일시정지 중엔 새 `seekTo()` 필요
+
+**v3까지의 설계**: `trackPlayer.ts`의 `playFrom(songPositionSeconds, playbackRate)`는 이미 "주어진 위치로 이동 후 재생 시작"을 하는 함수(T3-3에서 루프 재진입에 쓰던 것과 정확히 같은 책임) — 재생 중 seek이면 `tracks.playFrom(newPositionInTrackSeconds, playbackRate)`를 그대로 호출하면 됨.
+
+**(모드C 3라운드 C-008 반영, 필수)** 문제: 탐색 버튼은 일시정지 중에도 활성(§5)인데, `playFrom()`은 내부적으로 항상 `track.element.play()`를 부른다(`app/web/src/audio/trackPlayer.ts` 88~101행) — 일시정지 중 seek에서 그대로 `playFrom()`을 쓰면, Transport·신스 드럼은 얼어있는데(§1, pause는 틱을 멈출 뿐) **분리 오디오 트랙만 다시 들리기 시작**하는 모순된 상태가 됨. §7에서 자동 정지 타이머는 일시정지를 인지하도록 고쳤지만, 이 부분은 놓쳤음(지적이 정확함).
+
+**설계(v4)**: `trackPlayer.ts`에 재생을 시작하지 않고 위치만 옮기는 메서드를 새로 추가:
+```ts
+export interface TrackPlayer {
+  // ...기존 그대로...
+  /** T3-9(REQ-04) — 재생을 시작하지 않고 위치만 옮긴다(playFrom()과 달리
+   * .play()를 안 부름). 일시정지 중 seek처럼 "지금은 소리가 나면 안 되지만
+   * 다음에 재생을 누르면 이 위치부터 이어가야 하는" 경우에 씀. */
+  seekTo(songPositionSeconds: number, playbackRate: number): void
+}
+```
+구현(`playFrom()`과 거의 같지만 `.play()` 호출만 뺌):
+```ts
+function seekTo(songPositionSeconds: number, playbackRate: number): void {
+  for (const track of tracks) {
+    if (!track.unlocked) continue
+    track.element.preservesPitch = true
+    track.element.playbackRate = playbackRate
+    track.element.currentTime = Math.max(0, songPositionSeconds)
+  }
+}
+```
+`handleSeek()`(§5)이 `isPaused` 여부로 둘 중 하나를 호출하도록 분기(아래 §5 갱신본 참고) — §7에서 이미 쓰는 `isPaused` 분기 패턴을 트랙 쪽에도 똑같이 적용.
+- `newPositionInTrackSeconds`는 두 경우 모두 기존 `audioTrackPositionSeconds(audioStartSeconds, songStartSeconds, playbackRate)` 공식(work/T3-3/plan.md §4, 루프 유무와 무관한 일반식으로 이미 검증됨)을 그대로 재사용 — `audioStartSeconds`에 새 점프 목표 위치를 넣으면 됨.
 
 ### 3. `clock.ts`(MasterClock) — 메서드 1개 추가
 ```ts
@@ -81,8 +116,15 @@ function handleSeek(deltaSeconds: number) {
   if (tracks) {
     const playbackRate = playbackBpmRef.current / score.meta.bpm
     const positionInTrackSeconds = audioTrackPositionSeconds(target, songStartSeconds, playbackRate)
-    tracks.playFrom(positionInTrackSeconds, playbackRate)
+    // 모드C 3라운드 C-008 반영 — 일시정지 중엔 재생을 시작하면 안 되므로
+    // seekTo()(위치만 이동)를, 재생 중엔 기존 playFrom()(위치 이동 + 재생)을.
+    if (isPaused) {
+      tracks.seekTo(positionInTrackSeconds, playbackRate)
+    } else {
+      tracks.playFrom(positionInTrackSeconds, playbackRate)
+    }
   }
+  // ...§7의 자동 정지 타이머 재계산 로직이 이어짐...
 }
 ```
 - 버튼: "◀◀ 10초" (`onClick={() => handleSeek(-10)}`), "10초 ▶▶" (`onClick={() => handleSeek(10)}`) — `disabled={!isPlaying && !isPaused}`(재생 세션이 있을 때만, 일시정지 중에도 가능 — §1에서 확인한 대로 Transport가 "started"가 아니어도 점프는 지원됨).
@@ -212,6 +254,7 @@ function handleSeek(deltaSeconds: number) {
    - (h) **(모드C 1라운드 C-001 회귀)** 재생 중 "여기서 시작"→"여기까지"로 A-B 구간을 지정하면, 정지·재시작 없이 **바로 그 구간을 반복**하는지 직접 들어서 확인(§6에서 고친 핵심 — 이게 안 되면 기능 전체가 무의미).
    - (i) **(모드C 1라운드 C-002 회귀)** 곡이 끝나갈 즈음 "10초 뒤로"를 눌러 뒤로 seek한 뒤, 곡이 실제로 다시 끝날 때까지 자동 정지가 조기 발동하지 않는지. 반대로 곡 끝 근처로 "10초 앞으로" seek했을 때 자동 정지가 비정상적으로 오래 안 걸리는지(남은 시간이 거의 0에 가깝게 재계산되는지).
    - (i-2) **(모드C 2라운드 C-007 회귀)** 일시정지한 채로 "10초 뒤로"/"여기서 시작" 등 탐색·마킹 버튼을 눌러도, 그 상태로 한참(예: 자동 정지 타이머가 걸렸을 법한 시간 이상) 가만히 놔뒀을 때 자동 정지가 발동하지 않는지(일시정지 중엔 타이머가 실시간으로 안 흘러야 함) — 그 뒤 "▶ 재생"을 누르면 seek으로 조정된 남은 시간 기준으로 정상적으로 타이머가 다시 걸리는지.
+   - (i-3) **(모드C 3라운드 C-008 회귀, 분리 오디오 트랙이 있는 곡에서만)** 일시정지한 채로 "10초 뒤로"/"10초 앞으로"를 눌러도 **소리가 전혀 안 나는지**(신스 드럼·메트로놈뿐 아니라 원곡/분리 스템도 — Transport가 멈춰 있는데 분리 트랙만 재생이 시작되는 모순 상태가 재현되지 않는지가 핵심). 그 뒤 "▶ 재생"을 누르면 분리 트랙이 seek한 새 위치에서 정확히 이어서 들리는지(위치가 유실되지 않았는지).
    - (j) **(모드C 1라운드 C-006 권장 반영)** A-B 루프가 켜진 채로 그 구간 밖으로 seek했을 때, Transport의 네이티브 루프가 다음에 `loopEnd`를 지날 때 정상적으로 루프 구간 안으로 되돌아오는지(의도된 "루프 밖에서 놀다가 자동으로 루프 안으로 복귀"가 이상하게 느껴지지 않는지 체감 확인).
 3. 기존 회귀: A-B 루프 자체(기존 숫자 입력 경로)·BPM 변경·일시정지/재개(T3-6)가 이번 변경으로 깨지지 않는지 재확인.
 
