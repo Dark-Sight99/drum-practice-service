@@ -1031,11 +1031,12 @@ export function PracticeCanvas({
         </label>
 
         <label style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
+          {/* disabled 제거(T3-9-feedback-1): T3-9의 §6 live-reapply effect가 재생/일시정지 중
+           * 루프 on/off를 이미 Transport에 즉시 반영하므로 잠글 이유가 없음(모드A 검수 완료). */}
           <input
             type="checkbox"
             checked={loopEnabled}
             onChange={(e) => setLoopEnabled(e.target.checked)}
-            disabled={isPlaying || isPaused}
           />
           ⟲ A-B 루프
         </label>
