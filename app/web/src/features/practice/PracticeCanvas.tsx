@@ -1124,13 +1124,20 @@ export function PracticeCanvas({
       />
 
       {/* T3-4 게이트 피드백 1차(2026-10-25) — 믹서를 페이지 맨 아래 단독 블록
-       * 대신 드럼킷 그림 옆 빈 공간에 둔다. 넓은 화면(!isPortraitPhone)에서
-       * 킷 그림이 320px로 고정폭이라 그 오른쪽이 항상 비어 있던 걸 의뢰인이
-       * 직접 지적 — `intent/04-ui-ux.md` §3 와이어프레임의 "믹서 열기"
-       * 의도(하단에 큰 블록으로 항상 펼쳐두지 않음)에도 더 가까워짐. 세로
-       * 폰은 킷 자체가 안 보이므로(§반응형, T5-1 전까지의 기존 동작) 믹서가
-       * 캔버스 바로 아래 전체 폭으로 내려온다 — 레이아웃만 바뀌고 동작은
-       * 그대로라 위험 작업 아님(T3-2-feedback-1 "보이는 마디 수"와 같은 기준). */}
+       * 대신 드럼킷 그림 옆 빈 공간에 둔다. 넓은 화면에서 킷 그림이 320px로
+       * 고정폭이라 그 오른쪽이 항상 비어 있던 걸 의뢰인이 직접 지적 —
+       * `intent/04-ui-ux.md` §3 와이어프레임의 "믹서 열기" 의도(하단에 큰
+       * 블록으로 항상 펼쳐두지 않음)에도 더 가까워짐. 세로 폰은 킷을 320px
+       * 그대로 두면 너무 커 믹서가 한참 아래로 밀리므로 레이아웃만 세로로
+       * 바꿔 믹서가 캔버스+킷 아래 전체 폭으로 내려온다 — 레이아웃만 바뀌고
+       * 동작은 그대로라 위험 작업 아님(T3-2-feedback-1 "보이는 마디 수"와
+       * 같은 기준).
+       * T3-11(2026-10-25, 의뢰인 피드백 "폰 세로에서 드럼킷이 안 보여") —
+       * 원래 `intent/04-ui-ux.md` §3 반응형 규칙이 "폰 세로 = 레인만(킷은
+       * 축소 아이콘)"이었는데, 구현(T2-3~T3-4)은 "축소 아이콘"을 빠뜨리고
+       * 아예 숨겨버렸던 것을 뒤늦게 발견 — `!isPortraitPhone` 조건을 없애고
+       * 항상 그리되, 세로 폰에서는 폭만 축소(아래 160px, 넓은 화면의 320px
+       * 대비)해 문서가 원래 의도했던 "축소 아이콘"에 가깝게 맞춘다. */}
       <div
         style={{
           display: 'flex',
@@ -1139,15 +1146,13 @@ export function PracticeCanvas({
           alignItems: 'flex-start',
         }}
       >
-        {!isPortraitPhone && (
-          <div style={{ maxWidth: 320 }}>
-            <KitIllustration
-              activeHandByPiece={activeHandByPiece}
-              showSticking={false}
-              pieceColor={readPieceColor}
-            />
-          </div>
-        )}
+        <div style={{ maxWidth: isPortraitPhone ? 160 : 320 }}>
+          <KitIllustration
+            activeHandByPiece={activeHandByPiece}
+            showSticking={false}
+            pieceColor={readPieceColor}
+          />
+        </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)', flex: 1 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)' }}>
             <strong>믹서</strong>
