@@ -1,6 +1,9 @@
-> 한 줄 요약: T3-9(REQ-04) 설계안 v2 — 재생 위치 탐색(±10초) + "여기서 시작/여기까지" 버튼으로 현재 위치를 A-B 루프 마디로 바로 지정. 모드C 1라운드 BLOCKING 2건 반영: (C-001) 재생 중 마디를 찍어도 네이티브 루프에 즉시 반영되는 경로가 없었음 → §6 추가. (C-002) seek이 T3-6 자동 정지 타이머를 재계산 안 함 → §7 추가. "오디오 타이밍·동기" 위험 작업 — 구현 전 Codex 모드C 검수 대상.
+> 한 줄 요약: T3-9(REQ-04) 설계안 v3 — 재생 위치 탐색(±10초) + "여기서 시작/여기까지" 버튼으로 현재 위치를 A-B 루프 마디로 바로 지정. 1라운드 BLOCKING 2건(C-001 루프 즉시 반영, C-002 자동 정지 타이머 재계산) → §6·§7. 2라운드 BLOCKING(C-007: §7이 일시정지 중 seek에서도 무조건 실시간 타이머를 거는 바람에 일시정지 중인데도 자동 정지가 발동할 수 있었음) → §7을 pause-aware로 재설계. "오디오 타이밍·동기" 위험 작업 — 구현 전 Codex 모드C 검수 대상.
 
-# T3-9 재생 위치 탐색 + 현재 위치로 A-B 구간 지정 — 설계 v2
+# T3-9 재생 위치 탐색 + 현재 위치로 A-B 구간 지정 — 설계 v3
+
+## 모드C 2라운드 반영 내역
+2라운드 BLOCKING 지적(C-007, 필수): §7의 `handleSeek()`가 일시정지 여부와 무관하게 항상 새 `setTimeout`을 건다 — 탐색 버튼은 일시정지 중에도 활성(§5)인데, 일시정지 중 seek하면 "일시정지 중엔 타이머가 실시간으로 안 흐른다"는 T3-6의 핵심 불변식을 깨고 타이머가 실시간으로 다시 돌기 시작해, 사용자가 그냥 멈춰서 보고 있는 동안에도 자동 정지가 발동할 수 있었음. §7을 `isPaused` 분기로 재설계 — 일시정지 중엔 `autoStopRemainingMsRef`만 새 값으로 갱신하고 `setTimeout`은 걸지 않음(T3-6의 `pauseAutoStopTimer()`가 이미 하는 "멈춰있을 땐 값만 저장" 패턴과 동일한 상태로 귀결 — 나중에 "▶ 재생"을 누르면 기존 `resumeAutoStopTimer()`가 이 갱신된 값을 그대로 집어서 정상적으로 타이머를 건다). C-001은 2라운드에서 해결로 판단됨, C-002는 이번 수정으로 완전 해소.
 
 ## 모드C 1라운드 반영 내역
 1라운드 BLOCKING 지적 2건:
@@ -146,11 +149,13 @@ useEffect(() => {
 ```
 이 effect는 마킹 버튼이 state를 바꿀 때뿐 아니라, (이론상) 숫자 입력칸이 나중에 재생 중 잠금 해제되는 경우에도 똑같이 동작한다 — 일반화된 "루프 설정은 항상 살아있는 세션에 반영된다"는 불변식이 생기는 셈(부작용이 아니라 의도된 일반화).
 
-### 7. [모드C 1라운드 C-002 반영] seek 시 자동 정지 타이머(T3-6) 재계산
+### 7. [모드C 1·2라운드 반영] seek 시 자동 정지 타이머(T3-6) 재계산 — 일시정지 인지(pause-aware)
 
-**문제**: T3-6에서 만든 자동 정지 타이머(`autoStopTimerIdRef`/`autoStopRemainingMsRef`/`autoStopScheduledAtRef`)는 "일시정지 중 흐른 시간"만 빼는 로직이라, seek으로 위치가 통째로 바뀌는 상황을 전혀 모른다. 뒤로 seek하면 곡이 실제로 다시 끝나기 전에 타이머가 먼저 발동해 조기 정지시킬 수 있고, 앞으로 seek하면 곡이 이미 끝난 뒤에도 타이머가 쓸데없이 한참 남아있을 수 있다.
+**문제(1라운드 C-002)**: T3-6에서 만든 자동 정지 타이머(`autoStopTimerIdRef`/`autoStopRemainingMsRef`/`autoStopScheduledAtRef`)는 "일시정지 중 흐른 시간"만 빼는 로직이라, seek으로 위치가 통째로 바뀌는 상황을 전혀 모른다. 뒤로 seek하면 곡이 실제로 다시 끝나기 전에 타이머가 먼저 발동해 조기 정지시킬 수 있고, 앞으로 seek하면 곡이 이미 끝난 뒤에도 타이머가 쓸데없이 한참 남아있을 수 있다.
 
-**설계**: `handlePlay()`가 자동 정지 타이머를 최초로 걸 때 쓰는 "곡이 끝나는 절대 위치"(카운트인 + 마지막 노트 + 안전 여유, `countInSeconds + lastNoteSeconds + safetyMarginSeconds` — 기존 `totalMs/1000`과 같은 값, `clock.getPositionSeconds()`와 같은 좌표계) 계산을 공유 함수로 뽑아 seek 시에도 재사용한다:
+**문제(2라운드 C-007)**: 1라운드 수정은 seek할 때마다 **무조건** 새 `setTimeout`을 걸었다. 그런데 탐색 버튼(§5)은 재생 중뿐 아니라 **일시정지 중에도 활성**이다 — 일시정지 중엔 "타이머가 실시간으로 안 흐른다"(T3-6의 핵심 불변식, `pauseAutoStopTimer()`가 값만 저장하고 `setTimeout`을 안 거는 이유)인데, 일시정지 중 seek하면 이 불변식을 깨고 타이머가 실시간으로 다시 돌기 시작해 — 사용자가 그냥 멈춰서 화면을 보고 있는 동안에도 자동 정지가 발동할 수 있었다.
+
+**설계(v3)**: `handlePlay()`가 자동 정지 타이머를 최초로 걸 때 쓰는 "곡이 끝나는 절대 위치"(카운트인 + 마지막 노트 + 안전 여유, `countInSeconds + lastNoteSeconds + safetyMarginSeconds` — 기존 `totalMs/1000`과 같은 값, `clock.getPositionSeconds()`와 같은 좌표계) 계산을 공유 함수로 뽑아 seek 시에도 재사용한다:
 ```ts
 function songEndPositionSeconds(): number {
   const countInSeconds = barDurationSeconds(score.meta.timeSignature, playbackBpmRef.current)
@@ -160,7 +165,7 @@ function songEndPositionSeconds(): number {
   return countInSeconds + lastNoteSeconds + safetyMarginSeconds
 }
 ```
-`handlePlay()`의 기존 `totalMs` 계산을 `songEndPositionSeconds() * 1000`으로 교체(기존 로직과 동일한 값 — 공식을 한 곳으로 모아 §6과 같은 이유로 불일치 방지). `handleSeek()`은 점프 직후 이 값을 이용해 남은 시간을 다시 계산하고 타이머를 재설정:
+`handlePlay()`의 기존 `totalMs` 계산을 `songEndPositionSeconds() * 1000`으로 교체(기존 로직과 동일한 값 — 공식을 한 곳으로 모아 §6과 같은 이유로 불일치 방지). `handleSeek()`은 점프 직후 이 값을 이용해 남은 시간을 다시 계산하되, **재생 중일 때만 실제로 타이머를 걸고, 일시정지 중이면 값만 갱신**(`pauseAutoStopTimer()`가 이미 남겨두는 "멈춰있을 때의 상태"와 정확히 같은 모양으로 귀결 — 나중에 "▶ 재생"을 누르면 기존 `resumeAutoStopTimer()`가 이 갱신된 값을 그대로 집어 정상적으로 타이머를 건다):
 ```ts
 function handleSeek(deltaSeconds: number) {
   const session = playbackRef.current
@@ -168,17 +173,25 @@ function handleSeek(deltaSeconds: number) {
   // ...기존 점프 로직(§5)...
   if (autoStopRemainingMsRef.current !== null) { // 루프 모드면 애초에 타이머가 없음(null) — 그대로 둠
     if (autoStopTimerIdRef.current !== null) clearTimeout(autoStopTimerIdRef.current)
+    autoStopTimerIdRef.current = null
     const remainingMs = Math.max(0, (songEndPositionSeconds() - target) * 1000)
     autoStopRemainingMsRef.current = remainingMs
-    autoStopScheduledAtRef.current = performance.now()
-    const handle = session.handle
-    autoStopTimerIdRef.current = setTimeout(() => {
-      if (playbackRef.current?.handle === handle) stopPlayback()
-    }, remainingMs)
+    if (isPaused) {
+      // 모드C 2라운드 C-007 반영 — 일시정지 중엔 실시간으로 안 흐르므로
+      // 여기서 타이머를 걸지 않는다(pauseAutoStopTimer()와 같은 "값만
+      // 저장" 상태로 귀결). autoStopScheduledAtRef도 다음 재개 때
+      // resumeAutoStopTimer()가 새로 채우므로 여기선 안 건드려도 됨.
+    } else {
+      autoStopScheduledAtRef.current = performance.now()
+      const handle = session.handle
+      autoStopTimerIdRef.current = setTimeout(() => {
+        if (playbackRef.current?.handle === handle) stopPlayback()
+      }, remainingMs)
+    }
   }
 }
 ```
-기존 T3-6의 `handle` 아이덴티티 가드·`autoStopRemainingMsRef === null`(루프 모드 무시) 규칙을 그대로 재사용 — 새 메커니즘 없음.
+기존 T3-6의 `handle` 아이덴티티 가드·`autoStopRemainingMsRef === null`(루프 모드 무시) 규칙·"일시정지 중엔 값만 저장" 불변식을 전부 그대로 재사용 — 새 메커니즘 없음.
 
 ## 위험 분류 — Codex 모드C 대상
 - **오디오 타이밍·동기**: Transport 위치를 임의로 점프시키고(§1) 분리 오디오 트랙도 같은 위치로 맞춰야 함(§2). 재생 중인 Transport의 루프 설정을 실시간으로 갱신(§6)하고, T3-6 자동 정지 타이머도 seek에 맞춰 재계산(§7)해야 함. 특히 점프 직후 노트·오디오 트랙·레인 표시(이미 `getMasterClock().getPositionSeconds()` 기반으로 매 프레임 다시 그려지므로 추가 작업 불필요 — rAF 루프가 알아서 새 위치를 반영)·루프 경계·자동 정지 타이밍이 전부 같은 지점에서 다시 맞는지가 핵심 검증 대상.
@@ -198,6 +211,7 @@ function handleSeek(deltaSeconds: number) {
    - (g) 점프 직후 직전에 울리던 디케이 긴 소리(크래시 등)가 어떻게 들리는지 확인(§가정·한계 — 끊기지 않고 계속 울릴 수 있음, 수용 가능한지 재확인).
    - (h) **(모드C 1라운드 C-001 회귀)** 재생 중 "여기서 시작"→"여기까지"로 A-B 구간을 지정하면, 정지·재시작 없이 **바로 그 구간을 반복**하는지 직접 들어서 확인(§6에서 고친 핵심 — 이게 안 되면 기능 전체가 무의미).
    - (i) **(모드C 1라운드 C-002 회귀)** 곡이 끝나갈 즈음 "10초 뒤로"를 눌러 뒤로 seek한 뒤, 곡이 실제로 다시 끝날 때까지 자동 정지가 조기 발동하지 않는지. 반대로 곡 끝 근처로 "10초 앞으로" seek했을 때 자동 정지가 비정상적으로 오래 안 걸리는지(남은 시간이 거의 0에 가깝게 재계산되는지).
+   - (i-2) **(모드C 2라운드 C-007 회귀)** 일시정지한 채로 "10초 뒤로"/"여기서 시작" 등 탐색·마킹 버튼을 눌러도, 그 상태로 한참(예: 자동 정지 타이머가 걸렸을 법한 시간 이상) 가만히 놔뒀을 때 자동 정지가 발동하지 않는지(일시정지 중엔 타이머가 실시간으로 안 흘러야 함) — 그 뒤 "▶ 재생"을 누르면 seek으로 조정된 남은 시간 기준으로 정상적으로 타이머가 다시 걸리는지.
    - (j) **(모드C 1라운드 C-006 권장 반영)** A-B 루프가 켜진 채로 그 구간 밖으로 seek했을 때, Transport의 네이티브 루프가 다음에 `loopEnd`를 지날 때 정상적으로 루프 구간 안으로 되돌아오는지(의도된 "루프 밖에서 놀다가 자동으로 루프 안으로 복귀"가 이상하게 느껴지지 않는지 체감 확인).
 3. 기존 회귀: A-B 루프 자체(기존 숫자 입력 경로)·BPM 변경·일시정지/재개(T3-6)가 이번 변경으로 깨지지 않는지 재확인.
 
