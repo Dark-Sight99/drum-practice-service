@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import * as Tone from 'tone'
 import {
   audioTrackPositionSeconds,
@@ -277,6 +277,21 @@ export function PracticeCanvas({
     loopRef.current = loopEnabled ? { startBar: loopStartBar1 - 1, endBar: loopEndBar1 } : null
   }, [loopEnabled, loopStartBar1, loopEndBar1])
 
+  // T3-9(REQ-04) — "곡이 끝나는 절대 위치"(카운트인 + 마지막 노트 + 안전
+  // 여유, clock.getPositionSeconds()와 같은 좌표계) — handlePlay()가 자동
+  // 정지 타이머를 걸 때, handleSeek()이 seek 후 그 타이머를 다시 계산할
+  // 때, 아래 루프 상태 반영 effect가 전부 쓴다. 공식을 한 곳으로 모아
+  // 서로 다른 값을 쓰는 불일치를 막는다(work/T3-9/plan.md §7). useCallback
+  // 으로 감싸 아래 effect의 의존성 배열에 안전하게 넣을 수 있게 함(안
+  // 감싸면 매 렌더 새 함수라 effect가 불필요하게 매번 재실행됨).
+  const songEndPositionSeconds = useCallback((): number => {
+    const countInSeconds = barDurationSeconds(score.meta.timeSignature, playbackBpm)
+    const lastTick = Math.max(0, ...score.notes.map((n) => n.tick))
+    const lastNoteSeconds = (lastTick / score.ppq) * (60 / playbackBpm)
+    const safetyMarginSeconds = 4 // 크래시/라이드 등 길게 울리는 샘플이 다 끝날 시간
+    return countInSeconds + lastNoteSeconds + safetyMarginSeconds
+  }, [score, playbackBpm])
+
   // T3-9(REQ-04) 모드C 1라운드 C-001 반영 — 루프 설정이 바뀌어도
   // playDrumScore()는 재생 시작 시점에 딱 한 번만 transport.setLoopPoints()/
   // transport.loop를 걸기 때문에, 이미 돌고 있는 세션에는 반영이 안 됐다.
@@ -287,12 +302,37 @@ export function PracticeCanvas({
   // 루프 경계 판정이 매 틱 그 순간 값을 읽는다는 걸 실제 설치된 Tone.js
   // 소스로 확인한 근거 — plan.md §1).
   useEffect(() => {
-    if (!playbackRef.current) return
+    const session = playbackRef.current
+    if (!session) return
     const clock = getMasterClock()
     if (!loopEnabled) {
       clock.setLoopEnabled(false)
+      // 모드A 지적(Medium) 반영 — 루프가 꺼진(또는 아직 한 번도 안 켜진)
+      // 상태인데 자동 정지 타이머가 없다면(null) 다시 세운다. 대칭을 맞추기
+      // 위함 — handlePlay()가 재생을 "루프 없이" 시작하면 이미 타이머가
+      // 걸려있을 테니 보통은 이 분기가 아무 일도 안 함(이미 null이 아님).
+      if (autoStopRemainingMsRef.current === null) {
+        const remainingMs = Math.max(0, (songEndPositionSeconds() - clock.getPositionSeconds()) * 1000)
+        autoStopRemainingMsRef.current = remainingMs
+        if (!isPaused) {
+          autoStopScheduledAtRef.current = performance.now()
+          const handle = session.handle
+          autoStopTimerIdRef.current = setTimeout(() => {
+            if (playbackRef.current?.handle === handle) stopPlayback()
+          }, remainingMs)
+        }
+      }
       return
     }
+    // 모드A 지적(Medium) 반영 — 루프가 켜지면(예: 재생 중 "여기까지"로
+    // 마킹) handlePlay()가 애초에 루프로 시작했을 때와 같은 규칙을 적용:
+    // 자동 정지 타이머 자체를 없앤다(work/T2-4/plan.md §설계 "루프 중엔
+    // 사용자가 직접 정지할 때까지 반복"). 안 그러면 루프를 막 시작했는데
+    // 전체 곡 길이 기준으로 걸려있던 기존 타이머가 루프 도중 재생을
+    // 끊어버릴 수 있었음.
+    if (autoStopTimerIdRef.current !== null) clearTimeout(autoStopTimerIdRef.current)
+    autoStopTimerIdRef.current = null
+    autoStopRemainingMsRef.current = null
     const barSeconds = barDurationSeconds(score.meta.timeSignature, playbackBpm)
     const songStartSeconds = barSeconds * COUNT_IN_BARS
     clock.setLoopPoints(
@@ -300,7 +340,15 @@ export function PracticeCanvas({
       songStartSeconds + barSeconds * loopEndBar1,
     )
     clock.setLoopEnabled(true)
-  }, [loopEnabled, loopStartBar1, loopEndBar1, playbackBpm, score.meta.timeSignature])
+  }, [
+    loopEnabled,
+    loopStartBar1,
+    loopEndBar1,
+    playbackBpm,
+    score.meta.timeSignature,
+    isPaused,
+    songEndPositionSeconds,
+  ])
 
   // --- T3-4(REQ-05) 믹서: 볼륨/음소거/솔로 — work/T3-4/plan.md ---
   const [mixerState, setMixerState] = useState<MixerState>(defaultMixerState())
@@ -642,19 +690,6 @@ export function PracticeCanvas({
     setIsPlaying(false)
   }
 
-  // T3-9(REQ-04) — "곡이 끝나는 절대 위치"(카운트인 + 마지막 노트 + 안전
-  // 여유, clock.getPositionSeconds()와 같은 좌표계) — handlePlay()가 자동
-  // 정지 타이머를 걸 때와 handleSeek()이 seek 후 그 타이머를 다시 계산할
-  // 때 둘 다 쓴다. 공식을 한 곳으로 모아 두 곳이 서로 다른 값을 쓰는
-  // 불일치를 막는다(work/T3-9/plan.md §7).
-  function songEndPositionSeconds(): number {
-    const countInSeconds = barDurationSeconds(score.meta.timeSignature, playbackBpm)
-    const lastTick = Math.max(0, ...score.notes.map((n) => n.tick))
-    const lastNoteSeconds = (lastTick / score.ppq) * (60 / playbackBpm)
-    const safetyMarginSeconds = 4 // 크래시/라이드 등 길게 울리는 샘플이 다 끝날 시간
-    return countInSeconds + lastNoteSeconds + safetyMarginSeconds
-  }
-
   // T3-6(REQ-04) — "⏸ 일시정지". 모드C 3라운드 C-001 반영: 시작하자마자
   // playbackRef.current가 살아있는지부터 확인 — 그 사이(예: 자동 정지)에
   // 세션이 이미 끝났으면 아무 상태도 안 바꾸고 조용히 끝낸다(work/T3-6/
@@ -829,7 +864,13 @@ export function PracticeCanvas({
     const current = clock.getPositionSeconds()
     const barSeconds = barDurationSeconds(score.meta.timeSignature, playbackBpm)
     const songStartSeconds = barSeconds * COUNT_IN_BARS
-    const songEndSeconds = songStartSeconds + barSeconds * totalBars
+    // 모드A 지적(High) 반영 — 예전엔 "총 마디 수" 기준(totalBars, 마지막
+    // 노트가 속한 마디의 끝)으로 클램프했는데, 이건 자동 정지 타이머가 쓰는
+    // songEndPositionSeconds()(마지막 노트 시각 + 4초 여유)와 다른 기준이라
+    // 마지막 노트가 마디 초반에 있으면 그 사이 구간으로 seek했을 때 자동
+    // 정지 타이머가 남은 시간을 0으로 계산해 즉시 재생을 끊어버릴 수 있었음
+    // — 두 곳이 같은 기준(songEndPositionSeconds())을 쓰도록 통일.
+    const songEndSeconds = songEndPositionSeconds()
     const target = Math.min(songEndSeconds, Math.max(0, current + deltaSeconds))
     clock.setPositionSeconds(target)
     const tracks = session.tracks
