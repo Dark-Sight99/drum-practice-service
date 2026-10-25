@@ -205,6 +205,66 @@ describe('createTrackPlayer', () => {
     expect(pauseMock).toHaveBeenCalledTimes(1)
   })
 
+  describe('seekTo() — T3-9(REQ-04): 위치만 옮기고 재생은 시작하지 않음', () => {
+    it('repositions unlocked tracks (currentTime/playbackRate/preservesPitch) without calling play()', async () => {
+      const player = createTrackPlayer([{ kind: 'stem_drums', url: 'http://x/drums.wav' }])
+      await player.prime()
+      playMock.mockClear()
+      const setCurrentTime = vi.spyOn(HTMLMediaElement.prototype, 'currentTime', 'set')
+      setCurrentTime.mockClear()
+
+      player.seekTo(12.5, 1.3)
+
+      expect(setCurrentTime).toHaveBeenCalledWith(12.5)
+      expect(playMock).not.toHaveBeenCalled() // playFrom()과의 핵심 차이 — 재생 시작 안 함
+    })
+
+    it('clamps a negative position to 0', async () => {
+      const player = createTrackPlayer([{ kind: 'stem_drums', url: 'http://x/drums.wav' }])
+      await player.prime()
+      const setCurrentTime = vi.spyOn(HTMLMediaElement.prototype, 'currentTime', 'set')
+      setCurrentTime.mockClear()
+
+      player.seekTo(-5, 1)
+
+      expect(setCurrentTime).toHaveBeenCalledWith(0)
+    })
+
+    it('skips a track that failed to unlock', async () => {
+      let callCount = 0
+      playMock.mockImplementation(() => {
+        callCount += 1
+        if (callCount === 2) return Promise.reject(new DOMException('', 'NotAllowedError'))
+        return Promise.resolve(undefined)
+      })
+      const player = createTrackPlayer([
+        { kind: 'stem_drums', url: 'http://x/drums.wav' },
+        { kind: 'stem_bass', url: 'http://x/bass.wav' },
+      ])
+      await player.prime() // stem_bass 언락 실패
+      const setCurrentTime = vi.spyOn(HTMLMediaElement.prototype, 'currentTime', 'set')
+      setCurrentTime.mockClear()
+
+      player.seekTo(10, 1)
+
+      expect(setCurrentTime).toHaveBeenCalledTimes(1) // 언락된 stem_drums만
+    })
+
+    it('does not touch the started flag or muted/unlocked state (purely cosmetic position change)', async () => {
+      // seekTo() 이후 resume()이 정상 작동하는지로 간접 확인 — started가
+      // 변하지 않았다면(이미 true였던 트랙) resume()이 그대로 play()를 부름.
+      const player = createTrackPlayer([{ kind: 'stem_drums', url: 'http://x/drums.wav' }])
+      await player.prime()
+      player.playFrom(0, 1) // started=true로 만듦
+      playMock.mockClear()
+
+      player.seekTo(10, 1)
+      player.resume()
+
+      expect(playMock).toHaveBeenCalledTimes(1) // resume()이 정상적으로 play() 호출
+    })
+  })
+
   describe('pause()/resume()', () => {
     it('pause() pauses only unlocked tracks', async () => {
       let callCount = 0

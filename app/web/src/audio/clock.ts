@@ -15,6 +15,16 @@ export interface MasterClock {
   getBpm(): number
   setTimeSignature(timeSignature: TimeSignature): void
   getPositionSeconds(): number
+  /** T3-9(REQ-04) — 재생 위치를 즉시 이 초 값으로 점프. 실제 설치된
+   * Tone.js 소스(Transport.js의 `seconds` getter/setter 공식 JSDoc:
+   * "Setting the value will jump to that position right away.") —
+   * 재생 중이든 일시정지 중이든 호출 가능. */
+  setPositionSeconds(seconds: number): void
+  /** T3-9(REQ-04) — 재생 중인 Transport에도 A-B 루프 구간을 즉시 반영한다
+   * (루프 경계 판정은 Transport가 매 틱 `_loopStart`/`_loopEnd`의 그 순간
+   * 값을 읽으므로, 재생 시작 후에 다시 호출해도 다음 틱부터 바로 적용됨). */
+  setLoopPoints(startSeconds: number, endSeconds: number): void
+  setLoopEnabled(enabled: boolean): void
 }
 
 export function getMasterClock(): MasterClock {
@@ -43,6 +53,15 @@ export function getMasterClock(): MasterClock {
     },
     getPositionSeconds() {
       return transport.seconds
+    },
+    setPositionSeconds(seconds: number) {
+      transport.seconds = seconds
+    },
+    setLoopPoints(startSeconds: number, endSeconds: number) {
+      transport.setLoopPoints(startSeconds, endSeconds)
+    },
+    setLoopEnabled(enabled: boolean) {
+      transport.loop = enabled
     },
   }
 }

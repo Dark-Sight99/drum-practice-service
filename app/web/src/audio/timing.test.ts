@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   audioTrackPositionSeconds,
   barDurationSeconds,
+  barIndexForSeconds,
   barIndexForTick,
   beatsPerBar,
   computePlaybackSchedule,
@@ -120,6 +121,36 @@ describe('barIndexForTick', () => {
   it('works across multiple bars', () => {
     const oneBar = 4 * 960
     expect(barIndexForTick(oneBar * 4 + 10, [4, 4], 960)).toBe(4)
+  })
+})
+
+describe('barIndexForSeconds — T3-9(REQ-04) "지금 위치"를 A-B 루프 마디로 변환', () => {
+  it('position exactly at songStartSeconds is bar 0', () => {
+    expect(barIndexForSeconds(10, 10, 2)).toBe(0)
+  })
+
+  it('a position exactly at a bar boundary belongs to the new bar, not the previous one', () => {
+    expect(barIndexForSeconds(12, 10, 2)).toBe(1) // 10 + 1*2
+    expect(barIndexForSeconds(11.999, 10, 2)).toBe(0)
+  })
+
+  it('mid-bar position floors to the containing bar', () => {
+    expect(barIndexForSeconds(17.5, 10, 2)).toBe(3) // (17.5-10)/2 = 3.75 → 3
+  })
+
+  it('clamps to 0 when position is before songStartSeconds (count-in)', () => {
+    expect(barIndexForSeconds(3, 10, 2)).toBe(0)
+  })
+
+  it('defends against barSeconds <= 0', () => {
+    expect(barIndexForSeconds(20, 10, 0)).toBe(0)
+    expect(barIndexForSeconds(20, 10, -1)).toBe(0)
+  })
+
+  it('defends against NaN/Infinity inputs', () => {
+    expect(barIndexForSeconds(NaN, 10, 2)).toBe(0)
+    expect(barIndexForSeconds(20, 10, Infinity)).toBe(0)
+    expect(barIndexForSeconds(Infinity, 10, 2)).toBe(0)
   })
 })
 
