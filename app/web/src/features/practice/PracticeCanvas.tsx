@@ -793,6 +793,13 @@ export function PracticeCanvas({
     // 안 걺" 분기)에서 더 이상 못 봐서 `ReferenceError`가 났음. tracks 등과
     // 같은 패턴으로 바깥에 선언.
     let loop: LoopBars | undefined
+    // T3-13 모드A 3라운드 지적 — `handle`도 같은 문제(아래 자동 정지
+    // `setTimeout` 콜백이 try 밖에서 `handle`을 참조). 이번엔 `npx tsc
+    // --noEmit`(인자 없이, 프로젝트 레퍼런스라 사실상 빈 파일만 체크)가
+    // 못 잡아 Codex가 `-p tsconfig.app.json`으로 직접 돌려서야 발견됨 —
+    // 이후로는 반드시 `-p tsconfig.app.json`(또는 `npm run build`의
+    // `tsc -b`)으로 타입체크한다.
+    let handle: PlaybackHandle | undefined
     function cleanupAbortedSetup(): void {
       tracks?.dispose()
       synthGain?.dispose()
@@ -858,7 +865,7 @@ export function PracticeCanvas({
       loop = loopEnabled
         ? { startBar: loopStartBar1 - 1, endBar: loopEndBar1 }
         : undefined
-      const handle = playDrumScore(score, voices, {
+      handle = playDrumScore(score, voices, {
         countInBars: COUNT_IN_BARS,
         playbackBpm,
         loop,
