@@ -303,14 +303,17 @@ export function createLaneRenderer(
       const noteSize = Math.min(laneWidth * 0.5, 28)
       visibleNoteCount = 0
       // T3-15(성능) — 원래 `activePieces()`/`activeHandByPiece()`(layout.ts)를
-      // 따로 호출해 `score.notes` 전체(이 레인 루프와 별개로)를 두 번 더
-      // 훑었음 — 매 프레임 994개 노트 스캔을 최대 3번(그리기용 1번 + 이 2번)
-      // 하던 셈. 판정 허용범위(`hitWindowSeconds`, 보통 0.06초)는 이 루프가
-      // 이미 쓰는 그리기 가시창(`windowStart`~`windowEnd`, lookbehind
-      // 0.15초+lookahead 수 초)보다 항상 좁아서, 이 루프 안에서 같이 체크해도
-      // 놓치는 노트가 없다 — 그리기용 `shape` 존재 체크보다 먼저(= 원래
-      // activePieces 등이 shape를 신경 안 쓰던 것과 동일하게) 둬서 의미상
-      // 완전히 같게 유지. 다만 이 결과(Set/Map)는 호출자가 React state에
+      // 따로 호출해 `score.notes` 전체(이 레인 루프와 별개로, 그리기 가시창
+      // 제약 없이)를 두 번 더 훑었음 — 매 프레임 994개 노트 스캔을 최대 3번
+      // (그리기용 1번 + 이 2번) 하던 셈. 이 루프 안에서 같이 체크하되, **판정
+      // 허용범위 체크는 반드시 그리기 가시창(windowStart~windowEnd) continue
+      // 전에** 둔다(아래 실제 체크 지점 주석 참고) — 가시창이 보통은 판정
+      // 허용범위보다 넓지만(T3-15 1차 구현은 이걸 가정하고 가시창 continue
+      // 뒤에 체크해 모드A가 실제 버그로 지적함: 극단적으로 빠른 BPM·짧은
+      // 박자표에선 가시창이 판정 허용범위보다 좁아질 수 있어 노트를 놓칠 수
+      // 있었음), 가시창 앞에 두면 그 가정 자체가 필요 없어져 원래
+      // activePieces/activeHandByPiece(가시창 제약이 아예 없었음)와 항상
+      // 완전히 같은 의미가 된다. 이 결과(Set/Map)는 호출자가 React state에
       // 저장하므로(PracticeCanvas.tsx) 위 `visibleNotePool`과 달리 프레임마다
       // 새로 만든다(재사용하면 이미 state로 넘어간 이전 프레임 결과까지
       // 뒤늦게 바뀌어버림 — React의 불변성 전제를 깨는 버그가 됨).
@@ -322,11 +325,20 @@ export function createLaneRenderer(
         for (const note of score.notes) {
           if (!lane.pieces.includes(note.piece)) continue
           const t = noteTimeOf(note)
-          if (t < windowStart || t > windowEnd) continue
+          // 모드A 지적(실제 버그) — 판정 허용범위 체크를 그리기 가시창
+          // continue보다 먼저 둬야 한다. 가시창(windowEnd=lookaheadSeconds)이
+          // 보통은 판정 허용범위(hitWindowSeconds=0.06초 등)보다 넓지만,
+          // `lookaheadSeconds`는 `barDurationSeconds × barsVisible`이라
+          // 극단적으로 빠른 BPM·짧은 박자표·보이는 마디 수 1에선 0.06초보다
+          // 작아질 수 있음(검증기가 BPM 상한을 강제하지 않음) — 그러면 가시창
+          // 밖인데 판정창 안인 노트를 기존(score.notes 전체를 가시창 제약 없이
+          // 쓰던 activePieces/activeHandByPiece)과 달리 놓치게 됨. 가시창
+          // continue 전에 먼저 체크해 원래 동작과 완전히 동일하게 맞춘다.
           if (Math.abs(t - currentTimeSeconds) <= options.hitWindowSeconds) {
             activePiecesResult.add(note.piece)
             activeHandResult.set(note.piece, note.hand)
           }
+          if (t < windowStart || t > windowEnd) continue
           const yCenter = noteYPosition(t, currentTimeSeconds, speed, hitLineY)
           const shape = lane.shapeByPiece[note.piece]
           if (!shape) continue
