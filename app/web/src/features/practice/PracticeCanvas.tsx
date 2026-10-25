@@ -225,7 +225,7 @@ export function PracticeCanvas({
             songStartSeconds,
             playbackRate,
           )
-          tracks.resync(expectedSongPositionSeconds, playbackRate, TRACK_RESYNC_THRESHOLD_SECONDS)
+          tracks.resync(expectedSongPositionSeconds, TRACK_RESYNC_THRESHOLD_SECONDS)
         }
       }
       if (renderer) {

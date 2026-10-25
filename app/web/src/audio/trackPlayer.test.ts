@@ -85,18 +85,82 @@ describe('createTrackPlayer', () => {
     expect(playMock).toHaveBeenCalledTimes(1)
   })
 
-  it('resync() corrects currentTime only when drift exceeds the threshold', async () => {
-    const player = createTrackPlayer([{ kind: 'stem_drums', url: 'http://x/drums.wav' }])
-    await player.prime()
-    playMock.mockClear()
-    player.playFrom(0, 1)
+  describe('resync()', () => {
+    // 모드A 지적(Medium, 실제 버그 — jsdom으로 재현): 수정 전엔
+    // `currentTime * playbackRate`로 "실제 위치"를 계산했는데, `currentTime`은
+    // 이미 원곡 파일 기준 초(`expectedSongPositionSeconds`와 같은 단위)라
+    // 1배속이 아닐 때 비교 자체가 틀렸다(예: 0.5배속에서 currentTime=0.5는
+    // "완벽히 동기"인데 실제로는 0.25로 계산돼 매번 틀리게 "보정"했을 것).
+    // 지금은 resync()가 playbackRate를 받지 않도록 바꿔 그 버그 자체가 API
+    // 수준에서 재발할 수 없게 했다. 수정 전엔 "예외만 안 나면 통과"하는
+    // 테스트였음(모드A가 정확히 지적한 약점) — 이번엔 `currentTime` setter를
+    // 직접 스파이해(call-through 유지) 실제로 보정됐는지/안 됐는지를
+    // 값으로 검증한다.
+    async function primedUnpausedPlayer(initialCurrentTime: number) {
+      const player = createTrackPlayer([{ kind: 'stem_drums', url: 'http://x/drums.wav' }])
+      await player.prime()
+      vi.spyOn(HTMLMediaElement.prototype, 'paused', 'get').mockReturnValue(false)
+      player.playFrom(initialCurrentTime, 1)
+      return player
+    }
 
-    // 내부 <audio> currentTime을 직접 들여다볼 공개 API는 없으므로, resync 전후
-    // play() 재호출 여부가 아니라 "예외 없이 동작"만 간접 확인 — 더 정밀한 검증은
-    // currentTime을 getter로 노출하지 않는 한 어렵고, 실제 드리프트 보정 효과는
-    // 실기기 QA(교차상관 분석)로 확인한다(work/T3-3/plan.md §QA계획 3).
-    expect(() => player.resync(0.01, 1, 0.1)).not.toThrow()
-    expect(() => player.resync(10, 1, 0.1)).not.toThrow()
+    it('does NOT touch currentTime when drift is within the threshold', async () => {
+      const player = await primedUnpausedPlayer(5.02)
+      const setSpy = vi.spyOn(HTMLMediaElement.prototype, 'currentTime', 'set')
+      setSpy.mockClear() // playFrom() 안의 초기 seek 호출은 제외하고 resync()만 본다
+
+      player.resync(5.0, 0.1) // 드리프트 0.02초 < threshold 0.1초
+
+      expect(setSpy).not.toHaveBeenCalled()
+    })
+
+    it('corrects currentTime to the expected position when drift exceeds the threshold', async () => {
+      const player = await primedUnpausedPlayer(5.5)
+      const setSpy = vi.spyOn(HTMLMediaElement.prototype, 'currentTime', 'set')
+      setSpy.mockClear()
+
+      player.resync(5.0, 0.1) // 드리프트 0.5초 > threshold 0.1초
+
+      expect(setSpy).toHaveBeenCalledWith(5.0)
+    })
+
+    it('does NOT correct when currentTime already equals the expected position (0.5x-speed unit-bug regression)', async () => {
+      // 0.5배속에서 currentTime(원곡 파일 기준)이 expectedSongPositionSeconds와
+      // 정확히 같은, "완벽히 동기"인 상태를 흉내 — 수정 전 버그였다면
+      // playbackRate=0.5를 곱해 실제 위치를 0.25로 잘못 계산해 드리프트가
+      // 있다고 오판, 불필요하게 currentTime을 다시 썼을 것.
+      const player = await primedUnpausedPlayer(0.5)
+      const setSpy = vi.spyOn(HTMLMediaElement.prototype, 'currentTime', 'set')
+      setSpy.mockClear()
+
+      player.resync(0.5, 0.1)
+
+      expect(setSpy).not.toHaveBeenCalled()
+    })
+
+    it('skips a track that failed to unlock, even with a huge drift', async () => {
+      playMock.mockRejectedValueOnce(new DOMException('', 'NotAllowedError'))
+      const player = createTrackPlayer([{ kind: 'stem_drums', url: 'http://x/drums.wav' }])
+      await player.prime() // 언락 실패
+      const setSpy = vi.spyOn(HTMLMediaElement.prototype, 'currentTime', 'set')
+      setSpy.mockClear()
+
+      player.resync(999, 0.001)
+
+      expect(setSpy).not.toHaveBeenCalled()
+    })
+
+    it('skips a track that is still paused (never actually started), even with a huge drift', async () => {
+      // primedUnpausedPlayer를 안 쓰고 paused를 그대로 둔다(jsdom 기본값 true).
+      const player = createTrackPlayer([{ kind: 'stem_drums', url: 'http://x/drums.wav' }])
+      await player.prime() // 언락은 성공하지만 playFrom()을 호출 안 해 paused=true 그대로
+      const setSpy = vi.spyOn(HTMLMediaElement.prototype, 'currentTime', 'set')
+      setSpy.mockClear()
+
+      player.resync(999, 0.001)
+
+      expect(setSpy).not.toHaveBeenCalled()
+    })
   })
 
   it('stop() pauses every track', async () => {

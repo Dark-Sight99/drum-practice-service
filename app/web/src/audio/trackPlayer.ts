@@ -25,10 +25,15 @@ export interface TrackPlayer {
   /** 곡 내 위치(초, 원곡 기준)로 각 트랙(언락 성공한 것만)을 이동시키고 재생
    * 시작. preservesPitch=true + playbackRate 설정. */
   playFrom(songPositionSeconds: number, playbackRate: number): void
-  /** 주기적 호출 — 기대 위치와 실제 위치가 thresholdSeconds를 넘게 벌어지면
-   * currentTime을 보정(루프 경계의 큰 점프 교정용 — work/T3-3/plan.md §5,
-   * threshold는 ±30ms보다 느슨하게 둬서 고정 지연을 상시 재보정하지 않음). */
-  resync(expectedSongPositionSeconds: number, playbackRate: number, thresholdSeconds: number): void
+  /** 주기적 호출 — 기대 위치(원곡 파일 기준 초, `audioTrackPositionSeconds`와
+   * 같은 단위)와 실제 위치(`currentTime`, 이미 원곡 파일 기준 초)가
+   * thresholdSeconds를 넘게 벌어지면 currentTime을 보정(루프 경계의 큰 점프
+   * 교정용 — work/T3-3/plan.md §5, threshold는 ±30ms보다 느슨하게 둬서 고정
+   * 지연을 상시 재보정하지 않음). 모드A 지적(Medium) 반영: `currentTime`은
+   * 이미 원곡 파일 기준 초라 playbackRate를 또 곱하면 안 됨(1배속이 아닐 때
+   * 비교 단위가 안 맞아 매번 잘못 보정하는 버그였음) — 그래서 playbackRate를
+   * 받지 않는다. */
+  resync(expectedSongPositionSeconds: number, thresholdSeconds: number): void
   stop(): void
   dispose(): void
 }
@@ -71,14 +76,10 @@ export function createTrackPlayer(sources: TrackSource[]): TrackPlayer {
     }
   }
 
-  function resync(
-    expectedSongPositionSeconds: number,
-    playbackRate: number,
-    thresholdSeconds: number,
-  ): void {
+  function resync(expectedSongPositionSeconds: number, thresholdSeconds: number): void {
     for (const track of tracks) {
       if (!track.unlocked || track.element.paused) continue
-      const actualSongPositionSeconds = track.element.currentTime * playbackRate
+      const actualSongPositionSeconds = track.element.currentTime
       const driftSeconds = Math.abs(actualSongPositionSeconds - expectedSongPositionSeconds)
       if (driftSeconds > thresholdSeconds) {
         track.element.currentTime = Math.max(0, expectedSongPositionSeconds)
