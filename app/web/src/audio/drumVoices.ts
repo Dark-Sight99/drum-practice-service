@@ -38,7 +38,23 @@ export function velocityToDb(velocity: number): number {
   return (clamped - 1) * 24
 }
 
-function sampleVoice(buffer: Tone.ToneAudioBuffer, destination?: Tone.ToneAudioNode): DrumVoice {
+/** 피스별 보정 게인(dB) — 의뢰인이 실사용 중 "킥 소리가 다른 악기에 비해
+ * 너무 작다"고 지적(2026-10-25). `public/audio/drums/*.wav` 9종을 ffmpeg
+ * volumedetect로 직접 측정해 확인: kick.wav의 피크가 -13.0dB로 snare.wav
+ * (-0.2dB)보다 12.8dB, tom_high.wav(-3.2dB)·tom_mid.wav(-4.1dB)보다도
+ * 뚜렷이 작음(자주 같이 치는 타격 계열끼리 유독 kick만 작게 녹음됨 — 심벌류
+ * 는 원래 더 작게 들리는 음색이라 보정 대상 아님, 의뢰인도 kick만 지적).
+ * +9dB를 더하면 kick 피크가 약 -4dB로 올라와 tom_high/tom_mid와 비슷한
+ * 체감 크기가 되고, 그래도 0dBFS(디지털 클리핑)보다 한참 작아 안전함. */
+const PIECE_GAIN_BOOST_DB: Partial<Record<DrumPiece, number>> = {
+  kick: 9,
+}
+
+function sampleVoice(
+  piece: DrumPiece,
+  buffer: Tone.ToneAudioBuffer,
+  destination?: Tone.ToneAudioNode,
+): DrumVoice {
   // Codex 모드A C-002(재현됨, 코드 검토): dispose()가 빈 함수라 버퍼·재생 중인
   // Player가 명시적 폐기 후에도 안 지워짐 — 지금 울리고 있는 Player를 추적해
   // dispose() 시 전부 멈추고, 버퍼도 같이 정리한다.
@@ -59,7 +75,7 @@ function sampleVoice(buffer: Tone.ToneAudioBuffer, destination?: Tone.ToneAudioN
       const player = destination
         ? new Tone.Player(buffer).connect(destination)
         : new Tone.Player(buffer).toDestination()
-      player.volume.value = velocityToDb(velocity)
+      player.volume.value = velocityToDb(velocity) + (PIECE_GAIN_BOOST_DB[piece] ?? 0)
       activePlayers.add(player)
       player.onstop = () => {
         activePlayers.delete(player)
@@ -130,7 +146,9 @@ export async function createDrumVoices(destination?: Tone.ToneAudioNode): Promis
   }
 
   const buffers = (results as PromiseFulfilledResult<Tone.ToneAudioBuffer>[]).map((r) => r.value)
-  const entries = pieces.map((piece, i) => [piece, sampleVoice(buffers[i], destination)] as const)
+  const entries = pieces.map(
+    (piece, i) => [piece, sampleVoice(piece, buffers[i], destination)] as const,
+  )
   return Object.fromEntries(entries) as DrumVoiceMap
 }
 

@@ -19,8 +19,12 @@ export interface LaneDef {
   shapeByPiece: Partial<Record<DrumPiece, NoteShape>>
 }
 
-/** 레인 순서(좌→우, 오른손잡이 기준): 하이햇, 크래시, 스네어, 하이탐, 미드탐, 플로어탐,
- * 라이드, 킥 — intent/04-ui-ux.md §3. */
+/** 레인 순서(좌→우, 오른손잡이 기준): 하이햇, 크래시, 스네어, 킥, 하이탐, 미드탐,
+ * 플로어탐, 라이드 — intent/04-ui-ux.md §3.
+ * 2026-10-25 의뢰인 피드백(T3-7) — 원래 순서는 킥이 맨 끝(라이드 다음)이라
+ * 스네어·하이탐과 같이 자주 섞어 치는 패턴을 한눈에 보기 어렵다는 지적.
+ * 킥을 스네어 바로 다음(하이탐 앞)으로 옮김 — 스네어·킥·하이탐이 서로
+ * 가까워져 베이스/스네어/탐 조합 패턴을 한 화면에서 더 쉽게 읽을 수 있음. */
 export const LANES: readonly LaneDef[] = [
   {
     pieces: ['hihat_closed', 'hihat_open'],
@@ -29,11 +33,11 @@ export const LANES: readonly LaneDef[] = [
   },
   { pieces: ['crash'], label: 'CR', shapeByPiece: { crash: 'x-large' } },
   { pieces: ['snare'], label: 'SN', shapeByPiece: { snare: 'rounded-rect' } },
+  { pieces: ['kick'], label: 'KK', shapeByPiece: { kick: 'bar' } },
   { pieces: ['tom_high'], label: 'HT', shapeByPiece: { tom_high: 'circle' } },
   { pieces: ['tom_mid'], label: 'MT', shapeByPiece: { tom_mid: 'circle' } },
   { pieces: ['tom_floor'], label: 'FT', shapeByPiece: { tom_floor: 'circle-large' } },
   { pieces: ['ride'], label: 'RD', shapeByPiece: { ride: 'diamond' } },
-  { pieces: ['kick'], label: 'KK', shapeByPiece: { kick: 'bar' } },
 ]
 
 export function laneIndexForPiece(piece: DrumPiece): number {
