@@ -209,18 +209,32 @@ describe('createTrackPlayer', () => {
       expect(pauseMock).toHaveBeenCalledTimes(1)
     })
 
-    it('resume() calls play() again only on unlocked tracks', async () => {
+    it('resume() calls play() again only on tracks already started via playFrom()', async () => {
       const player = createTrackPlayer([
         { kind: 'stem_drums', url: 'http://x/drums.wav' },
         { kind: 'stem_bass', url: 'http://x/bass.wav' },
       ])
       await player.prime()
+      player.playFrom(0, 1) // 둘 다 started=true로 만든다
       playMock.mockClear()
       playMock.mockResolvedValue(undefined)
 
       player.resume()
 
       expect(playMock).toHaveBeenCalledTimes(2)
+    })
+
+    it('resume() does NOT play a track that was primed but never started via playFrom() (T3-6 모드A 지적 — 카운트인 중 일시정지 회귀)', async () => {
+      // 카운트인 중 일시정지→재개를 재현: prime()만 하고 playFrom()은 아직
+      // 한 번도 안 부른 상태. resume()이 여기서 play()를 부르면 Transport가
+      // 아직 카운트인 중인데도 원곡 오디오가 먼저 들리는 버그가 된다.
+      const player = createTrackPlayer([{ kind: 'stem_drums', url: 'http://x/drums.wav' }])
+      await player.prime()
+      playMock.mockClear()
+
+      player.resume()
+
+      expect(playMock).not.toHaveBeenCalled()
     })
 
     it('resume() skips a track that failed to unlock', async () => {
@@ -235,6 +249,9 @@ describe('createTrackPlayer', () => {
         { kind: 'stem_bass', url: 'http://x/bass.wav' },
       ])
       await player.prime() // stem_bass 언락 실패
+      playMock.mockClear()
+      playMock.mockResolvedValue(undefined)
+      player.playFrom(0, 1) // 언락된 stem_drums만 started=true가 됨
       playMock.mockClear()
       playMock.mockResolvedValue(undefined)
 

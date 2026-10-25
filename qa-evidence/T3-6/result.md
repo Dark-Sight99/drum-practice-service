@@ -1,4 +1,4 @@
-> 한 줄 요약: T3-6(일시정지/이어재생) QA 결과 — 자동 테스트·타입체크·린트 통과, 브라우저로 상태 전이·콘솔 에러 없음 확인. 오디오 가청 검증(크래시 끊김·모바일 재생 거부)은 Claude가 들을 수 없어 의뢰인 확인 필요.
+> 한 줄 요약: T3-6(일시정지/이어재생) QA 결과 — 모드A 1라운드가 찾은 "카운트인 중 일시정지→재개 시 원곡 오디오가 너무 일찍 재생"버그를 trackPlayer.ts의 started 플래그로 수정, 전부 재검증 통과. 오디오 가청 검증(크래시 끊김·모바일 재생 거부)은 Claude가 들을 수 없어 의뢰인 확인 필요.
 
 # T3-6 QA 결과
 
@@ -13,14 +13,21 @@
 - `app/web/src/audio/scorePlayer.ts` — `PlaybackHandle.pause()`/`resume()` 신설. pause()는 `transport.pause()` + `stopAllRinging(voices)` + `countInSynth.triggerRelease()` + `tracks?.pause()`. resume()은 `transport.start()`(오프셋 없음) + `tracks?.resume()`.
 - `app/web/src/features/practice/PracticeCanvas.tsx` — `isPaused` 상태, "⏸ 일시정지" 버튼, `handlePause()`/`handlePlay()`의 재개 분기, `performance.now()` 기반 자동 정지 타이머 재계산(`autoStopTimerIdRef`/`autoStopRemainingMsRef`/`autoStopScheduledAtRef`), BPM/A-B 루프 입력 `disabled`에 `isPaused` 추가, "⏸"/"▶" 핸들러 둘 다 `playbackRef.current` 생존 가드(모드C 3라운드 C-001).
 
+## 모드A 1라운드 지적(High, 반영함)
+`trackPlayer.ts`의 `resume()`이 `unlocked`(=prime() 성공)인 트랙에 무조건 `.play()`를 불렀는데, `unlocked`는 "이 세션에서 실제로 playFrom()으로 시작된 적 있는지"와는 다른 조건 — 카운트인 중(아직 `playFrom()`이 한 번도 안 불린 시점)에 일시정지→재개하면 Transport의 예약된 `playFrom()` 콜백이 실행되기 전에 `resume()`이 먼저 `.play()`를 불러, 카운트인이 끝나기도 전에 원곡 오디오가 들리는 버그였음. `TrackState`에 `started: boolean`(기본 false, `playFrom()`이 설정)을 추가하고 `resume()`을 `!unlocked || !started`면 건너뛰도록 수정 — 아직 안 시작된 트랙은 Transport가 재개돼 원래 예약된 `playFrom()`이 때가 되면 알아서 시작시키게 둠(기존 T2-4/T3-3 경로 그대로, 추가 개입 없음).
+
 ## 자동 테스트
 ```
 cd app/web
 npx tsc --noEmit        # 통과
-npm test -- --run       # 17 test files / 176 tests 모두 통과(기존 173 + pause/resume 신규 3)
+npm test -- --run       # 17 test files / 177 tests 모두 통과(기존 173 + pause/resume 신규 4 — started 가드 회귀 테스트 포함)
 npm run lint            # oxlint 통과, 경고 없음
 ```
 `drumVoices.test.ts`에는 `stopAllRinging()` 자동 테스트를 추가하지 않음 — `sampleVoice()`가 비공개라 단위 테스트하려면 Tone.Player/ToneAudioBuffer 전체를 모킹해야 하는데, 이 파일은 애초에 `trigger()`/`dispose()`도 전혀 단위 테스트하지 않는 기존 선례(jsdom에 Web Audio 디코딩이 없음)를 그대로 유지(plan.md §QA계획에 명시, 구현 중 범위 조정).
+
+## 모드A 지적 수정 후 브라우저 검증(HTMLMediaElement.prototype.play 몽키패치로 호출 시점 로깅)
+- **count-in 중 일시정지→재개(버그 재현 시도)**: 재생 직후 빠르게 일시정지를 눌렀을 때 — 자동화 클릭의 왕복 지연 때문에 정확히 count-in 구간(2초) 안에서 멈추는 걸 안정적으로 재현하진 못함(타이밍에 민감 — 아래 "검증하지 못한 것" 참고). 대신 **동일한 시나리오를 정확히 겨냥한 단위 테스트**(`trackPlayer.test.ts` "resume() does NOT play a track that was primed but never started via playFrom()")로 확정적으로 재현·검증함 — prime()만 하고 playFrom()을 안 부른 상태에서 resume()을 호출해도 play()가 전혀 안 불림을 확인(수정 전이었다면 이 테스트가 실패했을 것).
+- **count-in 이후 일시정지→재개(정상 경로 회귀 확인)**: 재생 후 3초 대기(count-in 2초 지남, 원곡 오디오가 이미 시작된 상태)→일시정지→재생을 브라우저로 직접 수행, `play()` 호출 로그로 "prime() 배치(4건) → playFrom() 배치(4건) → resume() 배치(4건)" 순서로 정확히 3차례 호출됨을 확인 — 정상적으로 이미 시작된 트랙은 재개 시 여전히 다시 재생됨(이번 수정이 정상 경로를 깨지 않음).
 
 ## 브라우저 수동 검증(localhost:5174, 로그인된 세션, huibigyocha 곡)
 - **재생→일시정지**: 재생 중 "⏸ 일시정지" 클릭 → 버튼 상태가 `▶ 재생`(활성)/`⏸ 일시정지`(비활성)/`⏹ 정지`(활성)로 정확히 전환됨(`button.disabled` 직접 읽어 확인).
