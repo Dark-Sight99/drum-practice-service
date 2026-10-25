@@ -12,8 +12,14 @@ import {
   disposeDrumVoices,
   effectiveGain,
   getMasterClock,
+  isMusicMuted,
+  isMusicSolo,
   linearGainToDb,
+  musicVolume,
   playDrumScore,
+  setMusicMuted,
+  setMusicSolo,
+  setMusicVolume,
   toggleDrumlessPreset,
   type ChannelKey,
   type ChannelState,
@@ -49,9 +55,76 @@ const CHANNEL_LABELS: Record<ChannelKey, string> = {
   stem_drums: '드럼(원곡)',
   stem_bass: '베이스',
   stem_vocals: '보컬',
-  stem_other: '기타 악기',
+  // T3-4 게이트 피드백 3차(2026-10-25) — "기타 악기"가 "기타(guitar)"로
+  // 오해될 수 있다는 의뢰인 지적 반영. "기타"는 원래 "그 외(etc.)"의 뜻 —
+  // Demucs 4-스템 분리는 드럼/베이스/보컬/그 외(멜로디 악기 전부 포함, 더
+  // 세분화 불가)로만 나뉜다는 걸 명확히 하려고 "그 외 악기"로 바꿈.
+  stem_other: '그 외 악기',
   synth_drums: '신스 드럼',
   metronome: '메트로놈',
+}
+
+// T3-4 게이트 피드백 3차(2026-10-25) — 믹서에 개별 행으로 그리는 채널.
+// stem_bass/stem_vocals/stem_other는 "음악(전체)" 한 행으로 묶여 렌더링되므로
+// 여기선 제외(아래 MixerRow 목록에서 stem_drums 바로 다음에 수동으로 끼워 넣음).
+const MIXER_ROW_KEYS: ChannelKey[] = ['stem_drums', 'synth_drums', 'metronome']
+
+interface MixerRowProps {
+  label: string
+  volume: number
+  muted: boolean
+  solo: boolean
+  onVolumeChange: (volume: number) => void
+  onMutedChange: (muted: boolean) => void
+  onSoloChange: (solo: boolean) => void
+}
+
+/** T3-4 믹서 한 행(채널 1개 또는 묶음) — 피드백 3차에서 "음악(전체)" 묶음
+ * 행을 추가하며 기존 CHANNEL_KEYS.map() 안에 있던 JSX를 재사용 가능하게 뺌. */
+function MixerRow({
+  label,
+  volume,
+  muted,
+  solo,
+  onVolumeChange,
+  onMutedChange,
+  onSoloChange,
+}: MixerRowProps) {
+  return (
+    <div
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 'var(--space-2)',
+        opacity: muted ? 0.5 : 1,
+        border: solo ? '1px solid var(--accent)' : '1px solid transparent',
+        borderRadius: 4,
+        padding: '2px 4px',
+      }}
+    >
+      <span style={{ width: 90 }}>{label}</span>
+      <input
+        type="range"
+        min={0}
+        max={100}
+        value={Math.round(volume * 100)}
+        onChange={(e) => onVolumeChange(Number(e.target.value) / 100)}
+        style={{ width: 120 }}
+      />
+      <span style={{ width: 36, textAlign: 'right' }}>{Math.round(volume * 100)}%</span>
+      <label title="음소거" style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-1)' }}>
+        <input type="checkbox" checked={muted} onChange={(e) => onMutedChange(e.target.checked)} />
+        M
+      </label>
+      <label
+        title="솔로 — 이 채널만 들림"
+        style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-1)' }}
+      >
+        <input type="checkbox" checked={solo} onChange={(e) => onSoloChange(e.target.checked)} />
+        S
+      </label>
+    </div>
+  )
 }
 
 function readPieceColor(piece: DrumPiece): string {
@@ -312,6 +385,29 @@ export function PracticeCanvas({
   function applyDrumlessPreset() {
     userHasEditedMixerRef.current = true
     setMixerState((prev) => toggleDrumlessPreset(prev))
+    scheduleMixerSave()
+  }
+
+  // T3-4 게이트 피드백 3차(2026-10-25, 의뢰인 요청) — "원곡 음악이 드럼보다
+  // 너무 크다"는 지적에, 베이스·보컬·기타 악기(stem_bass/stem_vocals/
+  // stem_other) 3채널을 UI에서 슬라이더·M·S 하나로 묶어 조작한다. 저장되는
+  // 데이터 구조는 그대로(mixer.ts의 setMusicVolume/setMusicMuted/setMusicSolo가
+  // 3채널에 같은 값을 쓸 뿐) — 백엔드·effectiveGain() 전부 무수정.
+  function updateMusicVolume(volume: number) {
+    userHasEditedMixerRef.current = true
+    setMixerState((prev) => setMusicVolume(prev, volume))
+    scheduleMixerSave()
+  }
+
+  function updateMusicMuted(muted: boolean) {
+    userHasEditedMixerRef.current = true
+    setMixerState((prev) => setMusicMuted(prev, muted))
+    scheduleMixerSave()
+  }
+
+  function updateMusicSolo(solo: boolean) {
+    userHasEditedMixerRef.current = true
+    setMixerState((prev) => setMusicSolo(prev, solo))
     scheduleMixerSave()
   }
 
@@ -873,57 +969,40 @@ export function PracticeCanvas({
           <span style={{ color: 'var(--text-muted)', fontSize: '0.85em' }}>
             M = 음소거 · S = 솔로(이 채널만 들림)
           </span>
-          {CHANNEL_KEYS.map((key) => {
+          {MIXER_ROW_KEYS.map((key) => {
             const channel = mixerState[key]
-            return (
-              <div
+            const rows = [
+              <MixerRow
                 key={key}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 'var(--space-2)',
-                  opacity: channel.muted ? 0.5 : 1,
-                  border: channel.solo ? '1px solid var(--accent)' : '1px solid transparent',
-                  borderRadius: 4,
-                  padding: '2px 4px',
-                }}
-              >
-                <span style={{ width: 90 }}>{CHANNEL_LABELS[key]}</span>
-                <input
-                  type="range"
-                  min={0}
-                  max={100}
-                  value={Math.round(channel.volume * 100)}
-                  onChange={(e) => updateChannel(key, { volume: Number(e.target.value) / 100 })}
-                  style={{ width: 120 }}
-                />
-                <span style={{ width: 36, textAlign: 'right' }}>
-                  {Math.round(channel.volume * 100)}%
-                </span>
-                <label
-                  title="음소거"
-                  style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-1)' }}
-                >
-                  <input
-                    type="checkbox"
-                    checked={channel.muted}
-                    onChange={(e) => updateChannel(key, { muted: e.target.checked })}
-                  />
-                  M
-                </label>
-                <label
-                  title="솔로 — 이 채널만 들림"
-                  style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-1)' }}
-                >
-                  <input
-                    type="checkbox"
-                    checked={channel.solo}
-                    onChange={(e) => updateChannel(key, { solo: e.target.checked })}
-                  />
-                  S
-                </label>
-              </div>
-            )
+                label={CHANNEL_LABELS[key]}
+                volume={channel.volume}
+                muted={channel.muted}
+                solo={channel.solo}
+                onVolumeChange={(volume) => updateChannel(key, { volume })}
+                onMutedChange={(muted) => updateChannel(key, { muted })}
+                onSoloChange={(solo) => updateChannel(key, { solo })}
+              />,
+            ]
+            // T3-4 게이트 피드백 3차(2026-10-25, 의뢰인 요청) — "원곡 음악이
+            // 드럼보다 너무 크다"는 지적에, 베이스·보컬·기타 악기 3채널을
+            // 원래 위치(드럼(원곡) 바로 다음)에 슬라이더·M·S 하나로 묶어
+            // 보여준다. 저장 구조는 그대로(mixer.ts의 setMusicVolume 등이
+            // 3채널에 같은 값을 쓸 뿐) — 순수 UI 묶음.
+            if (key === 'stem_drums') {
+              rows.push(
+                <MixerRow
+                  key="music"
+                  label="음악(베이스·보컬·그 외)"
+                  volume={musicVolume(mixerState)}
+                  muted={isMusicMuted(mixerState)}
+                  solo={isMusicSolo(mixerState)}
+                  onVolumeChange={updateMusicVolume}
+                  onMutedChange={updateMusicMuted}
+                  onSoloChange={updateMusicSolo}
+                />,
+              )
+            }
+            return rows
           })}
         </div>
       </div>

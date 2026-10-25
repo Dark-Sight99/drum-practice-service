@@ -71,6 +71,50 @@ export function toggleDrumlessPreset(state: MixerState): MixerState {
   }
 }
 
+/** T3-4 게이트 피드백 3차(2026-10-25, 의뢰인 요청) — "원곡 음악 소리가
+ * 드럼보다 너무 크다"는 지적에, 베이스·보컬·기타 악기(=원곡에서 드럼 뺀
+ * 나머지 전체)를 UI에서 슬라이더 하나·M·S 하나로 묶어 조작한다. 저장되는
+ * 데이터 구조(6채널 각각의 volume/muted/solo)는 그대로 — 이 3개 함수가
+ * 그 3채널을 한꺼번에 같은 값으로 맞출 뿐이라 백엔드 스키마·`effectiveGain()`
+ * 모두 무수정. */
+export const MUSIC_STEM_KEYS: readonly ChannelKey[] = ['stem_bass', 'stem_vocals', 'stem_other']
+
+/** "음악 전체" 슬라이더에 표시할 대표 볼륨 — 평균(저장된 예전 값이 서로
+ * 달라도 합리적인 중간값으로 시작, 슬라이더를 한 번이라도 움직이면
+ * setMusicVolume()이 셋을 똑같이 맞춰 그 뒤로는 항상 일치). */
+export function musicVolume(state: MixerState): number {
+  const sum = MUSIC_STEM_KEYS.reduce((acc, key) => acc + state[key].volume, 0)
+  return sum / MUSIC_STEM_KEYS.length
+}
+
+/** 3채널 "전부" 음소거일 때만 체크 표시 — 섞여 있으면(저장된 예전 설정 등)
+ * 다음 클릭에서 셋 다 같은 값으로 정규화됨(아래 setMusicMuted). */
+export function isMusicMuted(state: MixerState): boolean {
+  return MUSIC_STEM_KEYS.every((key) => state[key].muted)
+}
+
+export function isMusicSolo(state: MixerState): boolean {
+  return MUSIC_STEM_KEYS.every((key) => state[key].solo)
+}
+
+export function setMusicVolume(state: MixerState, volume: number): MixerState {
+  const next = { ...state }
+  for (const key of MUSIC_STEM_KEYS) next[key] = { ...state[key], volume }
+  return next
+}
+
+export function setMusicMuted(state: MixerState, muted: boolean): MixerState {
+  const next = { ...state }
+  for (const key of MUSIC_STEM_KEYS) next[key] = { ...state[key], muted }
+  return next
+}
+
+export function setMusicSolo(state: MixerState, solo: boolean): MixerState {
+  const next = { ...state }
+  for (const key of MUSIC_STEM_KEYS) next[key] = { ...state[key], solo }
+  return next
+}
+
 /** 0(무음)~1(최대) 선형 게인을 데시벨로 변환 — Tone.js(신스 드럼 공용
  * Gain·메트로놈 synth)가 쓰는 단위. 실제 dB 공식(20*log10) 그대로 — T3-2
  * normalize_loudness()의 같은 공식과 일관. 0 이하는 -Infinity(완전 무음,
