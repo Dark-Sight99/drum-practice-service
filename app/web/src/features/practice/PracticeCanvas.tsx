@@ -718,13 +718,24 @@ export function PracticeCanvas({
       // Gain(linear 게인, Tone.Gain 기본 단위가 "gain" — 실제 설치된 Tone.js
       // 소스로 확인) 하나를 만들어 destination에 연결해두고 넘긴다 — 이걸로
       // "신스 드럼 전체" 볼륨을 한 번에 조절할 수 있다.
-      // T3-7 모드A 지적(리스크) — synthGain과 destination 사이에 리미터를
-      // 끼워 넣어, 여러 피스가 동시에 울려 합산 파형이 0dBFS를 넘으려 하면
-      // (예: +9dB 보정된 킥과 피크가 이미 -0.2dB인 스네어가 겹침) 찢어지는
-      // 소리 없이 깎아낸다. 임계값 -1dB — 평소 단일 타격(피크 대부분
-      // -3dB 이하)은 전혀 안 건드리고, 겹칠 때만 개입(Compressor
-      // ratio=20·attack=3ms·release=10ms, Tone.js 기본값 그대로 — 거의
-      // 하드 리미터에 가까움, 실제 설치된 Limiter.js 소스로 확인).
+      // T3-7 모드A 1라운드 지적(리스크) — synthGain과 destination 사이에
+      // 리미터를 끼워 넣어, 여러 피스가 동시에 울려 합산 파형이 0dBFS를
+      // 넘을 위험을 크게 줄인다(예: +9dB 보정된 킥과 피크가 이미 -0.2dB인
+      // 스네어가 겹침). 임계값 -1dB.
+      // T3-7 모드A 2라운드 지적(리스크, 과장 표현 수정) — 실제 설치된
+      // Limiter.js 소스를 보면 내부가 Compressor(ratio=20·attack=3ms·
+      // release=10ms)를 감싼 것일 뿐, lookahead 버퍼가 없는 WebAudio
+      // DynamicsCompressorNode 기반이라 "0dBFS를 절대 안 넘는다"는 수학적
+      // 보장은 아님 — 아주 가파른 타격 초입 몇 ms 동안은 감쇠가 아직 덜
+      // 걸린 채로 순간적으로 넘칠 가능성이 이론상 남아있다(사람이 알아챌
+      // 만한 지속 클리핑이 아니라 수 ms짜리 찰나의 초과). lookahead가 있는
+      // 진짜 브릭월 리미터는 Tone.js에 없고 직접 구현하려면 지연 버퍼링이
+      // 필요해 이 연습 앱 규모에 비해 과한 작업이라 채택 안 함 — 업계에서도
+      // 빠른 컴프레서 기반 리미터를 "충분히 좋은" 실용적 보호로 쓰는 게
+      // 표준이라 이 수준에서 받아들임(마스터 판단, qa-evidence/T3-7/
+      // result.md에 근거 기록). 참고로 단일 타격 대부분(피크 -3dB 이하)은
+      // 거의 안 건드리고, 스네어(-0.2dB)만 솔로여도 아주 미세하게(0.2dB
+      // 수준, 체감 불가) 반응 — "전혀 안 건드림"은 아님.
       limiter = new Tone.Limiter(-1).connect(Tone.getDestination())
       synthGain = new Tone.Gain(1).connect(limiter)
       voices = await createDrumVoices(synthGain)
