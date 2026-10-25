@@ -1,6 +1,6 @@
-> 한 줄 요약: T3-6(REQ-04) 설계안 v3 — "일시정지"(멈춘 지점부터 이어재생). 1라운드 BLOCKING(이미 트리거된 원샷 소리가 Transport.pause()만으로 안 멈춤) → `stopAllRinging()`으로 반영. 2라운드 BLOCKING(상태 전이 원자성·자동 정지 타이머 기준 불명확) → 타이머 시계 기준(performance.now())·루프모드 배제·세션 식별 가드를 명시해 반영.
+> 한 줄 요약: T3-6(REQ-04) 설계안 v4(모드C 3라운드 완료 — 마스터 최종 판단 포함) — "일시정지"(멈춘 지점부터 이어재생). 1라운드 BLOCKING(원샷 소리 자동 미정지) → stopAllRinging(). 2라운드 BLOCKING(상태 전이 근거 부족) → 타이머 시계 기준 명시. 3라운드 BLOCKING(C-001: 일시정지 핸들러가 세션 생존 여부 안 보고 무조건 isPaused=true) → playbackRef.current 유무로 가드해 코드로 직접 해소, 이게 파이프라인 최대 재검수 3회 — 4라운드 대신 마스터가 직접 판단해 반영·근거를 문서화.
 
-# T3-6 일시정지/이어재생 — 설계 v3
+# T3-6 일시정지/이어재생 — 설계 v4
 
 ## 모드C 1라운드 반영 내역
 1라운드 BLOCKING 지적: 설계 v1의 §1("Transport.pause() 후 틱 위치가 그대로 보존된다")은 실제 소스로 맞게 확인됐지만, 거기서 "그러니 신스 드럼·메트로놈도 Transport가 멈추면 자동으로 같이 멈춘다"고 일반화한 건 **틀림** — 이미 `transport.schedule()` 콜백이 발화해 `new Tone.Player(buffer).start(절대시각)`으로 Web Audio 스케줄러에 커밋된 원샷(드럼 샘플)은 Transport의 틱-위치 동결과 **완전히 독립**이라, `transport.pause()`를 불러도 그 원샷은 원래 예정된 절대 시각에 계속 울린다(예: 크래시 심벌을 치는 순간 일시정지를 눌러도 크래시가 몇 초간 계속 울림). v2에서 §3을 다시 설계해 이 틈을 명시적으로 막음(`stopAllRinging()`/`stopRinging()`). §1 Transport 네이티브 pause, §2 분리 오디오 트랙은 1라운드에서 지적 없었던 부분 그대로 유지.
@@ -10,6 +10,15 @@
 - **C-001(필수)**: "`isPlaying && isPaused`가 동시에 true가 안 된다"는 걸 전이 목록만 나열해서는 보장이 안 됨 — 특히 자동 정지 타이머가 `stopPlayback()`을 부르는 시점과 일시정지/재개 버튼 핸들러가 겹치는 경우, 전이의 원자성과 "지금 이 콜백이 여전히 유효한 세션을 가리키는지"를 계획에 명시해야 함.
 - **C-002(필수)**: 자동 정지 타이머의 "일시정지 중 흐른 시간"을 뺄 때 **기준 시계가 뭔지**(실시간 Date.now()는 배경 탭 스로틀링 등으로 어긋날 수 있음), 재개 시 남은 ms 재계산 규칙, 루프 모드와의 상호작용, `stopPlayback()`/언마운트 시 타이머 정리 규칙이 전부 미정이었음.
 아래 §4를 다시 써서 둘 다 구체적인 메커니즘(기준 시계·ref 구조·세션 식별)으로 명시했다. 권장/리스크 의견(C-003~C-007)도 전부 반영: §3에 `activePlayers` 등록이 `player.start()`보다 먼저 일어남을 코드 인용으로 명시(C-003), 메트로놈·카운트인 신스가 실제로 기본 release(1.4초)를 쓰는지 생성 코드를 직접 확인(C-004), Clock.pause() 멱등성 주장의 범위를 "이미 멈춘 상태에서 재호출"로 좁힘(C-005), `stopAllRinging()`의 onstop 비동기 정리 타이밍이 다음 트리거와 충돌 안 하는 이유를 명시(C-006), 자동 테스트가 mock 중심이라 브라우저 검증을 필수 통과 기준으로 명문화(C-007).
+
+## 모드C 3라운드 반영 + 마스터 최종 판단(이 리비전 v4)
+3라운드도 REQUEST_CHANGES/BLOCKING — `intent/06-pipeline.md` "재검수 최대 3회" 규칙에 따라 이번이 마지막 자동 재검수이고, 이후는 마스터가 직접 판단해 근거를 문서에 남긴다(T3-4 3라운드와 같은 절차).
+
+- **C-001(필수, 반영함)**: "일시정지 핸들러가 `clearTimeout()`을 불러도 이미 큐에 들어간 자동 정지 콜백이 그 뒤에 실행될 수 있다"는 지적. 이 지적의 정확한 메커니즘(clearTimeout이 "이미 큐에 들어간" 타이머까지 못 막는지)은 JS 이벤트 루프 스펙상 의문이 있음 — `clearTimeout(id)`는 콜백이 **실행을 시작하기 전까지는** 항상 취소를 보장한다(WHATWG HTML "run steps after a timeout": 콜백 실행 직전 `active timers` 목록에 그 id가 여전히 있는지 확인 — `clearTimeout`으로 지워졌으면 그 시점에 중단). 즉 두 태스크(클릭 핸들러/타이머 콜백) 중 어느 쪽이 먼저 실행되든 "둘이 동시에 절반씩 실행"되는 경우는 없음(JS 단일 스레드). 다만 이 지적이 가리키는 **진짜 문제**는 따로 있었음 — v3의 "⏸" 버튼 핸들러가 `playbackRef.current`가 이미 `null`인지(= 세션이 다른 경로로 이미 완전히 끝났는지) 확인하지 않고 **무조건** `setIsPaused(true)`를 호출하도록 적혀 있었다는 점. 만약(이론상으로라도) 타이머 콜백 쪽이 먼저 실행돼 `stopPlayback()`으로 세션이 이미 완전히 끝난 뒤에 "⏸" 클릭이 처리되면, 실제로 일시정지시킬 게 아무것도 없는데도 UI만 "일시정지 중"(`isPaused=true`)으로 잘못 전환되는 유령 상태가 생길 수 있었음 — 이건 메커니즘에 대한 정확한 설명과 무관하게 그 자체로 실재하는 빈틈이라 **코드로 직접 막음**(아래 §4 수정, 새 동기화 장치 없이 기존 `playbackRef.current`를 "지금 살아있는 세션의 유일한 근거"로 그대로 재사용 — 세대 토큰을 새로 추가하자는 권고는 과했다고 판단, 최소 침습).
+- **C-005(권장, 반박)**: "`disabled={!isPlaying}`인데 일시정지 중엔 `isPlaying=false`로 설정하니 버튼이 비활성화 안 된다"는 지적은 **틀림** — `isPlaying=false`일 때 `!isPlaying`은 `true`이므로 `disabled={true}`, 즉 정확히 비활성화된다(정지 상태·일시정지 상태 둘 다 `isPlaying=false`라 둘 다 "⏸" 버튼이 비활성화되는 게 의도된 동작이고, 코드도 그렇게 돼 있음). 2라운드 리포트가 스스로 "한글 콘솔 출력 인코딩이 깨져 세부 문구를 완전히 대조 못 했다"고 보고한 것과 같은 종류의 오독으로 보임 — `work/T2-4/plan.md`의 "모드B 지적 검증 후 반박" 선례와 같은 방식으로, 불리언 조건을 직접 대입해 반박하고 코드는 그대로 둠.
+- 그 외 C-002~C-004, C-006, C-007은 Codex 스스로 "해결됨"으로 재확인(아래 §4·§3·QA계획에 이미 반영된 v3 내용 그대로 유지).
+
+이 결정으로 설계는 종료하고 구현으로 넘어간다. 구현 중 추가로 발견되는 문제는 Codex 모드A(코드 기반 검수)에서 다시 걸러진다.
 
 ## 근거 REQ
 REQ-04(2026-10-25 추가, 의뢰인 요청): "일시정지/이어재생 — 멈춘 지점부터 다시 재생. 기존 '정지'(처음으로 되돌아가는 것)와는 별개 동작."
@@ -125,10 +134,35 @@ resume() {
 - *자동 정지가 먼저 발동 → 그 직후 사용자가 "▶"를 누른 경우*: 자동 정지의 `stopPlayback()`이 이미 동기적으로 `playbackRef.current=null`, `isPlaying=false`, (아래에서 추가하는) `isPaused=false`까지 전부 끝낸 뒤에야 다음 매크로태스크(사용자 클릭의 React 이벤트 핸들러)가 실행된다. 그 시점에 `isPaused`는 이미 `false`이므로 "▶" 핸들러는 (재개가 아니라) "처음부터 새 세션 시작" 분기를 탄다 — 틀린 재개가 섞여 들어갈 여지가 없다(다만 사용자 입장에선 "이어서 재생될 줄 알았는데 처음부터 시작됐다"고 느낄 수 있음 — 이건 자동 정지가 실제로 곡을 끝냈다는 뜻이므로 UX상 맞는 동작).
 - *사용자가 "▶"(재개)를 누른 직후, 거의 동시에 자동 정지 타이머가 발동하는 경우*: "▶" 핸들러의 재개 분기(아래 코드)가 **동기적으로** `clearTimeout` 후 남은 ms로 새 타이머를 다시 걸고 `isPaused=false`까지 끝마치므로, 그 사이에 옛 타이머 콜백이 끼어들 틈이 없다(clearTimeout이 호출된 시점 이후로 그 타이머는 절대 발동 안 함 — 브라우저 타이머 API의 기본 보장). 혹시 "클릭 이벤트"와 "이미 큐에 들어와 있던 옛 타이머 콜백"이 둘 다 대기 중이었다면, 둘 중 어느 게 먼저 실행되든 각자 끝에 가서 `playbackRef.current?.handle === handle` 가드(옛 타이머) 또는 현재 `isPaused` 값(재개 핸들러)을 확인하므로 결과가 꼬이지 않는다.
 - 결론: 새 동기화 프리미티브(락 등)는 필요 없음 — 기존 `playbackRef.current.handle` 아이덴티티 가드 + "상태 전이는 항상 동기적으로 완결" 두 가지만 지키면 `isPlaying && isPaused` 동시 true는 발생할 수 없다.
+- **(모드C 3라운드 C-001 추가 보강)** 위 결론은 "둘 다 true"는 막지만, "`playbackRef.current`가 이미 사라졌는데도 `isPaused=true`로 잘못 들어가는" 경우는 별도로 막아야 함을 3라운드에서 확인 — "⏸"/"▶" 핸들러 둘 다 시작하자마자 `playbackRef.current`가 살아있는지부터 확인하고, 없으면 아무 상태도 안 바꾸고 끝낸다(아래 코드). 이 가드 하나로 "콜백이 실행되는 정확한 순서가 무엇이든" 상관없이 안전하다 — 세션이 살아있으면 정상적으로 일시정지/재개하고, 이미 끝났으면 둘 다 조용히 no-op.
 
 - 기존 `isPlaying`(boolean, "지금 실제로 재생 중")은 그대로 두고 **새 `isPaused`(boolean) 상태를 추가**(전체를 3상태 union으로 바꾸는 큰 리팩터 대신 최소 침습).
-- "⏸ 일시정지" 버튼: `disabled={!isPlaying}`. `onClick`(동기): `playbackRef.current?.handle.pause()`, `playbackRef.current?.metronome.stopRinging()`, 아래 "자동 정지 타이머" 일시정지 처리, `isPlayingRef.current = false`(킷 점등 가드), `setIsPlaying(false)`, `setIsPaused(true)`.
-- "▶ 재생" 버튼: `disabled={isPlaying}`(일시정지 중엔 활성 유지). `onClick`(`handlePlay`) **맨 앞, 첫 `await`보다 먼저**: `if (isPaused) { playbackRef.current?.handle.resume(); 아래 "자동 정지 타이머" 재개 처리; isPlayingRef.current = true; setIsPlaying(true); setIsPaused(false); return }` — 새 세션 생성 로직(그 아래의 모든 `await`)을 전부 건너뜀. 아니면 기존 "처음부터 새 세션 만들기" 로직 그대로.
+- "⏸ 일시정지" 버튼: `disabled={!isPlaying}`. `onClick`(동기, **모드C 3라운드 C-001 반영 — 맨 앞에 생존 가드 추가**):
+  ```ts
+  function handlePause() {
+    if (!playbackRef.current) return // 이 사이에 세션이 이미 끝났으면(예: 자동 정지) 일시정지로 전환하지 않음
+    playbackRef.current.handle.pause()
+    playbackRef.current.metronome.stopRinging()
+    pauseAutoStopTimer() // §4 아래 "자동 정지 타이머" 참고
+    isPlayingRef.current = false
+    setIsPlaying(false)
+    setIsPaused(true)
+  }
+  ```
+  새 세대 토큰 없이 기존 `playbackRef.current`(이미 "지금 살아있는 세션이 있는지"의 유일한 근거로 쓰이고 있음 — 자동 정지 타이머의 `playbackRef.current?.handle === handle` 가드와 같은 원천)를 그대로 재사용한 것 — 이 가드 하나로 "세션이 이미 끝난 뒤에 일시정지 버튼이 처리되는" 모든 경우(메커니즘이 뭐든)가 안전한 no-op이 됨.
+- "▶ 재생" 버튼: `disabled={isPlaying}`(일시정지 중엔 활성 유지). `onClick`(`handlePlay`) **맨 앞, 첫 `await`보다 먼저**(방어적으로 여기도 생존 가드 추가):
+  ```ts
+  if (isPaused) {
+    if (!playbackRef.current) { setIsPaused(false); return } // 이론상 도달 안 해야 하지만 방어적으로
+    playbackRef.current.handle.resume()
+    resumeAutoStopTimer()
+    isPlayingRef.current = true
+    setIsPlaying(true)
+    setIsPaused(false)
+    return
+  }
+  ```
+  새 세션 생성 로직(그 아래의 모든 `await`)을 전부 건너뜀. `isPaused`가 애초에 false면 기존 "처음부터 새 세션 만들기" 로직 그대로.
 - "⏹ 정지" 버튼: `disabled={!isPlaying && !isPaused}`. `stopPlayback()`은 끝에서 `setIsPaused(false)`도 같이 리셋(자동 정지·언마운트 cleanup도 전부 `stopPlayback()` 하나를 공유하므로 이 리셋이 모든 경로에 자동으로 적용됨).
 - BPM/A-B 루프 입력의 `disabled` 조건: 기존 `isPlaying` 대신 `isPlaying || isPaused`로 바꿔, 일시정지 중에도 계속 잠긴 채 유지(§범위경계).
 
