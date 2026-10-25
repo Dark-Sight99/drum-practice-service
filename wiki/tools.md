@@ -71,3 +71,15 @@ const score = alphaTab.importer.ScoreLoader.loadScoreFromBytes(new Uint8Array(fi
 - 세션 런타임: 첫 리뷰/작업 명령 시 자동 시작(direct mode)
 - **플래그 확인 완료**(`codex exec --help`, 2026-10-23): `-s, --sandbox <SANDBOX_MODE>` 값은 `read-only|workspace-write|danger-full-access`. 읽기 전용 검수 명령: `codex exec -s read-only -o <결과파일> "<프롬프트>"` (`-o/--output-last-message`로 마지막 응답을 파일로 저장 가능). `-C/--cd <DIR>`로 작업 디렉터리 지정 가능.
 - ⚠ 윈도우에서 `read-only` 샌드박스가 실제로 파일 쓰기를 막는지는 아직 실행으로 확인 안 함(06-pipeline.md §1의 확인 항목) — Phase 1 전 재확인 권장.
+
+## ⚠ 프런트(`app/web`) 타입체크 — 올바른 명령은 `tsc -p tsconfig.app.json`, 인자 없는 `npx tsc --noEmit`이 아님 (2026-10-26 발견)
+`app/web/tsconfig.json`은 `"files": []`에 `references`(→`tsconfig.app.json`/`tsconfig.node.json`)만 있는 구조 — TypeScript 프로젝트 레퍼런스 패턴. **인자 없이 `npx tsc --noEmit`을 돌리면 루트 설정의 `"files": []`만 보고 사실상 아무 파일도 체크 안 한 채 조용히 성공 종료**(실제 실행으로 확인: `npx tsc --noEmit` vs `npx tsc -p tsconfig.app.json --noEmit`을 나란히 돌려 비교). `package.json`의 `"build": "tsc -b && vite build"`가 쓰는 `tsc -b`(빌드 모드, 레퍼런스를 따라감)가 원래 올바른 방식.
+
+**실제 피해**: 이 세션에서 한동안 `npx tsc --noEmit`(빈 체크)을 "타입체크 통과"로 잘못 보고함 — T3-13 작업 중 `handle` 변수 스코프 버그(try 블록 밖에서 참조)를 못 잡았고, Codex가 `-p tsconfig.app.json`으로 직접 돌려서야 발견(`qa-evidence/T3-13/result.md` 참고). 같은 명령으로 재검사해보니 테스트 파일 4건(`trackPlayer.test.ts` 2건, `EditorScreen.test.tsx`/`filterSongs.test.ts` 각 1건 이상)에 더 오래된(T3-13과 무관한) 타입 오류가 이미 있었음도 함께 드러남 — 프로덕션 코드(`src/` 내 비-테스트 파일)엔 추가 오류 없음, 테스트는 vitest가 타입 체크 없이(esbuild 변환만) 돌아서 런타임 통과엔 영향 없었음. 그 4건은 이번 작업 범위 밖이라 미수정 — `intent/07-open-questions.md` Q-34 참고.
+
+**앞으로 타입체크는 반드시**:
+```
+cd app/web
+npx tsc -p tsconfig.app.json --noEmit
+```
+(또는 `npm run build`가 쓰는 `npx tsc -b`)
