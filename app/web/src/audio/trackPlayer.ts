@@ -11,6 +11,12 @@ interface TrackState {
   kind: string
   element: HTMLAudioElement
   unlocked: boolean
+  // T3-6(REQ-04, 모드A 지적 반영) — playFrom()이 이 트랙을 실제로 재생
+  // 시작했는지. unlocked는 prime() 성공 여부만 나타내 "카운트인 중 일시정지
+  // →재개"처럼 playFrom()이 아직 한 번도 안 불린 트랙까지 resume()이 조기
+  // 재생시키는 버그가 있었음(원곡 오디오가 카운트인이 끝나기 전에 먼저
+  // 들림) — started로 "이번 세션에서 실제로 시작된 적 있는지"를 따로 추적.
+  started: boolean
 }
 
 export interface TrackPlayer {
@@ -40,6 +46,18 @@ export interface TrackPlayer {
    * `kind`가 이 플레이어에 없으면 조용히 무시(다른 트랙 종류가 아직 분리
    * 안 된 곡 등 — 호출자가 존재 여부를 매번 확인할 필요 없게). */
   setChannelGain(kind: string, gain: number): void
+  /** T3-6(REQ-04) — 언락된 트랙만 .pause()(HTMLMediaElement 네이티브 —
+   * currentTime은 그대로 보존됨, 스펙 보장). resync()는 이미
+   * `track.element.paused`를 건너뛰는 가드가 있어 수정 불필요. */
+  pause(): void
+  /** T3-6(REQ-04) — 언락되고 **이미 playFrom()으로 실제 시작된** 트랙만
+   * .play() 재호출(모드A 지적 반영 — 카운트인 중 일시정지처럼 아직 한 번도
+   * 시작 안 된 트랙까지 여기서 조기 재생하면 카운트인이 끝나기 전에 원곡
+   * 오디오가 먼저 들리는 버그가 됨. 그런 트랙은 Transport가 재개돼 원래
+   * 예약된 playFrom() 콜백이 때가 되면 알아서 시작시킨다). 이미 한 번
+   * 사용자 제스처 안에서 성공적으로 재생된 엘리먼트는 이후 play()가
+   * "블레스"된 상태로 유지되는 게 표준 동작이라 추가 제스처 없이 재생 가능. */
+  resume(): void
   stop(): void
   dispose(): void
 }
@@ -48,7 +66,7 @@ export function createTrackPlayer(sources: TrackSource[]): TrackPlayer {
   const tracks: TrackState[] = sources.map((source) => {
     const element = new Audio(source.url)
     element.preload = 'auto'
-    return { kind: source.kind, element, unlocked: false }
+    return { kind: source.kind, element, unlocked: false, started: false }
   })
 
   async function prime(): Promise<{ kind: string; ok: boolean }[]> {
@@ -73,11 +91,18 @@ export function createTrackPlayer(sources: TrackSource[]): TrackPlayer {
       track.element.preservesPitch = true
       track.element.playbackRate = playbackRate
       track.element.currentTime = Math.max(0, songPositionSeconds)
+      track.started = true
       void track.element.play().catch(() => {
         // 재생 도중 거부되면(드물게 발생 가능) 이번 세션 동안 이 트랙만 계속
         // 건너뛴다 — 위 prime()과 같은 "조용히 무시하지 않되 전체를 막지도
-        // 않는다" 원칙.
+        // 않는다" 원칙. T3-6 모드A 2라운드 지적(High) — 루프 재진입처럼 이
+        // 호출 시점에 엘리먼트가 이미 재생 중이었을 수 있어(직전 루프 구간의
+        // 소리), 거부돼도 재생이 그대로 이어질 수 있다. unlocked=false가 된
+        // 트랙은 이후 pause()/resume()이 전부 건너뛰므로, 여기서 명시적으로
+        // pause()해 "unlocked=false ⇒ 소리 안 남"을 보장해야 pause()로 끌 수
+        // 없는 트랙이 생기지 않는다.
         track.unlocked = false
+        track.element.pause()
       })
     }
   }
@@ -99,6 +124,30 @@ export function createTrackPlayer(sources: TrackSource[]): TrackPlayer {
     track.element.volume = Math.min(1, Math.max(0, gain))
   }
 
+  function pause(): void {
+    for (const track of tracks) {
+      if (!track.unlocked) continue
+      track.element.pause()
+    }
+  }
+
+  function resume(): void {
+    for (const track of tracks) {
+      // T3-6 모드A 지적(High) — started가 false면(카운트인 중 일시정지처럼
+      // playFrom()이 아직 한 번도 안 불린 경우) 여기서 재생하지 않는다 —
+      // Transport가 재개돼 원래 예약된 playFrom() 콜백이 때가 되면 알아서
+      // 시작시킨다(기존 T2-4/T3-3에서 이미 검증된 경로). 여기서 조기에 play()
+      // 하면 카운트인이 끝나기도 전에 원곡 오디오가 먼저 들리는 버그가 된다.
+      if (!track.unlocked || !track.started) continue
+      void track.element.play().catch(() => {
+        // T3-6 모드A 2라운드 지적(High) — playFrom()의 catch와 같은 이유로
+        // 명시적 pause() 추가(위 playFrom() 주석 참고).
+        track.unlocked = false
+        track.element.pause()
+      })
+    }
+  }
+
   function stop(): void {
     for (const track of tracks) {
       track.element.pause()
@@ -113,5 +162,5 @@ export function createTrackPlayer(sources: TrackSource[]): TrackPlayer {
     }
   }
 
-  return { prime, playFrom, resync, setChannelGain, stop, dispose }
+  return { prime, playFrom, resync, setChannelGain, pause, resume, stop, dispose }
 }

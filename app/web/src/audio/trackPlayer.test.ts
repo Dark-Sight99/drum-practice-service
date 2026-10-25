@@ -75,6 +75,23 @@ describe('createTrackPlayer', () => {
     expect(playMock).toHaveBeenCalledTimes(1)
   })
 
+  it('playFrom() pauses the element when play() rejects mid-session (T3-6 모드A 2라운드 지적 — A-B 루프 재진입 중 거부돼도 소리가 안 남아야 함)', async () => {
+    // 루프 재진입 시나리오: 이미 언락된 트랙에 playFrom()을 다시 불렀는데
+    // (예: 네트워크 문제 등으로) 이번엔 거부되는 경우. unlocked=false가 되면
+    // 이후 pause()/resume()이 전부 이 트랙을 건너뛰므로, play() 거부 시점에
+    // 명시적으로 pause()해두지 않으면 끌 방법이 없는 소리가 남을 수 있었다.
+    const player = createTrackPlayer([{ kind: 'stem_drums', url: 'http://x/drums.wav' }])
+    await player.prime()
+    playMock.mockClear()
+    pauseMock.mockClear()
+    playMock.mockRejectedValueOnce(new DOMException('', 'AbortError'))
+
+    player.playFrom(5, 1)
+    await Promise.resolve().then(() => Promise.resolve()) // catch 핸들러가 돌 때까지 마이크로태스크 양보
+
+    expect(pauseMock).toHaveBeenCalledTimes(1)
+  })
+
   it('playFrom() sets preservesPitch/playbackRate/currentTime on unlocked tracks', async () => {
     const player = createTrackPlayer([{ kind: 'stem_drums', url: 'http://x/drums.wav' }])
     await player.prime()
@@ -186,6 +203,93 @@ describe('createTrackPlayer', () => {
     player.dispose()
 
     expect(pauseMock).toHaveBeenCalledTimes(1)
+  })
+
+  describe('pause()/resume()', () => {
+    it('pause() pauses only unlocked tracks', async () => {
+      let callCount = 0
+      playMock.mockImplementation(() => {
+        callCount += 1
+        if (callCount === 2) return Promise.reject(new DOMException('', 'NotAllowedError'))
+        return Promise.resolve(undefined)
+      })
+      const player = createTrackPlayer([
+        { kind: 'stem_drums', url: 'http://x/drums.wav' },
+        { kind: 'stem_bass', url: 'http://x/bass.wav' },
+      ])
+      await player.prime() // stem_bass(2번째 play() 호출)는 언락 실패
+      pauseMock.mockClear()
+
+      player.pause()
+
+      // 언락된 stem_drums만 pause() 호출, 언락 실패한 stem_bass는 건너뜀
+      expect(pauseMock).toHaveBeenCalledTimes(1)
+    })
+
+    it('resume() calls play() again only on tracks already started via playFrom()', async () => {
+      const player = createTrackPlayer([
+        { kind: 'stem_drums', url: 'http://x/drums.wav' },
+        { kind: 'stem_bass', url: 'http://x/bass.wav' },
+      ])
+      await player.prime()
+      player.playFrom(0, 1) // 둘 다 started=true로 만든다
+      playMock.mockClear()
+      playMock.mockResolvedValue(undefined)
+
+      player.resume()
+
+      expect(playMock).toHaveBeenCalledTimes(2)
+    })
+
+    it('resume() does NOT play a track that was primed but never started via playFrom() (T3-6 모드A 지적 — 카운트인 중 일시정지 회귀)', async () => {
+      // 카운트인 중 일시정지→재개를 재현: prime()만 하고 playFrom()은 아직
+      // 한 번도 안 부른 상태. resume()이 여기서 play()를 부르면 Transport가
+      // 아직 카운트인 중인데도 원곡 오디오가 먼저 들리는 버그가 된다.
+      const player = createTrackPlayer([{ kind: 'stem_drums', url: 'http://x/drums.wav' }])
+      await player.prime()
+      playMock.mockClear()
+
+      player.resume()
+
+      expect(playMock).not.toHaveBeenCalled()
+    })
+
+    it('resume() pauses the element when play() rejects (T3-6 모드A 2라운드 지적)', async () => {
+      const player = createTrackPlayer([{ kind: 'stem_drums', url: 'http://x/drums.wav' }])
+      await player.prime()
+      player.playFrom(0, 1) // started=true로 만든다
+      playMock.mockClear()
+      pauseMock.mockClear()
+      playMock.mockRejectedValueOnce(new DOMException('', 'AbortError'))
+
+      player.resume()
+      await Promise.resolve().then(() => Promise.resolve())
+
+      expect(pauseMock).toHaveBeenCalledTimes(1)
+    })
+
+    it('resume() skips a track that failed to unlock', async () => {
+      let callCount = 0
+      playMock.mockImplementation(() => {
+        callCount += 1
+        if (callCount === 2) return Promise.reject(new DOMException('', 'NotAllowedError'))
+        return Promise.resolve(undefined)
+      })
+      const player = createTrackPlayer([
+        { kind: 'stem_drums', url: 'http://x/drums.wav' },
+        { kind: 'stem_bass', url: 'http://x/bass.wav' },
+      ])
+      await player.prime() // stem_bass 언락 실패
+      playMock.mockClear()
+      playMock.mockResolvedValue(undefined)
+      player.playFrom(0, 1) // 언락된 stem_drums만 started=true가 됨
+      playMock.mockClear()
+      playMock.mockResolvedValue(undefined)
+
+      player.resume()
+
+      expect(playMock).toHaveBeenCalledTimes(1)
+    })
   })
 
   describe('setChannelGain()', () => {

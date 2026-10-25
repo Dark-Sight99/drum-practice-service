@@ -105,6 +105,11 @@ export function PracticeCanvas({
   const rafIdRef = useRef<number | null>(null)
   const [activeHandByPiece, setActiveHandByPiece] = useState<ReadonlyMap<DrumPiece, Hand>>(new Map())
   const [isPlaying, setIsPlaying] = useState(false)
+  // T3-6(REQ-04) — "일시정지": isPlaying과 별개 상태(최소 침습, 3상태 union으로
+  // 안 바꿈). isPlaying && isPaused가 동시에 true인 경우는 없음(전이는 아래
+  // handlePause/handlePlay/stopPlayback 세 곳에서만 일어나고 전부 동기적으로
+  // 완결됨 — work/T3-6/plan.md §4 "전이 원자성").
+  const [isPaused, setIsPaused] = useState(false)
   // REQ-12 "상단 바에 R/L 표시 켜기/끄기" — 기본 켜짐(의뢰인이 요청한 핵심 학습
   // 포인트라, 찾아서 켜야 하는 숨김 옵션보다는 기본 노출이 맞다고 판단).
   const [showSticking, setShowSticking] = useState(true)
@@ -472,8 +477,37 @@ export function PracticeCanvas({
   // 셋업 중간중간 "내가 아직 최신 세션인지" 확인하게 한다.
   const playSessionIdRef = useRef(0)
 
+  // T3-6(REQ-04) — 자동 정지 타이머의 "일시정지 중 흐른 시간"을 빼기 위한
+  // 기준. performance.now()(단조 증가, Date.now()와 달리 시스템 시각 변경에
+  // 안 틀어짐)를 쓴다. autoStopRemainingMsRef가 null이면 "이 세션엔 타이머
+  // 자체가 없음"(루프 모드 — handlePlay() 끝에서 안 걺, work/T3-6/plan.md §4).
+  const autoStopTimerIdRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const autoStopRemainingMsRef = useRef<number | null>(null)
+  const autoStopScheduledAtRef = useRef<number | null>(null)
+
+  function pauseAutoStopTimer() {
+    if (autoStopRemainingMsRef.current === null) return // 루프 모드 — 타이머 자체가 없음
+    if (autoStopTimerIdRef.current !== null) clearTimeout(autoStopTimerIdRef.current)
+    const elapsed = performance.now() - (autoStopScheduledAtRef.current ?? performance.now())
+    autoStopRemainingMsRef.current = Math.max(0, autoStopRemainingMsRef.current - elapsed)
+    autoStopTimerIdRef.current = null
+  }
+
+  function resumeAutoStopTimer(fn: () => void) {
+    if (autoStopRemainingMsRef.current === null) return // 루프 모드
+    autoStopScheduledAtRef.current = performance.now()
+    autoStopTimerIdRef.current = setTimeout(fn, autoStopRemainingMsRef.current)
+  }
+
   function stopPlayback() {
     playSessionIdRef.current += 1 // 진행 중인 handlePlay() 셋업이 있으면 무효화
+    // 정지 버튼·자동 정지 자신·언마운트 cleanup이 전부 이 함수를 공유하므로,
+    // 여기서 한 번에 리셋해야 모든 경로에 자동으로 적용된다.
+    if (autoStopTimerIdRef.current !== null) clearTimeout(autoStopTimerIdRef.current)
+    autoStopTimerIdRef.current = null
+    autoStopRemainingMsRef.current = null
+    autoStopScheduledAtRef.current = null
+    setIsPaused(false)
     if (!playbackRef.current) return
     playbackRef.current.handle.stop()
     disposeDrumVoices(playbackRef.current.voices)
@@ -497,7 +531,45 @@ export function PracticeCanvas({
     setIsPlaying(false)
   }
 
+  // T3-6(REQ-04) — "⏸ 일시정지". 모드C 3라운드 C-001 반영: 시작하자마자
+  // playbackRef.current가 살아있는지부터 확인 — 그 사이(예: 자동 정지)에
+  // 세션이 이미 끝났으면 아무 상태도 안 바꾸고 조용히 끝낸다(work/T3-6/
+  // plan.md §4 "전이 원자성"). 살아있으면 Transport pause + 이미 커밋된
+  // 원샷 정지(§3) + 분리 트랙 pause + 자동 정지 타이머 일시정지까지 전부
+  // 동기적으로 완결한다.
+  function handlePause() {
+    if (!playbackRef.current) return
+    playbackRef.current.handle.pause()
+    playbackRef.current.metronome.stopRinging()
+    pauseAutoStopTimer()
+    isPlayingRef.current = false
+    setIsPlaying(false)
+    setIsPaused(true)
+  }
+
   async function handlePlay() {
+    // T3-6(REQ-04) — 일시정지 중이면 "처음부터 새 세션" 로직(아래의 모든
+    // await·stopPlayback() 호출)을 전부 건너뛰고 재개만 한다. 반드시 첫
+    // await보다 먼저, 완전히 동기적으로 끝나야 자동 정지 타이머와의 경쟁이
+    // 안전하다(work/T3-6/plan.md §4). 방어적으로 playbackRef.current가 이미
+    // 사라진 경우(이론상 도달 안 해야 함)도 가드.
+    if (isPaused) {
+      const session = playbackRef.current
+      if (!session) {
+        setIsPaused(false)
+        return
+      }
+      session.handle.resume()
+      // 기존 자동 정지 타이머와 같은 handle 아이덴티티 가드 재사용(새 세대
+      // 토큰 없이 — work/T3-6/plan.md §4).
+      resumeAutoStopTimer(() => {
+        if (playbackRef.current?.handle === session.handle) stopPlayback()
+      })
+      isPlayingRef.current = true
+      setIsPlaying(true)
+      setIsPaused(false)
+      return
+    }
     stopPlayback() // 혹시 이전 재생이 안 끝났으면 먼저 정리(이중 재생 방지) — playSessionIdRef도 여기서 올라감
     const mySessionId = playSessionIdRef.current
     // T3-3(REQ-04) — audioOffsetMs!==0이면 오디오 트랙 자체를 만들지 않는다
@@ -596,7 +668,11 @@ export function PracticeCanvas({
     const lastNoteSeconds = (lastTick / score.ppq) * (60 / playbackBpm)
     const safetyMarginSeconds = 4 // 크래시/라이드 등 길게 울리는 샘플이 다 끝날 시간
     const totalMs = (countInSeconds + lastNoteSeconds + safetyMarginSeconds) * 1000
-    setTimeout(() => {
+    // T3-6(REQ-04) — 일시정지 중 흐른 시간을 나중에 뺄 수 있게 ref로 들고
+    // 있는다(work/T3-6/plan.md §4). 기준 시계는 performance.now().
+    autoStopRemainingMsRef.current = totalMs
+    autoStopScheduledAtRef.current = performance.now()
+    autoStopTimerIdRef.current = setTimeout(() => {
       if (playbackRef.current?.handle === handle) stopPlayback()
     }, totalMs)
   }
@@ -622,7 +698,10 @@ export function PracticeCanvas({
           <button onClick={handlePlay} disabled={isPlaying}>
             ▶ 재생
           </button>
-          <button onClick={handleStop} disabled={!isPlaying}>
+          <button onClick={handlePause} disabled={!isPlaying}>
+            ⏸ 일시정지
+          </button>
+          <button onClick={handleStop} disabled={!isPlaying && !isPaused}>
             ⏹ 정지
           </button>
         </div>
@@ -638,7 +717,7 @@ export function PracticeCanvas({
             max={maxBpm}
             value={playbackBpm}
             onChange={(e) => setPlaybackBpm(clampBpm(Number(e.target.value)))}
-            disabled={isPlaying}
+            disabled={isPlaying || isPaused}
           />
           <input
             type="number"
@@ -659,7 +738,7 @@ export function PracticeCanvas({
             onKeyDown={(e) => {
               if (e.key === 'Enter') e.currentTarget.blur()
             }}
-            disabled={isPlaying}
+            disabled={isPlaying || isPaused}
             style={{ width: 56 }}
           />
           <span style={{ color: 'var(--text-muted)' }}>
@@ -688,7 +767,7 @@ export function PracticeCanvas({
             type="checkbox"
             checked={loopEnabled}
             onChange={(e) => setLoopEnabled(e.target.checked)}
-            disabled={isPlaying}
+            disabled={isPlaying || isPaused}
           />
           ⟲ A-B 루프
         </label>
@@ -723,7 +802,7 @@ export function PracticeCanvas({
               onKeyDown={(e) => {
                 if (e.key === 'Enter') e.currentTarget.blur()
               }}
-              disabled={isPlaying}
+              disabled={isPlaying || isPaused}
               style={{ width: 48 }}
             />
             <span>~</span>
@@ -746,7 +825,7 @@ export function PracticeCanvas({
               onKeyDown={(e) => {
                 if (e.key === 'Enter') e.currentTarget.blur()
               }}
-              disabled={isPlaying}
+              disabled={isPlaying || isPaused}
               style={{ width: 48 }}
             />
           </div>

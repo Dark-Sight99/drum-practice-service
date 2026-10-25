@@ -7,6 +7,14 @@ import type { DrumPiece } from '../score/types'
 export interface DrumVoice {
   /** time: Tone.js Time(초 단위 숫자 권장), velocity: 0~1 정규화값. */
   trigger(time: number, velocity: number): void
+  /** T3-6(REQ-04) — 지금 울리고 있거나(디케이 중) 아직 실제 시각이 안 된
+   * (Tone lookahead로 이미 커밋된) 원샷을 전부 즉시 끊는다. 샘플 버퍼는
+   * 유지 — dispose와 달리 이후 trigger()를 계속 쓸 수 있음.
+   * Transport.pause()는 이미 커밋된 원샷(new Tone.Player(buffer).start(절대시각))
+   * 을 자동으로 멈추지 않으므로(Transport의 틱-위치 동결과 완전히 독립 —
+   * 실제 설치된 Tone.js 15.1.22 Player.js/Source.js 소스로 확인,
+   * work/T3-6/plan.md §3) 일시정지 시 반드시 명시적으로 호출해야 함. */
+  stopAllRinging(): void
   dispose(): void
 }
 
@@ -58,6 +66,16 @@ function sampleVoice(buffer: Tone.ToneAudioBuffer, destination?: Tone.ToneAudioN
         player.dispose()
       }
       player.start(time)
+    },
+    stopAllRinging() {
+      // T3-6 — 스냅샷을 떠서 순회(dispose()와 같은 이유: player.stop()이
+      // 트리거하는 onstop이 Set을 동기적으로 건드리므로 원본을 직접 순회하면
+      // 반복 중 Set이 바뀜). stop()만 부르고 dispose()는 안 부름 — 샘플
+      // 버퍼는 살려둬야 다음 trigger()에 또 쓴다. 실제 제거·dispose는 기존
+      // onstop 핸들러(자연 종료 때와 같은 경로)에 맡긴다.
+      for (const player of Array.from(activePlayers)) {
+        player.stop()
+      }
     },
     dispose() {
       // onstop이 dispose() 중에 다시 끼어들어 Set을 건드리지 않도록 먼저
@@ -118,4 +136,10 @@ export async function createDrumVoices(destination?: Tone.ToneAudioNode): Promis
 
 export function disposeDrumVoices(voices: DrumVoiceMap): void {
   for (const voice of Object.values(voices)) voice.dispose()
+}
+
+/** T3-6(REQ-04) — 9종 전체에 대해 stopAllRinging()을 부른다(일시정지 시
+ * PlaybackHandle.pause()에서 호출). work/T3-6/plan.md §3. */
+export function stopAllRinging(voices: DrumVoiceMap): void {
+  for (const voice of Object.values(voices)) voice.stopAllRinging()
 }
