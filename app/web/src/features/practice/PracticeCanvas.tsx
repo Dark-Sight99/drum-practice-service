@@ -203,6 +203,13 @@ export function PracticeCanvas({
     // T3-4(REQ-05) — 신스 드럼 9종이 공용으로 거치는 게인(한 값으로 전체
     // 조절). Metronome은 이번에 처음 재생 흐름에 연결됨(work/T3-4/plan.md §1).
     synthGain: Tone.Gain
+    // T3-7 모드A 지적(리스크) — 킥(+9dB 보정)과 스네어(원래부터 피크
+    // 거의 0dB)처럼 서로 다른 신스 드럼 원샷이 정확히 같은 순간 겹치면
+    // 합산 파형이 0dBFS를 넘어 디지털 클리핑(찢어지는 소리)이 날 수 있음.
+    // synthGain 바로 뒤에 리미터를 둬 신스 드럼 전체 출력이 절대 넘지
+    // 않게 막는다(실제 설치된 Tone.js Limiter.js 소스 확인 — Compressor를
+    // ratio 20·attack 3ms·release 10ms로 감싼 전용 컴포넌트).
+    limiter: Tone.Limiter
     metronome: Metronome
   } | null>(null)
   // Codex 모드A C-001(재현됨): 렌더 루프가 재생 여부와 무관하게 매 프레임
@@ -613,6 +620,9 @@ export function PracticeCanvas({
     // Gain부터 지워 끊기는" 경우가 없다. Player.dispose()는 이 Gain 자체를
     // 안 지우므로 명시적으로 여기서 지워야 함(안 하면 재생할 때마다 누적 leak).
     playbackRef.current.synthGain.dispose()
+    // T3-7 — 리미터는 synthGain보다 더 다운스트림이라 같은 이유로 그 다음에
+    // 지운다(이미 끊긴 뒤라 안전).
+    playbackRef.current.limiter.dispose()
     playbackRef.current.metronome.dispose()
     // T3-3(REQ-04) — TrackPlayer는 재생 1회당 1개 수명(work/T3-3/plan.md §4
     // 생명주기) — DrumVoiceMap과 똑같이 여기서 버려야 다음 handlePlay()가 새
@@ -691,11 +701,13 @@ export function PracticeCanvas({
     // 그때까지 만든 리소스(트랙·Gain·voices·메트로놈)를 전부 정리하고
     // 중단한다 — 안 그러면 취소된 세션의 오디오가 계속 돌거나 리소스가 샌다.
     let synthGain: Tone.Gain | undefined
+    let limiter: Tone.Limiter | undefined
     let voices: DrumVoiceMap | undefined
     let metronome: Metronome | undefined
     function cleanupAbortedSetup(): void {
       tracks?.dispose()
       synthGain?.dispose()
+      limiter?.dispose()
       if (voices) disposeDrumVoices(voices)
       metronome?.dispose()
     }
@@ -706,7 +718,15 @@ export function PracticeCanvas({
       // Gain(linear 게인, Tone.Gain 기본 단위가 "gain" — 실제 설치된 Tone.js
       // 소스로 확인) 하나를 만들어 destination에 연결해두고 넘긴다 — 이걸로
       // "신스 드럼 전체" 볼륨을 한 번에 조절할 수 있다.
-      synthGain = new Tone.Gain(1).connect(Tone.getDestination())
+      // T3-7 모드A 지적(리스크) — synthGain과 destination 사이에 리미터를
+      // 끼워 넣어, 여러 피스가 동시에 울려 합산 파형이 0dBFS를 넘으려 하면
+      // (예: +9dB 보정된 킥과 피크가 이미 -0.2dB인 스네어가 겹침) 찢어지는
+      // 소리 없이 깎아낸다. 임계값 -1dB — 평소 단일 타격(피크 대부분
+      // -3dB 이하)은 전혀 안 건드리고, 겹칠 때만 개입(Compressor
+      // ratio=20·attack=3ms·release=10ms, Tone.js 기본값 그대로 — 거의
+      // 하드 리미터에 가까움, 실제 설치된 Limiter.js 소스로 확인).
+      limiter = new Tone.Limiter(-1).connect(Tone.getDestination())
+      synthGain = new Tone.Gain(1).connect(limiter)
       voices = await createDrumVoices(synthGain)
       if (playSessionIdRef.current !== mySessionId) {
         cleanupAbortedSetup()
@@ -734,7 +754,7 @@ export function PracticeCanvas({
       loop,
       tracks: tracks ?? undefined,
     })
-    playbackRef.current = { handle, voices, tracks, synthGain, metronome }
+    playbackRef.current = { handle, voices, tracks, synthGain, limiter, metronome }
     // 방금 만든 세션에 지금 믹서 상태를 바로 적용(처음부터 맞게 시작 —
     // work/T3-4/plan.md §4, "handlePlay()가 세션을 만들 때는 그 시점의
     // mixerStateRef.current를 그대로 읽어 처음부터 맞게 구성").

@@ -16,7 +16,7 @@
 ```
 cd app/web
 npx tsc --noEmit        # 통과
-npm test -- --run       # 17 test files / 189 tests 모두 통과(회귀 없음 — LANES 순서를 검증하는 테스트가 없어 그대로 통과)
+npm test -- --run       # 17 test files / 189 tests 모두 통과(회귀 없음 — LANES 순서를 검증하는 테스트가 없어 그대로 통과, 리미터 추가 후 재확인)
 npm run lint            # oxlint 통과, 경고 없음
 ```
 킥 음량 보정 자체는 자동 테스트 추가 안 함 — `PIECE_GAIN_BOOST_DB`는 비공개 상수고, `trigger()`의 실제 재생은 jsdom에 Web Audio가 없어 이 파일 전체가 기존부터 단위 테스트 범위 밖(순수 함수 `velocityToDb`만 테스트해온 기존 선례와 동일한 기준 — work/T3-6/plan.md에서도 같은 판단).
@@ -26,6 +26,9 @@ npm run lint            # oxlint 통과, 경고 없음
 - 재생 시작 → 콘솔 에러 0건, 재생/일시정지/정지 버튼 상태 정상 전환(킥 보정 게인 적용이 Tone.Player 생성·트리거에 문제를 일으키지 않음을 확인).
 - (참고) 테스트 중 임시로 띄운 별도 preview 서버 인스턴스에서 드럼 샘플 9개가 전부 ERR_CONNECTION_REFUSED로 실패하는 현상이 재현됐으나, 같은 코드를 의뢰인이 쓰던 기존 장기 실행 dev 서버(5173)의 새 탭에서 재시도하자 0건 에러로 정상 재생됨 — 반복적으로 껐다 켠 테스트용 서버 인스턴스 쪽의 일시적 현상으로 판단, 코드 문제 아님(같은 커밋으로 안정된 서버에서 재현 안 됨).
 - 킥 소리 자체가 실제로 더 크게 들리는지는 Claude가 들을 수 없어 가청 검증 불가 — ffmpeg 실측값(§변경 내용 1)이 근거. 의뢰인 실사용 확인 필요.
+
+## 모드A 지적(리스크, 반영함)
++9dB 보정된 킥(단독 피크 약 -4dB)과 스네어(원래부터 피크 -0.2dB)처럼 서로 다른 신스 드럼 원샷이 정확히 같은 순간 겹치면, 각자는 안전해도 합산 파형이 0dBFS를 넘어 디지털 클리핑(찢어지는 소리)이 날 수 있다는 지적 — 단독 피크만으로는 동시 재생 안전을 보장 못 함. `PracticeCanvas.tsx`의 `synthGain`(신스 드럼 9종 공용 게인)과 destination 사이에 `Tone.Limiter(-1)`를 추가(실제 설치된 Tone.js `Limiter.js` 소스로 내부가 `Compressor(ratio=20, attack=3ms, release=10ms)`임을 확인 — 사실상 하드 리미터). 평소 단일 타격(대부분 피크 -3dB 이하)은 전혀 안 건드리고, 겹칠 때만 개입해 0dBFS를 못 넘게 막음. `playbackRef`/`cleanupAbortedSetup`/`stopPlayback()` 생명주기에 `limiter`를 `synthGain`과 같은 패턴으로 추가(생성 시 함께 만들고, 정지 시 synthGain 다음에 dispose — 이미 검증된 "업스트림 먼저, 다운스트림 나중" 순서 재사용).
 
 ## 결론
 레인 순서 변경은 코드·브라우저로 확실히 검증됨. 킥 음량 보정은 측정값 기반으로 적용했으나 "충분히 커졌는지"는 의뢰인이 직접 들어봐야 확정 가능 — 부족하거나 과하면 `PIECE_GAIN_BOOST_DB.kick` 값(현재 9)만 조정하면 됨.
