@@ -1,6 +1,12 @@
-> 한 줄 요약: T3-9(REQ-04) 설계안 — 재생 위치 탐색(±10초) + "여기서 시작/여기까지" 버튼으로 현재 위치를 A-B 루프 마디로 바로 지정. Tone.js `Transport.seconds` setter가 공식 지원하는 "즉시 점프" 기능과 `schedule()`이 기본적으로 틱 재방문 시 자동 재발화하는 동작(둘 다 실제 설치된 소스로 확인)을 그대로 활용해, 새 재스케줄링 로직 없이 구현한다. "오디오 타이밍·동기" 위험 작업 — 구현 전 Codex 모드C 검수 대상.
+> 한 줄 요약: T3-9(REQ-04) 설계안 v2 — 재생 위치 탐색(±10초) + "여기서 시작/여기까지" 버튼으로 현재 위치를 A-B 루프 마디로 바로 지정. 모드C 1라운드 BLOCKING 2건 반영: (C-001) 재생 중 마디를 찍어도 네이티브 루프에 즉시 반영되는 경로가 없었음 → §6 추가. (C-002) seek이 T3-6 자동 정지 타이머를 재계산 안 함 → §7 추가. "오디오 타이밍·동기" 위험 작업 — 구현 전 Codex 모드C 검수 대상.
 
-# T3-9 재생 위치 탐색 + 현재 위치로 A-B 구간 지정 — 설계
+# T3-9 재생 위치 탐색 + 현재 위치로 A-B 구간 지정 — 설계 v2
+
+## 모드C 1라운드 반영 내역
+1라운드 BLOCKING 지적 2건:
+- **C-001(필수)**: 마킹 버튼은 재생 중 사용 가능하고 "여기까지"는 `loopEnabled`를 켜지만, 이건 React 상태만 바꿀 뿐 — `playDrumScore()`는 **재생 시작 시점**의 루프 구간으로 `transport.setLoopPoints()`/`transport.loop`를 1회 설정할 뿐, 재생 중 바뀐 `loopRef`를 이미 돌고 있는 Transport에 다시 적용하는 경로가 없었음. 그래서 재생 중 A-B 지점을 찍어도 **지금 재생에는 루프가 안 걸림**(다음에 정지 후 다시 재생해야 적용) — §6에서 "재생 중 루프 설정 즉시 반영" 경로를 새로 추가해 해소.
+- **C-002(필수)**: 자동 정지 타이머(T3-6)는 재생 시작 때 산정한 전체 길이로 예약되고 일시정지·재개 때만 남은 시간을 재계산함 — seek은 이 타이머를 전혀 건드리지 않음. 뒤로 seek하면 곡이 실제로 끝나기 전에 타이머가 먼저 재생을 끊을 수 있고, 앞으로 seek하면 곡이 이미 끝난 뒤에도 타이머가 한참 남아있을 수 있음 → §7에서 seek 시 타이머를 재계산하도록 추가.
+권장 사항(C-003~C-006)도 반영: §1에 "재발화가 모든 seek 상황에서 끊김 없는 재생을 보장하진 않는다"는 범위를 명확히 함(건너뛴 구간 노트는 안 울림, 이미 울리던 꼬리는 안 끊김 — 원래도 §가정·한계에 있었지만 QA 항목으로도 명시), §4에 `Number.isFinite` 방어 추가, §QA계획에 "루프 구간 밖으로 seek" 시나리오 추가. C-005(playFrom() 중 거부 처리)는 seek 전용 결함이 아니라 기존 재생 거부 처리의 한계라는 Codex 의견에 동의 — 추가 조치 없이 수용.
 
 ## 근거 REQ
 REQ-04(2026-10-25 추가, 의뢰인 실사용 피드백): "A-B 루프 이거 마디수를 입력하는 방식으로는 활용 못하겠는데? 노래 듣다가 잘 안되는 부분이 있어서 거기 반복하려고 하는데 지금 듣고 있는 부분이 몇 번째 마디인지 어떻게 아는데 악보가 없으면."
@@ -21,6 +27,7 @@ REQ-04(2026-10-25 추가, 의뢰인 실사용 피드백): "A-B 루프 이거 마
 - 같은 파일 449~467행 `set ticks(t)` — 재생 중(`state === "started"`)이면 `"stop"` 이벤트를 아주 가까운 미래 시각에 발행 → 틱 위치를 새 값으로 설정 → `"start"` 이벤트를 발행하는 "멈췄다 그 자리에서 다시 시작"하는 내부 동작. 재생 중이 아니면(정지·일시정지) 그냥 바로 틱 위치만 바꿈. 둘 다 즉시 점프를 지원.
 - **핵심 — 왜 노트를 다시 스케줄링할 필요가 없는가**: `node_modules/tone/build/esm/core/clock/TransportEvent.js`의 `invoke(time)`(45~53행)을 보면, `this._once`가 `true`일 때만 발화 후 `this.transport.clear(this.id)`로 스스로를 제거한다. `Transport.js`의 `schedule()`(160~166행)이 만드는 `TransportEvent`는 `once` 옵션을 아예 안 넘기므로 기본값 `false`(`TransportEvent.js` 28~34행 `getDefaults()`)가 적용된다 — 즉 **`scorePlayer.ts`가 `transport.schedule()`로 예약한 노트·카운트인 이벤트는 한 번 울렸다고 타임라인에서 사라지지 않는다.** Transport의 내부 처리 루프(`Transport.js` 140~143행 `this._timeline.forEachAtTime(ticks, (event) => event.invoke(tickTime))`)는 "지금 틱"에 걸린 이벤트를 그때그때 부를 뿐이라, 뒤로 점프해서 같은 틱을 다시 지나가면 **자동으로 다시 발화한다** — 루프(A-B 반복) 경계에서 이벤트가 끊김 없이 재발화하는 것(work/T2-4/plan.md §설계)과 완전히 같은 메커니즘. 앞으로 점프(건너뛰기)하면 건너뛴 구간의 이벤트는 그 틱을 "지나가며" 호출되는 게 아니라 틱이 불연속으로 점프하므로 자연히 건너뛰어짐(의도된 동작 — 건너뛴 구간 노트가 한꺼번에 몰려 울리지 않음).
 - 결론: **`transport.seconds = target`만으로 즉시 점프 + 이미 지난 구간으로 되감아도 노트가 다시 들리는 동작이 전부 공짜로 된다.** T3-6처럼 "원샷이 Transport와 독립적으로 계속 울릴 수 있다"는 문제는 여기선 해당 없음(점프는 pause와 달리 "지금 울리는 소리를 그대로 두고 틱만 얼리는" 게 아니라 틱 자체가 이동하는 것이라 다른 범주의 동작) — 다만 점프하는 "그 순간" 울리고 있던 소리(디케이 중인 크래시 등)는 자연스럽게 끊기지 않고 계속 울릴 수 있음(§가정·한계에 명시, 수용 가능한 수준으로 판단).
+- **(모드C 1라운드 C-003 반영, 범위 명확화)** "재발화가 보장된다"는 건 **"그 틱에 걸린 `schedule()` 이벤트가 다시 호출된다"**는 뜻이지, 모든 seek 상황에서 완벽히 끊김 없는 재생을 보장한다는 뜻이 아니다 — 앞으로 건너뛴 구간의 노트는 (불연속 점프라 그 틱을 "지나가지" 않으므로) 원래 의도대로 안 울리고, 점프하는 순간 이미 울리고 있던 소리의 꼬리는 seek 자체로 끊기지 않는다(바로 위 문단과 같은 내용, QA 항목에도 명시 — 아래 §QA계획).
 
 ### 2. 분리 오디오 트랙 — 기존 `playFrom()` 재사용(새 메서드 불필요)
 `trackPlayer.ts`의 `playFrom(songPositionSeconds, playbackRate)`는 이미 "주어진 위치로 이동 후 재생 시작"을 하는 함수(T3-3에서 루프 재진입에 쓰던 것과 정확히 같은 책임) — `.play()`를 다시 불러도 이미 재생 중인 엘리먼트엔 해가 없음(표준 동작). 점프 시 `tracks.playFrom(newPositionInTrackSeconds, playbackRate)`를 그대로 호출하면 끝 — 새 메서드 불필요.
@@ -47,11 +54,12 @@ export function barIndexForSeconds(
   songStartSeconds: number,
   barSeconds: number,
 ): number {
-  if (barSeconds <= 0) return 0
+  if (!Number.isFinite(positionSeconds) || !Number.isFinite(songStartSeconds)) return 0
+  if (!Number.isFinite(barSeconds) || barSeconds <= 0) return 0
   return Math.max(0, Math.floor((positionSeconds - songStartSeconds) / barSeconds))
 }
 ```
-단위 테스트: 정확히 마디 경계일 때, 마디 중간일 때, `songStartSeconds` 이전(카운트인 중)일 때 0으로 클램프되는지, `barSeconds<=0` 방어.
+단위 테스트: 정확히 마디 경계일 때, 마디 중간일 때, `songStartSeconds` 이전(카운트인 중)일 때 0으로 클램프되는지, `barSeconds<=0` 방어, `NaN`/`Infinity` 입력 방어(모드C 1라운드 C-004 권장 반영 — 실제 호출부는 항상 유효한 값만 넘기지만 방어 비용이 저렴해 추가).
 
 ### 5. `PracticeCanvas.tsx` 연동
 
@@ -99,8 +107,81 @@ function markLoopPointFromCurrentPosition(which: 'start' | 'end') {
 - 버튼: "⏱ 여기서 시작" / "⏱ 여기까지" — `disabled={!isPlaying && !isPaused}`(재생 세션 필요, 재생/일시정지 둘 다 허용).
 - 기존 BPM/루프 입력의 "재생 중엔 잠금" 규칙(§기존 설계)과 달리, 이 두 버튼은 **재생 중에도 활성** — 애초에 "재생하면서 듣다가 누르는" 게 전체 기능의 목적이므로 잠그면 기능 자체가 성립 안 함. 숫자 입력칸(루프 시작/끝)은 기존 규칙 그대로 재생 중 잠금 유지 — 이 두 버튼은 "숫자칸에 값을 대신 채워주는" 경로일 뿐, 숫자칸 자체의 잠금 정책을 바꾸지 않음(버튼 클릭은 `setLoopStartBar1`/`setLoopEndBar1`을 직접 호출하므로 `disabled` 숫자칸과 무관하게 동작 — React state 변경 자체엔 DOM `disabled` 속성이 영향 없음).
 
+### 6. [모드C 1라운드 C-001 반영] 재생 중 루프 설정을 실제로 돌고 있는 Transport에 즉시 반영
+
+**문제**: `playDrumScore()`(`scorePlayer.ts`)는 `handlePlay()` 호출 시점에 딱 한 번 `transport.setLoopPoints(...)`·`transport.loop = true`를 건다. 이후 `loopEnabled`/`loopStartBar1`/`loopEndBar1`(React state)이 바뀌어도 — 기존 숫자 입력칸이든 이번에 추가하는 마킹 버튼이든 — 이미 돌고 있는 그 Transport 인스턴스엔 아무 영향이 없다. 숫자 입력칸은 재생 중 `disabled`라 지금까지 이 틈이 드러나지 않았을 뿐, 마킹 버튼은 **재생 중에도 활성**이라(§5) 이 틈이 바로 체감됨.
+
+**근거(실제 설치된 소스로 확인)**: `Transport.js`의 틱 처리 루프(§1에서 인용한 `_bindClockEvents`/클럭 콜백 근처) — 루프 여부·경계 판정(`if (this._loop.get(tickTime)) { if (ticks >= this._loopEnd) {...} }`)은 매 틱마다 `this._loopStart`/`this._loopEnd`의 **그 순간 값**을 읽어 판정한다(한 번 캐시해두는 구조가 아님) — 즉 재생 도중 `transport.setLoopPoints()`/`transport.loop`를 다시 호출해도 다음 틱부터 바로 반영된다(Tone.js가 "재생 시작 전에만 설정 가능"으로 제한하지 않음).
+
+**설계**: `clock.ts`(MasterClock)에 메서드 2개 추가(§3의 `setPositionSeconds`와 같은 자리):
+```ts
+export interface MasterClock {
+  // ...
+  setLoopPoints(startSeconds: number, endSeconds: number): void
+  setLoopEnabled(enabled: boolean): void
+}
+```
+구현: `setLoopPoints(s, e) { transport.setLoopPoints(s, e) }`, `setLoopEnabled(enabled) { transport.loop = enabled }`.
+
+`PracticeCanvas.tsx`에 새 `useEffect` 추가(기존 "재생 중 믹서 상태가 바뀌면 즉시 반영" useEffect와 정확히 같은 패턴 — `playbackRef.current` 존재 여부로만 게이트):
+```ts
+useEffect(() => {
+  if (!playbackRef.current) return // 세션 없으면 반영할 Transport 자체가 없음
+  const clock = getMasterClock()
+  if (!loopEnabled) {
+    clock.setLoopEnabled(false)
+    return
+  }
+  const barSeconds = barDurationSeconds(score.meta.timeSignature, playbackBpmRef.current)
+  const songStartSeconds = barSeconds * COUNT_IN_BARS
+  // scorePlayer.ts/computePlaybackSchedule()과 똑같은 공식(loop.startBar는
+  // 0-기준) — 두 곳이 서로 다른 공식을 쓰면 "처음 재생할 땐 맞는데 마킹
+  // 버튼으로 바꾸면 살짝 어긋나는" 불일치가 생길 수 있어 반드시 일치시킴.
+  clock.setLoopPoints(
+    songStartSeconds + barSeconds * (loopStartBar1 - 1),
+    songStartSeconds + barSeconds * loopEndBar1,
+  )
+  clock.setLoopEnabled(true)
+}, [loopEnabled, loopStartBar1, loopEndBar1])
+```
+이 effect는 마킹 버튼이 state를 바꿀 때뿐 아니라, (이론상) 숫자 입력칸이 나중에 재생 중 잠금 해제되는 경우에도 똑같이 동작한다 — 일반화된 "루프 설정은 항상 살아있는 세션에 반영된다"는 불변식이 생기는 셈(부작용이 아니라 의도된 일반화).
+
+### 7. [모드C 1라운드 C-002 반영] seek 시 자동 정지 타이머(T3-6) 재계산
+
+**문제**: T3-6에서 만든 자동 정지 타이머(`autoStopTimerIdRef`/`autoStopRemainingMsRef`/`autoStopScheduledAtRef`)는 "일시정지 중 흐른 시간"만 빼는 로직이라, seek으로 위치가 통째로 바뀌는 상황을 전혀 모른다. 뒤로 seek하면 곡이 실제로 다시 끝나기 전에 타이머가 먼저 발동해 조기 정지시킬 수 있고, 앞으로 seek하면 곡이 이미 끝난 뒤에도 타이머가 쓸데없이 한참 남아있을 수 있다.
+
+**설계**: `handlePlay()`가 자동 정지 타이머를 최초로 걸 때 쓰는 "곡이 끝나는 절대 위치"(카운트인 + 마지막 노트 + 안전 여유, `countInSeconds + lastNoteSeconds + safetyMarginSeconds` — 기존 `totalMs/1000`과 같은 값, `clock.getPositionSeconds()`와 같은 좌표계) 계산을 공유 함수로 뽑아 seek 시에도 재사용한다:
+```ts
+function songEndPositionSeconds(): number {
+  const countInSeconds = barDurationSeconds(score.meta.timeSignature, playbackBpmRef.current)
+  const lastTick = Math.max(0, ...score.notes.map((n) => n.tick))
+  const lastNoteSeconds = (lastTick / score.ppq) * (60 / playbackBpmRef.current)
+  const safetyMarginSeconds = 4
+  return countInSeconds + lastNoteSeconds + safetyMarginSeconds
+}
+```
+`handlePlay()`의 기존 `totalMs` 계산을 `songEndPositionSeconds() * 1000`으로 교체(기존 로직과 동일한 값 — 공식을 한 곳으로 모아 §6과 같은 이유로 불일치 방지). `handleSeek()`은 점프 직후 이 값을 이용해 남은 시간을 다시 계산하고 타이머를 재설정:
+```ts
+function handleSeek(deltaSeconds: number) {
+  const session = playbackRef.current
+  if (!session) return
+  // ...기존 점프 로직(§5)...
+  if (autoStopRemainingMsRef.current !== null) { // 루프 모드면 애초에 타이머가 없음(null) — 그대로 둠
+    if (autoStopTimerIdRef.current !== null) clearTimeout(autoStopTimerIdRef.current)
+    const remainingMs = Math.max(0, (songEndPositionSeconds() - target) * 1000)
+    autoStopRemainingMsRef.current = remainingMs
+    autoStopScheduledAtRef.current = performance.now()
+    const handle = session.handle
+    autoStopTimerIdRef.current = setTimeout(() => {
+      if (playbackRef.current?.handle === handle) stopPlayback()
+    }, remainingMs)
+  }
+}
+```
+기존 T3-6의 `handle` 아이덴티티 가드·`autoStopRemainingMsRef === null`(루프 모드 무시) 규칙을 그대로 재사용 — 새 메커니즘 없음.
+
 ## 위험 분류 — Codex 모드C 대상
-- **오디오 타이밍·동기**: Transport 위치를 임의로 점프시키고(§1) 분리 오디오 트랙도 같은 위치로 맞춰야 함(§2). 특히 점프 직후 노트·오디오 트랙·레인 표시(이미 `getMasterClock().getPositionSeconds()` 기반으로 매 프레임 다시 그려지므로 추가 작업 불필요 — rAF 루프가 알아서 새 위치를 반영)가 전부 같은 지점에서 다시 맞는지가 핵심 검증 대상.
+- **오디오 타이밍·동기**: Transport 위치를 임의로 점프시키고(§1) 분리 오디오 트랙도 같은 위치로 맞춰야 함(§2). 재생 중인 Transport의 루프 설정을 실시간으로 갱신(§6)하고, T3-6 자동 정지 타이머도 seek에 맞춰 재계산(§7)해야 함. 특히 점프 직후 노트·오디오 트랙·레인 표시(이미 `getMasterClock().getPositionSeconds()` 기반으로 매 프레임 다시 그려지므로 추가 작업 불필요 — rAF 루프가 알아서 새 위치를 반영)·루프 경계·자동 정지 타이밍이 전부 같은 지점에서 다시 맞는지가 핵심 검증 대상.
 - 새 공개 API·DB 스키마 변경 없음(순수 프런트 재생 위치 조작).
 
 ## QA 계획
@@ -115,6 +196,9 @@ function markLoopPointFromCurrentPosition(which: 'start' | 'end') {
    - (e) 곡 시작 근처(카운트인 구간)에서 "10초 뒤로"를 눌러도 음수/비정상 위치로 안 가는지, 곡 끝 근처에서 "10초 앞으로"를 눌러도 범위를 안 넘는지.
    - (f) 일시정지 중에도 탐색·마킹 버튼이 동작하는지(§1에서 확인한 대로 Transport가 멈춰 있어도 점프는 지원).
    - (g) 점프 직후 직전에 울리던 디케이 긴 소리(크래시 등)가 어떻게 들리는지 확인(§가정·한계 — 끊기지 않고 계속 울릴 수 있음, 수용 가능한지 재확인).
+   - (h) **(모드C 1라운드 C-001 회귀)** 재생 중 "여기서 시작"→"여기까지"로 A-B 구간을 지정하면, 정지·재시작 없이 **바로 그 구간을 반복**하는지 직접 들어서 확인(§6에서 고친 핵심 — 이게 안 되면 기능 전체가 무의미).
+   - (i) **(모드C 1라운드 C-002 회귀)** 곡이 끝나갈 즈음 "10초 뒤로"를 눌러 뒤로 seek한 뒤, 곡이 실제로 다시 끝날 때까지 자동 정지가 조기 발동하지 않는지. 반대로 곡 끝 근처로 "10초 앞으로" seek했을 때 자동 정지가 비정상적으로 오래 안 걸리는지(남은 시간이 거의 0에 가깝게 재계산되는지).
+   - (j) **(모드C 1라운드 C-006 권장 반영)** A-B 루프가 켜진 채로 그 구간 밖으로 seek했을 때, Transport의 네이티브 루프가 다음에 `loopEnd`를 지날 때 정상적으로 루프 구간 안으로 되돌아오는지(의도된 "루프 밖에서 놀다가 자동으로 루프 안으로 복귀"가 이상하게 느껴지지 않는지 체감 확인).
 3. 기존 회귀: A-B 루프 자체(기존 숫자 입력 경로)·BPM 변경·일시정지/재개(T3-6)가 이번 변경으로 깨지지 않는지 재확인.
 
 ## 가정·한계
