@@ -31,7 +31,6 @@ import {
 } from '../../audio'
 import { fetchPracticeSetting, saveMixerSetting, songAudioUrl } from '../../api/songs'
 import type { DrumPiece, DrumScore, Hand } from '../../score/types'
-import { DEFAULT_START_HAND, recommendSticking } from '../../score/sticking'
 import { createLaneRenderer, type LaneRenderer } from '../../render/laneRenderer'
 import { KitIllustration } from '../../render/KitIllustration'
 
@@ -48,6 +47,9 @@ const COUNT_IN_BARS = 1
 // "루프 경계 같은 큰 점프"만 잡고 고정 지연 수준은 상시 보정하지 않게 한다.
 const TRACK_RESYNC_INTERVAL_MS = 750
 const TRACK_RESYNC_THRESHOLD_SECONDS = 0.1
+
+// 2026-10-25(의뢰인 요청) — "노트가 떨어지는 크기는 고정"(아래 <canvas> 참고).
+const PRACTICE_LANE_MAX_WIDTH_PX = 520
 
 // T3-4(REQ-05) — 믹서 UI에 쓸 채널 표시 이름.
 const CHANNEL_LABELS: Record<ChannelKey, string> = {
@@ -165,13 +167,6 @@ export function PracticeCanvas({
   // handlePause/handlePlay/stopPlayback 세 곳에서만 일어나고 전부 동기적으로
   // 완결됨 — work/T3-6/plan.md §4 "전이 원자성").
   const [isPaused, setIsPaused] = useState(false)
-  // REQ-12 "상단 바에 R/L 표시 켜기/끄기" — 기본 켜짐(의뢰인이 요청한 핵심 학습
-  // 포인트라, 찾아서 켜야 하는 숨김 옵션보다는 기본 노출이 맞다고 판단).
-  const [showSticking, setShowSticking] = useState(true)
-  const showStickingRef = useRef(showSticking)
-  useEffect(() => {
-    showStickingRef.current = showSticking
-  }, [showSticking])
   const isPortraitPhone = usePortraitPhoneLayout()
   // 재생 중인 핸들·보이스를 들고 있다가 정지/언마운트 시 반드시 정리한다 —
   // 안 그러면 Transport에 예약된 이벤트가 남아 있다가 재생을 다시 시작했을 때
@@ -519,16 +514,6 @@ export function PracticeCanvas({
   // T3-3(REQ-04) — 오디오 트랙 리싱크 폴링 스로틀(위 TRACK_RESYNC_INTERVAL_MS).
   const lastTrackResyncAtRef = useRef(0)
 
-  // REQ-12 — 손 정보가 없는(또는 일부만 지정된) 곡도 연습 화면에서 바로 R/L을
-  // 볼 수 있게, 저장 없이 그 자리에서 자동 추천을 계산해 보여준다(편집기에서
-  // "자동 추천 재적용"을 눌러야만 보이던 기존 흐름의 보완 — Phase 2 게이트
-  // 피드백). 재생(`playDrumScore`)은 hand/handSource를 전혀 읽지 않으므로 원본
-  // `score`를 그대로 쓰고, 이 계산 결과는 화면 표시 전용.
-  const displayScore = useMemo<DrumScore>(
-    () => ({ ...score, notes: recommendSticking(score.notes, score.ppq, DEFAULT_START_HAND) }),
-    [score],
-  )
-
   useEffect(() => {
     function loop() {
       const clock = getMasterClock()
@@ -558,13 +543,15 @@ export function PracticeCanvas({
         }
       }
       if (renderer) {
+        // R/L 표시 제거(2026-10-25, 의뢰인 피드백 "안 맞는 게 너무 많아서") — 자동
+        // 추천 손 배정 자체가 부정확해 레인/킷 어느 쪽도 더 이상 표시하지 않음.
         const rendered = renderer.render(
-          displayScore,
+          score,
           positionSeconds,
           songStartSeconds,
           barsVisible,
           playbackBpmRef.current,
-          showStickingRef.current,
+          false,
         )
         // 정지 중에는 마스터 클록 위치가 고정돼 있어, 그 고정 위치 근처에 노트가
         // 있으면 계속 "히트"로 잡혀 킷이 켜진 채 남는다 — 재생 중일 때만 점등
@@ -624,7 +611,7 @@ export function PracticeCanvas({
     return () => {
       if (rafIdRef.current !== null) cancelAnimationFrame(rafIdRef.current)
     }
-  }, [score, displayScore, barsVisible, totalBars])
+  }, [score, barsVisible, totalBars])
 
   // T3-4 모드A 1라운드 지적(High) — handlePlay()의 비동기 셋업 구간(아래
   // await들 사이)에는 아직 playbackRef.current가 없어, 그 틈에 정지를
@@ -1030,22 +1017,25 @@ export function PracticeCanvas({
           </select>
         </label>
 
-        <label style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
-          {/* disabled 제거(T3-9-feedback-1): T3-9의 §6 live-reapply effect가 재생/일시정지 중
-           * 루프 on/off를 이미 Transport에 즉시 반영하므로 잠글 이유가 없음(모드A 검수 완료). */}
-          <input
-            type="checkbox"
-            checked={loopEnabled}
-            onChange={(e) => setLoopEnabled(e.target.checked)}
-          />
-          ⟲ A-B 루프
-        </label>
-
-        {/* T3-9(REQ-04, 의뢰인 피드백) — "지금 듣고 있는 부분이 몇 번째
-         * 마디인지 악보 없이는 모른다"는 지적에, 재생 위치를 그대로 A-B 루프
-         * 경계로 찍는 버튼. 숫자 입력칸(아래)과 달리 재생 중에도 활성 —
-         * "듣다가 바로 누르는" 게 기능의 목적(work/T3-9/plan.md §5). */}
-        <div style={{ display: 'flex', gap: 'var(--space-2)' }}>
+        {/* T3-9-feedback-2(2026-10-25, 의뢰인 요청) — A-B 루프 체크박스와
+         * "여기서 시작"/"여기까지" 버튼을 한 그룹으로 묶어 항상 옆에 붙어
+         * 보이게 함(기존엔 각자 별도 flex 아이템이라 화면이 좁아지면 줄바꿈으로
+         * 서로 떨어져 보일 수 있었음). */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
+            {/* disabled 제거(T3-9-feedback-1): T3-9의 §6 live-reapply effect가 재생/일시정지 중
+             * 루프 on/off를 이미 Transport에 즉시 반영하므로 잠글 이유가 없음(모드A 검수 완료). */}
+            <input
+              type="checkbox"
+              checked={loopEnabled}
+              onChange={(e) => setLoopEnabled(e.target.checked)}
+            />
+            ⟲ A-B 루프
+          </label>
+          {/* T3-9(REQ-04, 의뢰인 피드백) — "지금 듣고 있는 부분이 몇 번째
+           * 마디인지 악보 없이는 모른다"는 지적에, 재생 위치를 그대로 A-B 루프
+           * 경계로 찍는 버튼. 숫자 입력칸(아래)과 달리 재생 중에도 활성 —
+           * "듣다가 바로 누르는" 게 기능의 목적(work/T3-9/plan.md §5). */}
           <button
             onClick={() => markLoopPointFromCurrentPosition('start')}
             disabled={!isPlaying && !isPaused}
@@ -1059,15 +1049,6 @@ export function PracticeCanvas({
             ⏱ 여기까지
           </button>
         </div>
-
-        <label style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
-          <input
-            type="checkbox"
-            checked={showSticking}
-            onChange={(e) => setShowSticking(e.target.checked)}
-          />
-          R/L 표시
-        </label>
         {loopEnabled && (
           <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
             <span>마디</span>
@@ -1120,7 +1101,27 @@ export function PracticeCanvas({
         )}
       </div>
 
-      <canvas ref={canvasRef} style={{ width: '100%', height: 400, background: 'var(--bg)' }} />
+      {/* 레인 폭 고정(2026-10-25, 의뢰인 요청) — "화면을 넓게 쓰더라도 노트가
+       * 떨어지는 크기는 고정하고 그 외 여백은 배경으로 채우고 싶다"는 요청.
+       * `maxWidth: PRACTICE_LANE_MAX_WIDTH_PX` + `margin: '0 auto'`로 좁은
+       * 화면(모바일)에서는 기존처럼 꽉 채우고, 넓은 화면에서는 그 이상
+       * 넓어지지 않고 중앙 정렬 + 좌우는 `<main>`의 배경색(--bg)이 그대로
+       * 보이게 둔다(laneRenderer.ts가 매 프레임 canvas.clientWidth를 읽어
+       * 내부 해상도를 맞추므로 렌더러 쪽 변경 불필요). 구체 px 값은 의뢰인이
+       * 보낸 스크린샷의 창 폭(약 500px, 레인 폭이 노트 최대 크기 28px에 이미
+       * 도달하는 수준)에서 역산한 추정치 — 너무 좁거나 넓으면 조정 필요
+       * (`intent/07-open-questions.md`에 추가 예정). */}
+      <canvas
+        ref={canvasRef}
+        style={{
+          display: 'block',
+          width: '100%',
+          maxWidth: PRACTICE_LANE_MAX_WIDTH_PX,
+          height: 400,
+          margin: '0 auto',
+          background: 'var(--bg)',
+        }}
+      />
 
       {/* T3-4 게이트 피드백 1차(2026-10-25) — 믹서를 페이지 맨 아래 단독 블록
        * 대신 드럼킷 그림 옆 빈 공간에 둔다. 넓은 화면(!isPortraitPhone)에서
@@ -1142,7 +1143,7 @@ export function PracticeCanvas({
           <div style={{ maxWidth: 320 }}>
             <KitIllustration
               activeHandByPiece={activeHandByPiece}
-              showSticking={showSticking}
+              showSticking={false}
               pieceColor={readPieceColor}
             />
           </div>
