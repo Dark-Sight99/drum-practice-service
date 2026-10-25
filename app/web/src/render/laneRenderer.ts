@@ -33,7 +33,9 @@ export interface LaneRendererOptions {
    * 명시돼 있었는데 T2-3 구현에서 빠뜨렸던 것을 뒤늦게 발견 — 탐 레인 글자는 이후
    * T2-15에서 T1/T2 → HT/MT로 변경. 이후 T3-7(2026-10-25, 의뢰인 피드백)에서
    * 킥을 스네어 바로 다음으로 옮겨 현재 순서는 `layout.ts`의 `LANES` 배열이
-   * 유일한 기준 — 이 주석은 역사적 맥락일 뿐 최신 순서를 나타내지 않음). */
+   * 유일한 기준 — 이 주석은 역사적 맥락일 뿐 최신 순서를 나타내지 않음).
+   * T3-11(2026-10-25, 의뢰인 피드백) — 노트 도형 테두리(halo)에도 같은 색을
+   * 재사용해 겹친/인접한 노트끼리 경계를 구분한다(아래 `drawNoteShape` 참고). */
   laneHeaderBackgroundColor: string
   /** 판정선 근처 노트를 "히트"로 보는 허용범위(초) — work/T2-3/plan.md §가정. */
   hitWindowSeconds: number
@@ -96,17 +98,27 @@ function shapeBottomExtent(shape: NoteShape, size: number): number {
   }
 }
 
-function drawNoteShape(
+/** 겹친/인접한 노트끼리 경계가 보이게 캔버스 배경색으로 두르는 테두리 두께(T3-11,
+ * 의뢰인 피드백: "RL 없애서 여러 개 붙어 나올 때 몇 번을 쳐야 하는지 잘 안 보인다").
+ * R/L 텍스트에 이미 쓰던 "배경색으로 먼저 깔고 그 위에 그리기" halo 기법을 도형에도
+ * 재사용 — 도형별 분기 없이 "같은 도형을 배경색으로 살짝 더 크게 먼저 그리고, 그
+ * 위에 원래 크기·색으로 다시 그린다"만으로 모든 도형(채워진 도형은 더 큰 실루엣이
+ * 테두리처럼 비어져 나옴, X자 같은 선 도형은 더 두껍고 큰 선이 배경색 테두리로
+ * 비어져 나옴)에 동일하게 적용됨. */
+const NOTE_HALO_PADDING = 2
+
+function drawNoteShapePass(
   ctx: CanvasRenderingContext2D,
   shape: NoteShape,
   x: number,
   y: number,
   size: number,
   color: string,
+  lineWidth: number,
 ): void {
   ctx.fillStyle = color
   ctx.strokeStyle = color
-  ctx.lineWidth = 2
+  ctx.lineWidth = lineWidth
   const half = size / 2
 
   switch (shape) {
@@ -161,6 +173,19 @@ function drawNoteShape(
       break
     }
   }
+}
+
+function drawNoteShape(
+  ctx: CanvasRenderingContext2D,
+  shape: NoteShape,
+  x: number,
+  y: number,
+  size: number,
+  color: string,
+  haloColor: string,
+): void {
+  drawNoteShapePass(ctx, shape, x, y, size + NOTE_HALO_PADDING * 2, haloColor, 2 + NOTE_HALO_PADDING)
+  drawNoteShapePass(ctx, shape, x, y, size, color, 2)
 }
 
 /** 레인 렌더러를 만든다. `render()`를 매 프레임(requestAnimationFrame) 호출하면
@@ -277,7 +302,15 @@ export function createLaneRenderer(
         }
       }
       for (const v of visibleNotes) {
-        drawNoteShape(ctx, v.shape, v.laneCenterX, v.shapeY, noteSize, v.color)
+        drawNoteShape(
+          ctx,
+          v.shape,
+          v.laneCenterX,
+          v.shapeY,
+          noteSize,
+          v.color,
+          options.laneHeaderBackgroundColor,
+        )
       }
       // REQ-12 — 노트 위 R/L(/RF/LF) 글자. 자동 추천 값은 반투명
       // (intent/08-design.md §3 "자동 추천 값은 50% 투명도"), 사용자 지정은 불투명.
