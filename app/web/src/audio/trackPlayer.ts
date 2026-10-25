@@ -31,6 +31,12 @@ export interface TrackPlayer {
   /** 곡 내 위치(초, 원곡 기준)로 각 트랙(언락 성공한 것만)을 이동시키고 재생
    * 시작. preservesPitch=true + playbackRate 설정. */
   playFrom(songPositionSeconds: number, playbackRate: number): void
+  /** T3-9(REQ-04) — `playFrom()`과 달리 **재생을 시작하지 않고** 위치만
+   * 옮긴다(`.play()` 호출 없음). 일시정지 중 탐색(seek)처럼 "지금은 소리가
+   * 나면 안 되지만 다음에 재생을 누르면 이 위치부터 이어가야 하는" 경우에
+   * 씀 — `playFrom()`을 그대로 쓰면 Transport·신스 드럼은 멈춰있는데
+   * 분리 트랙만 다시 들리는 모순이 생김(모드C 3라운드 C-008 지적). */
+  seekTo(songPositionSeconds: number, playbackRate: number): void
   /** 주기적 호출 — 기대 위치(원곡 파일 기준 초, `audioTrackPositionSeconds`와
    * 같은 단위)와 실제 위치(`currentTime`, 이미 원곡 파일 기준 초)가
    * thresholdSeconds를 넘게 벌어지면 currentTime을 보정(루프 경계의 큰 점프
@@ -107,6 +113,16 @@ export function createTrackPlayer(sources: TrackSource[]): TrackPlayer {
     }
   }
 
+  function seekTo(songPositionSeconds: number, playbackRate: number): void {
+    for (const track of tracks) {
+      if (!track.unlocked) continue
+      track.element.preservesPitch = true
+      track.element.playbackRate = playbackRate
+      track.element.currentTime = Math.max(0, songPositionSeconds)
+      // .play()를 안 부름 — playFrom()과의 유일한 차이(일시정지 상태 유지).
+    }
+  }
+
   function resync(expectedSongPositionSeconds: number, thresholdSeconds: number): void {
     for (const track of tracks) {
       if (!track.unlocked || track.element.paused) continue
@@ -162,5 +178,5 @@ export function createTrackPlayer(sources: TrackSource[]): TrackPlayer {
     }
   }
 
-  return { prime, playFrom, resync, setChannelGain, pause, resume, stop, dispose }
+  return { prime, playFrom, seekTo, resync, setChannelGain, pause, resume, stop, dispose }
 }

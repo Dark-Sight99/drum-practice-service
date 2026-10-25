@@ -24,6 +24,7 @@ export type { TrackPlayer, TrackSource } from './trackPlayer'
 export {
   audioTrackPositionSeconds,
   barDurationSeconds,
+  barIndexForSeconds,
   barIndexForTick,
   beatsPerBar,
   computePlaybackSchedule,

@@ -3,6 +3,7 @@ import * as Tone from 'tone'
 import {
   audioTrackPositionSeconds,
   barDurationSeconds,
+  barIndexForSeconds,
   barIndexForTick,
   CHANNEL_KEYS,
   createDrumVoices,
@@ -275,6 +276,31 @@ export function PracticeCanvas({
   useEffect(() => {
     loopRef.current = loopEnabled ? { startBar: loopStartBar1 - 1, endBar: loopEndBar1 } : null
   }, [loopEnabled, loopStartBar1, loopEndBar1])
+
+  // T3-9(REQ-04) 모드C 1라운드 C-001 반영 — 루프 설정이 바뀌어도
+  // playDrumScore()는 재생 시작 시점에 딱 한 번만 transport.setLoopPoints()/
+  // transport.loop를 걸기 때문에, 이미 돌고 있는 세션에는 반영이 안 됐다.
+  // "여기서 시작/여기까지"(아래 markLoopPointFromCurrentPosition)처럼
+  // 재생 중에도 쓸 수 있는 조작이 생긴 이상, 루프 상태 변경은 항상 살아있는
+  // 세션에 즉시 반영돼야 한다 — 재생 중 믹서 상태 반영(위)과 같은 패턴,
+  // playbackRef.current 존재 여부로만 게이트(work/T3-9/plan.md §6, Transport의
+  // 루프 경계 판정이 매 틱 그 순간 값을 읽는다는 걸 실제 설치된 Tone.js
+  // 소스로 확인한 근거 — plan.md §1).
+  useEffect(() => {
+    if (!playbackRef.current) return
+    const clock = getMasterClock()
+    if (!loopEnabled) {
+      clock.setLoopEnabled(false)
+      return
+    }
+    const barSeconds = barDurationSeconds(score.meta.timeSignature, playbackBpm)
+    const songStartSeconds = barSeconds * COUNT_IN_BARS
+    clock.setLoopPoints(
+      songStartSeconds + barSeconds * (loopStartBar1 - 1),
+      songStartSeconds + barSeconds * loopEndBar1,
+    )
+    clock.setLoopEnabled(true)
+  }, [loopEnabled, loopStartBar1, loopEndBar1, playbackBpm, score.meta.timeSignature])
 
   // --- T3-4(REQ-05) 믹서: 볼륨/음소거/솔로 — work/T3-4/plan.md ---
   const [mixerState, setMixerState] = useState<MixerState>(defaultMixerState())
@@ -616,6 +642,19 @@ export function PracticeCanvas({
     setIsPlaying(false)
   }
 
+  // T3-9(REQ-04) — "곡이 끝나는 절대 위치"(카운트인 + 마지막 노트 + 안전
+  // 여유, clock.getPositionSeconds()와 같은 좌표계) — handlePlay()가 자동
+  // 정지 타이머를 걸 때와 handleSeek()이 seek 후 그 타이머를 다시 계산할
+  // 때 둘 다 쓴다. 공식을 한 곳으로 모아 두 곳이 서로 다른 값을 쓰는
+  // 불일치를 막는다(work/T3-9/plan.md §7).
+  function songEndPositionSeconds(): number {
+    const countInSeconds = barDurationSeconds(score.meta.timeSignature, playbackBpm)
+    const lastTick = Math.max(0, ...score.notes.map((n) => n.tick))
+    const lastNoteSeconds = (lastTick / score.ppq) * (60 / playbackBpm)
+    const safetyMarginSeconds = 4 // 크래시/라이드 등 길게 울리는 샘플이 다 끝날 시간
+    return countInSeconds + lastNoteSeconds + safetyMarginSeconds
+  }
+
   // T3-6(REQ-04) — "⏸ 일시정지". 모드C 3라운드 C-001 반영: 시작하자마자
   // playbackRef.current가 살아있는지부터 확인 — 그 사이(예: 자동 정지)에
   // 세션이 이미 끝났으면 아무 상태도 안 바꾸고 조용히 끝낸다(work/T3-6/
@@ -769,11 +808,7 @@ export function PracticeCanvas({
     // 예약돼 있는 도중에 타이머가 먼저 발동해 disposeDrumVoices가 버퍼를 지워버리는
     // 경쟁 상태를 실제 브라우저로 재현함("buffer is either not set or not loaded"
     // 예외) — qa-evidence/T2-3/result.md. 카운트인 길이를 더하고 여유도 넉넉히 둠.
-    const countInSeconds = barDurationSeconds(score.meta.timeSignature, playbackBpm)
-    const lastTick = Math.max(0, ...score.notes.map((n) => n.tick))
-    const lastNoteSeconds = (lastTick / score.ppq) * (60 / playbackBpm)
-    const safetyMarginSeconds = 4 // 크래시/라이드 등 길게 울리는 샘플이 다 끝날 시간
-    const totalMs = (countInSeconds + lastNoteSeconds + safetyMarginSeconds) * 1000
+    const totalMs = songEndPositionSeconds() * 1000
     // T3-6(REQ-04) — 일시정지 중 흐른 시간을 나중에 뺄 수 있게 ref로 들고
     // 있는다(work/T3-6/plan.md §4). 기준 시계는 performance.now().
     autoStopRemainingMsRef.current = totalMs
@@ -781,6 +816,79 @@ export function PracticeCanvas({
     autoStopTimerIdRef.current = setTimeout(() => {
       if (playbackRef.current?.handle === handle) stopPlayback()
     }, totalMs)
+  }
+
+  // T3-9(REQ-04, 의뢰인 피드백) — 재생 위치를 ±초 이동. 재생 중·일시정지
+  // 중 둘 다 가능(work/T3-9/plan.md §1 — Transport.seconds는 Tone.js가
+  // 공식 지원하는 즉시 점프, 재생 상태와 무관). 곡 범위([0, 곡 끝]) 밖으로
+  // 못 나가게 클램프.
+  function handleSeek(deltaSeconds: number) {
+    const session = playbackRef.current
+    if (!session) return
+    const clock = getMasterClock()
+    const current = clock.getPositionSeconds()
+    const barSeconds = barDurationSeconds(score.meta.timeSignature, playbackBpm)
+    const songStartSeconds = barSeconds * COUNT_IN_BARS
+    const songEndSeconds = songStartSeconds + barSeconds * totalBars
+    const target = Math.min(songEndSeconds, Math.max(0, current + deltaSeconds))
+    clock.setPositionSeconds(target)
+    const tracks = session.tracks
+    if (tracks) {
+      const playbackRate = playbackBpm / score.meta.bpm
+      const positionInTrackSeconds = audioTrackPositionSeconds(target, songStartSeconds, playbackRate)
+      // 모드C 3라운드 C-008 반영 — 일시정지 중엔 재생을 시작하면 안 되므로
+      // seekTo()(위치만 이동)를, 재생 중엔 기존 playFrom()(위치 이동 + 재생)을.
+      if (isPaused) {
+        tracks.seekTo(positionInTrackSeconds, playbackRate)
+      } else {
+        tracks.playFrom(positionInTrackSeconds, playbackRate)
+      }
+    }
+    // 모드C 1·2라운드 반영(§7) — 자동 정지 타이머를 새 위치 기준으로
+    // 재계산. 루프 모드면 애초에 타이머가 없음(null) — 그대로 둠.
+    if (autoStopRemainingMsRef.current !== null) {
+      if (autoStopTimerIdRef.current !== null) clearTimeout(autoStopTimerIdRef.current)
+      autoStopTimerIdRef.current = null
+      const remainingMs = Math.max(0, (songEndPositionSeconds() - target) * 1000)
+      autoStopRemainingMsRef.current = remainingMs
+      if (isPaused) {
+        // 모드C 2라운드 C-007 반영 — 일시정지 중엔 실시간으로 안 흐르므로
+        // 여기서 타이머를 걸지 않는다(pauseAutoStopTimer()와 같은 "값만
+        // 저장" 상태로 귀결 — 다음 재개 때 resumeAutoStopTimer()가 이
+        // 값을 그대로 써서 정상 작동).
+      } else {
+        autoStopScheduledAtRef.current = performance.now()
+        const handle = session.handle
+        autoStopTimerIdRef.current = setTimeout(() => {
+          if (playbackRef.current?.handle === handle) stopPlayback()
+        }, remainingMs)
+      }
+    }
+  }
+
+  // T3-9(REQ-04, 의뢰인 피드백) — "여기서 시작"/"여기까지": 악보 없이
+  // 귀로만 들으며 A-B 루프를 지정할 수 있게, 지금 재생 위치를 가장 가까운
+  // 마디로 변환해 바로 loopStartBar1/loopEndBar1에 반영한다. 숫자 입력칸과
+  // 달리 재생 중에도 활성(work/T3-9/plan.md §5) — 듣다가 바로 누르는 게
+  // 기능의 목적이라 잠그면 성립이 안 됨.
+  function markLoopPointFromCurrentPosition(which: 'start' | 'end') {
+    if (!playbackRef.current) return
+    const clock = getMasterClock()
+    const barSeconds = barDurationSeconds(score.meta.timeSignature, playbackBpm)
+    const songStartSeconds = barSeconds * COUNT_IN_BARS
+    const barIndex0 = barIndexForSeconds(clock.getPositionSeconds(), songStartSeconds, barSeconds)
+    const bar1 = Math.min(totalBars, barIndex0 + 1) // 1-기준, totalBars로 클램프
+    if (which === 'start') {
+      setLoopStartBar1(bar1)
+      if (bar1 >= loopEndBar1) setLoopEndBar1(Math.min(totalBars, bar1 + 1)) // 기존 blur 핸들러와 같은 규칙
+    } else {
+      setLoopEndBar1(bar1)
+      if (bar1 <= loopStartBar1) setLoopStartBar1(Math.max(1, bar1 - 1))
+      // "여기까지"는 구간 지정을 완료하는 동작이라 바로 루프를 켠다
+      // (work/T3-9/plan.md §가정·한계 — 의뢰인이 명시 요청한 건 아니지만
+      // 두 지점을 다 찍은 순간이 "이제 반복해줘"라는 의도로 해석).
+      setLoopEnabled(true)
+    }
   }
 
   function handleStop() {
@@ -809,6 +917,19 @@ export function PracticeCanvas({
           </button>
           <button onClick={handleStop} disabled={!isPlaying && !isPaused}>
             ⏹ 정지
+          </button>
+        </div>
+
+        {/* T3-9(REQ-04, 의뢰인 피드백) — "A-B 루프를 마디 번호로 입력하는
+         * 방식은 악보 없이는 못 쓰겠다"는 지적에, 재생 위치를 ±10초 이동하는
+         * 탐색 버튼을 추가. 재생/일시정지 둘 다 활성 — 일시정지 중에도 점프
+         * 가능(work/T3-9/plan.md §1). */}
+        <div style={{ display: 'flex', gap: 'var(--space-2)' }}>
+          <button onClick={() => handleSeek(-10)} disabled={!isPlaying && !isPaused}>
+            ◀◀ 10초
+          </button>
+          <button onClick={() => handleSeek(10)} disabled={!isPlaying && !isPaused}>
+            10초 ▶▶
           </button>
         </div>
 
@@ -877,6 +998,25 @@ export function PracticeCanvas({
           />
           ⟲ A-B 루프
         </label>
+
+        {/* T3-9(REQ-04, 의뢰인 피드백) — "지금 듣고 있는 부분이 몇 번째
+         * 마디인지 악보 없이는 모른다"는 지적에, 재생 위치를 그대로 A-B 루프
+         * 경계로 찍는 버튼. 숫자 입력칸(아래)과 달리 재생 중에도 활성 —
+         * "듣다가 바로 누르는" 게 기능의 목적(work/T3-9/plan.md §5). */}
+        <div style={{ display: 'flex', gap: 'var(--space-2)' }}>
+          <button
+            onClick={() => markLoopPointFromCurrentPosition('start')}
+            disabled={!isPlaying && !isPaused}
+          >
+            ⏱ 여기서 시작
+          </button>
+          <button
+            onClick={() => markLoopPointFromCurrentPosition('end')}
+            disabled={!isPlaying && !isPaused}
+          >
+            ⏱ 여기까지
+          </button>
+        </div>
 
         <label style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
           <input

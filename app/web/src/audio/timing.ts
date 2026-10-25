@@ -50,6 +50,20 @@ export function barIndexForTick(tick: number, timeSignature: TimeSignature, ppq:
   return Math.floor(tick / ticksPerBar(timeSignature, ppq))
 }
 
+/** 재생 위치(초)가 속한 마디 번호(0-기준) — barIndexForTick의 "초 단위" 버전.
+ * T3-9(REQ-04) — "지금 재생 위치"를 A-B 루프 마디로 바로 지정하는 데 씀.
+ * 음수 결과(카운트인 구간 등 songStartSeconds 이전)는 0으로 클램프,
+ * NaN/Infinity·barSeconds<=0 입력도 0으로 방어(모드C 1라운드 C-004 권장). */
+export function barIndexForSeconds(
+  positionSeconds: number,
+  songStartSeconds: number,
+  barSeconds: number,
+): number {
+  if (!Number.isFinite(positionSeconds) || !Number.isFinite(songStartSeconds)) return 0
+  if (!Number.isFinite(barSeconds) || barSeconds <= 0) return 0
+  return Math.max(0, Math.floor((positionSeconds - songStartSeconds) / barSeconds))
+}
+
 /** T3-3(REQ-04) — Transport 절대 시각(초)을, 분리된 오디오 트랙 파일 안에서의
  * 위치(초, 원곡 기준)로 환산한다. `scorePlayer.ts`의 노트 스케줄 식
  * `songStartSeconds + ticksToSeconds(tick, ppq, playbackBpm)`과
