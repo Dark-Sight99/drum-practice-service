@@ -30,7 +30,7 @@ export function velocityToDb(velocity: number): number {
   return (clamped - 1) * 24
 }
 
-function sampleVoice(buffer: Tone.ToneAudioBuffer): DrumVoice {
+function sampleVoice(buffer: Tone.ToneAudioBuffer, destination?: Tone.ToneAudioNode): DrumVoice {
   // Codex 모드A C-002(재현됨, 코드 검토): dispose()가 빈 함수라 버퍼·재생 중인
   // Player가 명시적 폐기 후에도 안 지워짐 — 지금 울리고 있는 Player를 추적해
   // dispose() 시 전부 멈추고, 버퍼도 같이 정리한다.
@@ -42,7 +42,15 @@ function sampleVoice(buffer: Tone.ToneAudioBuffer): DrumVoice {
       // (예: 8분음표 하이햇 연타) 이전 소리를 끊고 재시작함. 드럼 샘플은 매번
       // 새 Player를 만들어 "발사 후 소멸" 방식으로 자연스러운 겹침(디케이)을
       // 허용함 — Tone.js 커뮤니티에서 권장하는 one-shot 패턴.
-      const player = new Tone.Player(buffer).toDestination()
+      //
+      // T3-4(REQ-05) — destination이 주어지면(믹서 사용) 그 공용 Gain을 거쳐
+      // destination으로 연결, 안 주어지면 기존처럼 바로 destination으로
+      // 연결(하위 호환 — 실제 설치된 Tone.js(15.1.22) 소스로 `toDestination()`이
+      // 정확히 `this.connect(this.context.destination)`임을 확인함,
+      // work/T3-4/plan.md §3).
+      const player = destination
+        ? new Tone.Player(buffer).connect(destination)
+        : new Tone.Player(buffer).toDestination()
       player.volume.value = velocityToDb(velocity)
       activePlayers.add(player)
       player.onstop = () => {
@@ -75,8 +83,13 @@ export type DrumVoiceMap = Record<DrumPiece, DrumVoice>
  * 버퍼 로드 자체는 되지만 나중에 `Player.start()`가 "buffer is either not set
  * or not loaded"라는 다른 증상의 예외를 던지는 걸 실제 브라우저로 재현 확인함
  * (T2-3 PracticeCanvas 연동 중 실제로 겪음 — qa-evidence/T2-3/result.md). 이
- * 함수가 오디오 엔진을 쓰는 사실상 유일한 진입점이라 여기서 한 번만 호출. */
-export async function createDrumVoices(): Promise<DrumVoiceMap> {
+ * 함수가 오디오 엔진을 쓰는 사실상 유일한 진입점이라 여기서 한 번만 호출.
+ *
+ * T3-4(REQ-05) — `destination`을 주면(믹서가 공용 `Tone.Gain`을 만들어
+ * 넘김) 9종 피스가 전부 그 Gain을 거쳐 나가 하나의 "신스 드럼 전체" 볼륨으로
+ * 조절 가능해짐(work/T3-4/plan.md §3). `DrumVoiceMap`(피스별 트리거 맵) 자체
+ * 타입은 그대로라 기존 `scorePlayer.ts` 호출부는 무수정. */
+export async function createDrumVoices(destination?: Tone.ToneAudioNode): Promise<DrumVoiceMap> {
   await Tone.start()
   const pieces = Object.keys(SAMPLE_URLS) as DrumPiece[]
   const results = await Promise.allSettled(
@@ -99,7 +112,7 @@ export async function createDrumVoices(): Promise<DrumVoiceMap> {
   }
 
   const buffers = (results as PromiseFulfilledResult<Tone.ToneAudioBuffer>[]).map((r) => r.value)
-  const entries = pieces.map((piece, i) => [piece, sampleVoice(buffers[i])] as const)
+  const entries = pieces.map((piece, i) => [piece, sampleVoice(buffers[i], destination)] as const)
   return Object.fromEntries(entries) as DrumVoiceMap
 }
 

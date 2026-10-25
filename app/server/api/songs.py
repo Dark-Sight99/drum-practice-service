@@ -11,6 +11,7 @@ JSON을 저장만 한다(T1-5 결정: 경로 C 파싱은 브라우저 전담).
 """
 
 import enum
+import json
 import mimetypes
 from collections.abc import AsyncIterator
 from pathlib import Path
@@ -32,7 +33,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from api.deps import get_current_user, get_db
-from api.schemas import DrumScoreIn
+from api.schemas import DrumScoreIn, PracticeSettingIn, PracticeSettingOut
 from db.models import (
     AUDIO_ASSET_KINDS,
     Asset,
@@ -40,6 +41,7 @@ from db.models import (
     Job,
     JobStatus,
     JobType,
+    PracticeSetting,
     Song,
     SongSourceType,
     SongStatus,
@@ -467,4 +469,54 @@ async def save_song_drumscore(
                 status.HTTP_500_INTERNAL_SERVER_ERROR, "저장 처리 중 오류가 발생했습니다"
             ) from None
         existing.file_path = file_path
+        db.commit()
+
+
+def _find_practice_setting(db: Session, song_id: int) -> PracticeSetting | None:
+    return db.query(PracticeSetting).filter(PracticeSetting.song_id == song_id).first()
+
+
+@router.get("/{song_id}/practice-setting", response_model=PracticeSettingOut)
+def get_practice_setting(
+    song: Song = Depends(get_owned_song), db: Session = Depends(get_db)
+) -> PracticeSettingOut:
+    """T3-4(REQ-05) — 곡별 믹서 설정 조회. work/T3-4/plan.md §1: 저장된 게
+    없으면(행 자체가 없거나 `volumes_json`이 비어있으면) `volumes=None`을 그대로
+    돌려준다 — 기본값은 프런트(`defaultMixerState()`)가 채운다."""
+    setting = _find_practice_setting(db, song.id)
+    if setting is None or not setting.volumes_json:
+        return PracticeSettingOut(volumes=None)
+    return PracticeSettingOut(volumes=json.loads(setting.volumes_json))
+
+
+@router.put("/{song_id}/practice-setting", status_code=status.HTTP_204_NO_CONTENT)
+def save_practice_setting(
+    body: PracticeSettingIn, song: Song = Depends(get_owned_song), db: Session = Depends(get_db)
+) -> None:
+    """T3-4(REQ-05) — 곡별 믹서 설정 저장. `volumes_json`만 갱신하고
+    `practice_bpm`/루프 컬럼은 안 건드림(work/T3-4/plan.md §1·§범위경계 —
+    이번 작업 범위 밖, 기존 값이 있으면 그대로 둠)."""
+    volumes_json = json.dumps({k: v.model_dump() for k, v in body.volumes.items()})
+
+    existing = _find_practice_setting(db, song.id)
+    if existing is not None:
+        existing.volumes_json = volumes_json
+        db.commit()
+        return
+
+    # work/T3-4/plan.md §1(모드C 1라운드 C-005) — T2-6 `_find_edited_asset`과
+    # 동일한 "낙관적 upsert": song_id 유니크 제약 때문에 동시에 최초 PUT 2개가
+    # 오면 하나는 INSERT가 IntegrityError로 거부될 수 있어, rollback 후
+    # 재조회해 UPDATE로 재시도한다.
+    try:
+        db.add(PracticeSetting(song_id=song.id, volumes_json=volumes_json))
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        existing = _find_practice_setting(db, song.id)
+        if existing is None:
+            raise HTTPException(
+                status.HTTP_500_INTERNAL_SERVER_ERROR, "저장 처리 중 오류가 발생했습니다"
+            ) from None
+        existing.volumes_json = volumes_json
         db.commit()

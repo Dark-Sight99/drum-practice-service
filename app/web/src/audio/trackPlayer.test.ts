@@ -187,4 +187,42 @@ describe('createTrackPlayer', () => {
 
     expect(pauseMock).toHaveBeenCalledTimes(1)
   })
+
+  describe('setChannelGain()', () => {
+    it('sets .volume on the matching track only, clamped to [0,1]', async () => {
+      const player = createTrackPlayer([
+        { kind: 'stem_drums', url: 'http://x/drums.wav' },
+        { kind: 'stem_bass', url: 'http://x/bass.wav' },
+      ])
+      await player.prime()
+      const setSpy = vi.spyOn(HTMLMediaElement.prototype, 'volume', 'set')
+      setSpy.mockClear()
+
+      player.setChannelGain('stem_bass', 0.3)
+
+      expect(setSpy).toHaveBeenCalledTimes(1)
+      expect(setSpy).toHaveBeenCalledWith(0.3)
+    })
+
+    it('clamps out-of-range gain to [0,1]', async () => {
+      const player = createTrackPlayer([{ kind: 'stem_drums', url: 'http://x/drums.wav' }])
+      await player.prime()
+      const setSpy = vi.spyOn(HTMLMediaElement.prototype, 'volume', 'set')
+      setSpy.mockClear()
+
+      player.setChannelGain('stem_drums', 1.5)
+      expect(setSpy).toHaveBeenCalledWith(1)
+
+      setSpy.mockClear()
+      player.setChannelGain('stem_drums', -0.5)
+      expect(setSpy).toHaveBeenCalledWith(0)
+    })
+
+    it('silently ignores an unknown kind', async () => {
+      const player = createTrackPlayer([{ kind: 'stem_drums', url: 'http://x/drums.wav' }])
+      await player.prime()
+
+      expect(() => player.setChannelGain('nonexistent', 0.5)).not.toThrow()
+    })
+  })
 })

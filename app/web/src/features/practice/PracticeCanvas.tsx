@@ -1,19 +1,30 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import * as Tone from 'tone'
 import {
   audioTrackPositionSeconds,
   barDurationSeconds,
   barIndexForTick,
+  CHANNEL_KEYS,
   createDrumVoices,
+  createMetronome,
   createTrackPlayer,
+  defaultMixerState,
   disposeDrumVoices,
+  effectiveGain,
   getMasterClock,
+  linearGainToDb,
   playDrumScore,
+  toggleDrumlessPreset,
+  type ChannelKey,
+  type ChannelState,
   type DrumVoiceMap,
   type LoopBars,
+  type Metronome,
+  type MixerState,
   type PlaybackHandle,
   type TrackPlayer,
 } from '../../audio'
-import { songAudioUrl } from '../../api/songs'
+import { fetchPracticeSetting, saveMixerSetting, songAudioUrl } from '../../api/songs'
 import type { DrumPiece, DrumScore, Hand } from '../../score/types'
 import { DEFAULT_START_HAND, recommendSticking } from '../../score/sticking'
 import { createLaneRenderer, type LaneRenderer } from '../../render/laneRenderer'
@@ -32,6 +43,16 @@ const COUNT_IN_BARS = 1
 // "루프 경계 같은 큰 점프"만 잡고 고정 지연 수준은 상시 보정하지 않게 한다.
 const TRACK_RESYNC_INTERVAL_MS = 750
 const TRACK_RESYNC_THRESHOLD_SECONDS = 0.1
+
+// T3-4(REQ-05) — 믹서 UI에 쓸 채널 표시 이름.
+const CHANNEL_LABELS: Record<ChannelKey, string> = {
+  stem_drums: '드럼(원곡)',
+  stem_bass: '베이스',
+  stem_vocals: '보컬',
+  stem_other: '기타 악기',
+  synth_drums: '신스 드럼',
+  metronome: '메트로놈',
+}
 
 function readPieceColor(piece: DrumPiece): string {
   const varName =
@@ -101,6 +122,10 @@ export function PracticeCanvas({
     handle: PlaybackHandle
     voices: DrumVoiceMap
     tracks: TrackPlayer | null
+    // T3-4(REQ-05) — 신스 드럼 9종이 공용으로 거치는 게인(한 값으로 전체
+    // 조절). Metronome은 이번에 처음 재생 흐름에 연결됨(work/T3-4/plan.md §1).
+    synthGain: Tone.Gain
+    metronome: Metronome
   } | null>(null)
   // Codex 모드A C-001(재현됨): 렌더 루프가 재생 여부와 무관하게 매 프레임
   // activePieces를 계산해서, 정지 중(마스터 클록 위치가 고정된 상태)에도
@@ -181,6 +206,118 @@ export function PracticeCanvas({
   useEffect(() => {
     loopRef.current = loopEnabled ? { startBar: loopStartBar1 - 1, endBar: loopEndBar1 } : null
   }, [loopEnabled, loopStartBar1, loopEndBar1])
+
+  // --- T3-4(REQ-05) 믹서: 볼륨/음소거/솔로 — work/T3-4/plan.md ---
+  const [mixerState, setMixerState] = useState<MixerState>(defaultMixerState())
+  const mixerStateRef = useRef(mixerState)
+  useEffect(() => {
+    mixerStateRef.current = mixerState
+  }, [mixerState])
+
+  // 마운트 시(=곡 진입 시, 이 컴포넌트는 곡이 바뀌면 통째로 다시 마운트됨)
+  // 저장된 설정을 불러온다 — §4.
+  useEffect(() => {
+    if (songId === undefined) return
+    let cancelled = false
+    fetchPracticeSetting(songId)
+      .then(({ volumes }) => {
+        if (cancelled) return
+        if (!volumes) {
+          setMixerState(defaultMixerState())
+          return
+        }
+        // 모드C 1라운드 C-006 — 알 수 없는/누락된 채널 키는 방어적으로
+        // 기본값으로 채움(저장 형식이 나중에 바뀌어도 안 깨지게).
+        const merged = defaultMixerState()
+        for (const key of CHANNEL_KEYS) {
+          if (volumes[key]) merged[key] = volumes[key]
+        }
+        setMixerState(merged)
+      })
+      .catch(() => {
+        if (!cancelled) setMixerState(defaultMixerState())
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [songId])
+
+  // 저장 요청 직렬화(모드C 2라운드 지적 반영) — 한 곡에 대해 이 탭에서 PUT이
+  // 클라이언트가 인지하는 한 항상 1개씩만 뜨도록: 진행 중이면 새로 안 보내고
+  // 플래그만 세우고, 끝나면 그 시점의 최신 상태로 한 번만 더 보낸다. 모호한
+  // 네트워크 실패 시의 좁은 순서 역전 잔존 위험은 마스터가 수용한 한계(§마스터
+  // 최종 판단).
+  const savingRef = useRef(false)
+  const pendingSaveRef = useRef(false)
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  async function doSaveMixer(targetSongId: number) {
+    if (savingRef.current) {
+      pendingSaveRef.current = true
+      return
+    }
+    savingRef.current = true
+    try {
+      await saveMixerSetting(targetSongId, mixerStateRef.current)
+    } catch {
+      // 실패해도 조용히 넘어감 — 다음 변경 때 다시 저장 시도됨, 믹서 설정
+      // 하나가 잠깐 이전 값으로 남는 정도라 치명적이지 않음.
+    } finally {
+      savingRef.current = false
+      if (pendingSaveRef.current) {
+        pendingSaveRef.current = false
+        await doSaveMixer(targetSongId)
+      }
+    }
+  }
+
+  function scheduleMixerSave() {
+    if (songId === undefined) return
+    if (saveTimerRef.current !== null) clearTimeout(saveTimerRef.current)
+    saveTimerRef.current = setTimeout(() => {
+      saveTimerRef.current = null
+      void doSaveMixer(songId)
+    }, 400)
+  }
+
+  // 언마운트·곡 전환 시 대기 중인 디바운스를 즉시 flush(모드C 1라운드 C-002).
+  useEffect(() => {
+    return () => {
+      if (saveTimerRef.current !== null) {
+        clearTimeout(saveTimerRef.current)
+        saveTimerRef.current = null
+        if (songId !== undefined) void doSaveMixer(songId)
+      }
+    }
+  }, [songId])
+
+  function updateChannel(key: ChannelKey, patch: Partial<ChannelState>) {
+    setMixerState((prev) => ({ ...prev, [key]: { ...prev[key], ...patch } }))
+    scheduleMixerSave()
+  }
+
+  function applyDrumlessPreset() {
+    setMixerState((prev) => toggleDrumlessPreset(prev))
+    scheduleMixerSave()
+  }
+
+  // 재생 중 믹서 상태가 바뀌면 즉시 반영(REQ-05 "조작 즉시 반영" — BPM/루프와
+  // 달리 재생 중에도 잠그지 않음). playbackRef.current 존재 여부로만 게이트해
+  // handlePlay() 셋업 중의 경쟁을 원천 차단(모드C 1라운드 C-004).
+  useEffect(() => {
+    const session = playbackRef.current
+    if (!session) return
+    for (const key of CHANNEL_KEYS) {
+      const gain = effectiveGain(mixerState[key], mixerState)
+      if (key === 'synth_drums') {
+        session.synthGain.gain.value = gain
+      } else if (key === 'metronome') {
+        session.metronome.setVolume(linearGainToDb(gain))
+      } else {
+        session.tracks?.setChannelGain(key, gain)
+      }
+    }
+  }, [mixerState])
 
   useEffect(() => {
     if (!canvasRef.current) return
@@ -323,6 +460,13 @@ export function PracticeCanvas({
     if (!playbackRef.current) return
     playbackRef.current.handle.stop()
     disposeDrumVoices(playbackRef.current.voices)
+    // T3-4(REQ-05, work/T3-4/plan.md §3) — 공용 게인은 반드시
+    // disposeDrumVoices() 다음에 지운다: 그 안에서 지금 울리고 있는 모든
+    // Player를 먼저 끊은 뒤라, "아직 연결된 Player가 있는데 다운스트림
+    // Gain부터 지워 끊기는" 경우가 없다. Player.dispose()는 이 Gain 자체를
+    // 안 지우므로 명시적으로 여기서 지워야 함(안 하면 재생할 때마다 누적 leak).
+    playbackRef.current.synthGain.dispose()
+    playbackRef.current.metronome.dispose()
     // T3-3(REQ-04) — TrackPlayer는 재생 1회당 1개 수명(work/T3-3/plan.md §4
     // 생명주기) — DrumVoiceMap과 똑같이 여기서 버려야 다음 handlePlay()가 새
     // 인스턴스를 만들 때 이전 <audio> 엘리먼트가 남아 겹치지 않는다.
@@ -356,7 +500,14 @@ export function PracticeCanvas({
       ? createTrackPlayer(stemKinds.map((kind) => ({ kind, url: songAudioUrl(songId, kind) })))
       : null
     const primePromise = tracks?.prime()
-    const voices = await createDrumVoices()
+    // T3-4(REQ-05, work/T3-4/plan.md §3) — 신스 드럼 9종이 공용으로 거치는
+    // Gain(linear 게인, Tone.Gain 기본 단위가 "gain" — 실제 설치된 Tone.js
+    // 소스로 확인) 하나를 만들어 destination에 연결해두고 넘긴다 — 이걸로
+    // "신스 드럼 전체" 볼륨을 한 번에 조절할 수 있다. 메트로놈은 이번에
+    // 처음 재생 흐름에 연결됨(§범위경계 — T2-4가 믹서로 미뤄뒀던 부분).
+    const synthGain = new Tone.Gain(1).connect(Tone.getDestination())
+    const voices = await createDrumVoices(synthGain)
+    const metronome = createMetronome({ timeSignature: score.meta.timeSignature })
     if (primePromise) await primePromise
     const loop: LoopBars | undefined = loopEnabled
       ? { startBar: loopStartBar1 - 1, endBar: loopEndBar1 }
@@ -367,7 +518,20 @@ export function PracticeCanvas({
       loop,
       tracks: tracks ?? undefined,
     })
-    playbackRef.current = { handle, voices, tracks }
+    playbackRef.current = { handle, voices, tracks, synthGain, metronome }
+    // 방금 만든 세션에 지금 믹서 상태를 바로 적용(처음부터 맞게 시작 —
+    // work/T3-4/plan.md §4, "handlePlay()가 세션을 만들 때는 그 시점의
+    // mixerStateRef.current를 그대로 읽어 처음부터 맞게 구성").
+    for (const key of CHANNEL_KEYS) {
+      const gain = effectiveGain(mixerStateRef.current[key], mixerStateRef.current)
+      if (key === 'synth_drums') {
+        synthGain.gain.value = gain
+      } else if (key === 'metronome') {
+        metronome.setVolume(linearGainToDb(gain))
+      } else {
+        tracks?.setChannelGain(key, gain)
+      }
+    }
     isPlayingRef.current = true
     setIsPlaying(true)
     // 루프가 켜져 있으면 사용자가 직접 정지할 때까지 계속 반복돼야 하므로
@@ -573,6 +737,51 @@ export function PracticeCanvas({
             background: loopEnabled ? 'var(--warning)' : 'var(--accent)',
           }}
         />
+      </div>
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)' }}>
+          <strong>믹서</strong>
+          <button onClick={applyDrumlessPreset}>🥁 드럼 빼고 듣기</button>
+        </div>
+        {CHANNEL_KEYS.map((key) => {
+          const channel = mixerState[key]
+          return (
+            <div
+              key={key}
+              style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}
+            >
+              <span style={{ width: 90 }}>{CHANNEL_LABELS[key]}</span>
+              <input
+                type="range"
+                min={0}
+                max={100}
+                value={Math.round(channel.volume * 100)}
+                onChange={(e) => updateChannel(key, { volume: Number(e.target.value) / 100 })}
+                style={{ width: 120 }}
+              />
+              <span style={{ width: 36, textAlign: 'right' }}>
+                {Math.round(channel.volume * 100)}%
+              </span>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-1)' }}>
+                <input
+                  type="checkbox"
+                  checked={channel.muted}
+                  onChange={(e) => updateChannel(key, { muted: e.target.checked })}
+                />
+                M
+              </label>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-1)' }}>
+                <input
+                  type="checkbox"
+                  checked={channel.solo}
+                  onChange={(e) => updateChannel(key, { solo: e.target.checked })}
+                />
+                S
+              </label>
+            </div>
+          )
+        })}
       </div>
     </div>
   )

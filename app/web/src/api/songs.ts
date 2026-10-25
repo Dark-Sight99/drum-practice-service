@@ -1,6 +1,7 @@
 // 라이브러리(곡 목록/업로드/이름변경/삭제/DrumScore 조회). 백엔드: app/server/api/songs.py.
 // work/T2-5/plan.md §설계 2·3.
 
+import type { MixerState } from '../audio/mixer'
 import type { DrumScore } from '../score/types'
 import { apiFetch, apiFetchJson } from './client'
 
@@ -68,5 +69,22 @@ export async function saveSongDrumScore(id: number, drumScore: DrumScore): Promi
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(drumScore),
+  })
+}
+
+/** T3-4(REQ-05) — 곡별 믹서 설정 조회. 저장된 게 없으면 `volumes: null`
+ * (서버가 기본값을 추측하지 않음 — work/T3-4/plan.md §1, 기본값은 호출자가
+ * `defaultMixerState()`로 채움). */
+export async function fetchPracticeSetting(id: number): Promise<{ volumes: MixerState | null }> {
+  return apiFetchJson<{ volumes: MixerState | null }>(`/songs/${id}/practice-setting`)
+}
+
+/** T3-4(REQ-05) — 곡별 믹서 설정 저장(volumes_json만 갱신, practice_bpm/루프는
+ * 안 건드림). */
+export async function saveMixerSetting(id: number, volumes: MixerState): Promise<void> {
+  await apiFetch(`/songs/${id}/practice-setting`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ volumes }),
   })
 }

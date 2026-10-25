@@ -102,3 +102,39 @@ class DrumScoreIn(BaseModel):
                 "audioOffsetMs는 0이어야 합니다(Phase 3 오디오-MIDI 정렬 전까지 임시 제한)"
             )
         return value
+
+
+# T3-4(REQ-05) — 믹서. work/T3-4/plan.md §1에서 정의한 6채널 고정 집합.
+MIXER_CHANNEL_KEYS = frozenset(
+    {"stem_drums", "stem_bass", "stem_vocals", "stem_other", "synth_drums", "metronome"}
+)
+
+
+class ChannelStateIn(BaseModel):
+    volume: float = Field(ge=0, le=1)
+    muted: bool
+    solo: bool
+
+
+class PracticeSettingIn(BaseModel):
+    """`PUT /songs/{id}/practice-setting` 요청 본문. 채널 키가 정확히
+    `MIXER_CHANNEL_KEYS` 6개여야 함(work/T3-4/plan.md §1 — 알 수 없는 키나
+    누락된 키는 프런트의 버그일 수 있어 저장 전에 422로 거부)."""
+
+    volumes: dict[str, ChannelStateIn]
+
+    @field_validator("volumes")
+    @classmethod
+    def channel_keys_must_match_exactly(
+        cls, value: dict[str, ChannelStateIn]
+    ) -> dict[str, ChannelStateIn]:
+        if set(value.keys()) != MIXER_CHANNEL_KEYS:
+            raise ValueError(f"volumes의 키는 정확히 {sorted(MIXER_CHANNEL_KEYS)}여야 합니다")
+        return value
+
+
+class PracticeSettingOut(BaseModel):
+    """`GET /songs/{id}/practice-setting` 응답. 저장된 게 없으면 `volumes=None`
+    — 기본값을 서버가 추측하지 않고 그대로 돌려줌(work/T3-4/plan.md §1)."""
+
+    volumes: dict[str, ChannelStateIn] | None

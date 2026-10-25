@@ -34,6 +34,12 @@ export interface TrackPlayer {
    * 비교 단위가 안 맞아 매번 잘못 보정하는 버그였음) — 그래서 playbackRate를
    * 받지 않는다. */
   resync(expectedSongPositionSeconds: number, thresholdSeconds: number): void
+  /** T3-4(REQ-05) — 믹서가 mute/solo까지 반영해 계산한 "최종 게인"(0~1)을
+   * 그대로 적용. `<audio>`의 `.volume`은 네이티브 0~1 선형이라 변환 불필요
+   * — 이 모듈은 mute/solo 개념을 모른다(책임 분리, work/T3-4/plan.md §3).
+   * `kind`가 이 플레이어에 없으면 조용히 무시(다른 트랙 종류가 아직 분리
+   * 안 된 곡 등 — 호출자가 존재 여부를 매번 확인할 필요 없게). */
+  setChannelGain(kind: string, gain: number): void
   stop(): void
   dispose(): void
 }
@@ -87,6 +93,12 @@ export function createTrackPlayer(sources: TrackSource[]): TrackPlayer {
     }
   }
 
+  function setChannelGain(kind: string, gain: number): void {
+    const track = tracks.find((t) => t.kind === kind)
+    if (!track) return
+    track.element.volume = Math.min(1, Math.max(0, gain))
+  }
+
   function stop(): void {
     for (const track of tracks) {
       track.element.pause()
@@ -101,5 +113,5 @@ export function createTrackPlayer(sources: TrackSource[]): TrackPlayer {
     }
   }
 
-  return { prime, playFrom, resync, stop, dispose }
+  return { prime, playFrom, resync, setChannelGain, stop, dispose }
 }
