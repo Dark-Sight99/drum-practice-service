@@ -24,7 +24,11 @@ export interface LaneRendererOptions {
   laneBarColor: string
   laneBeatColor: string
   hitLineColor: string
-  /** 스티킹 R/L 글자 색(REQ-12, intent/08-design.md §3 "노트 위 R/L 글자(--text)"). */
+  /** 스티킹 R/L 글자 색(REQ-12, intent/08-design.md §3 "노트 위 R/L 글자(--text)").
+   * T3-11 게이트 피드백(2026-10-25) — 노트 도형 halo 테두리에도 같은 밝은 색을
+   * 재사용(아래 `drawNoteShape` 참고): 처음엔 `laneHeaderBackgroundColor`(어두운
+   * 배경색)를 썼는데, 캔버스 배경도 어두워 구분이 안 된다는 의뢰인 지적으로
+   * 밝은 색으로 교체. */
   stickingTextColor: string
   /** 레인 머리글(HH/CR/SN/...) 뒤에 까는 배경색 — 캔버스 배경과 같은 색을 넘기면
    * 떨어지는 노트가 글자 뒤를 지나가도 가독성이 안 깨진다(T2-10, Phase 2 게이트
@@ -33,9 +37,7 @@ export interface LaneRendererOptions {
    * 명시돼 있었는데 T2-3 구현에서 빠뜨렸던 것을 뒤늦게 발견 — 탐 레인 글자는 이후
    * T2-15에서 T1/T2 → HT/MT로 변경. 이후 T3-7(2026-10-25, 의뢰인 피드백)에서
    * 킥을 스네어 바로 다음으로 옮겨 현재 순서는 `layout.ts`의 `LANES` 배열이
-   * 유일한 기준 — 이 주석은 역사적 맥락일 뿐 최신 순서를 나타내지 않음).
-   * T3-11(2026-10-25, 의뢰인 피드백) — 노트 도형 테두리(halo)에도 같은 색을
-   * 재사용해 겹친/인접한 노트끼리 경계를 구분한다(아래 `drawNoteShape` 참고). */
+   * 유일한 기준 — 이 주석은 역사적 맥락일 뿐 최신 순서를 나타내지 않음). */
   laneHeaderBackgroundColor: string
   /** 판정선 근처 노트를 "히트"로 보는 허용범위(초) — work/T2-3/plan.md §가정. */
   hitWindowSeconds: number
@@ -98,13 +100,16 @@ function shapeBottomExtent(shape: NoteShape, size: number): number {
   }
 }
 
-/** 겹친/인접한 노트끼리 경계가 보이게 캔버스 배경색으로 두르는 테두리 두께(T3-11,
- * 의뢰인 피드백: "RL 없애서 여러 개 붙어 나올 때 몇 번을 쳐야 하는지 잘 안 보인다").
- * R/L 텍스트에 이미 쓰던 "배경색으로 먼저 깔고 그 위에 그리기" halo 기법을 도형에도
- * 재사용 — 도형별 분기 없이 "같은 도형을 배경색으로 살짝 더 크게 먼저 그리고, 그
- * 위에 원래 크기·색으로 다시 그린다"만으로 모든 도형(채워진 도형은 더 큰 실루엣이
- * 테두리처럼 비어져 나옴, X자 같은 선 도형은 더 두껍고 큰 선이 배경색 테두리로
- * 비어져 나옴)에 동일하게 적용됨. */
+/** 겹친/인접한 노트끼리 경계가 보이게 두르는 halo 테두리 두께(T3-11,
+ * 의뢰인 피드백 1차: "RL 없애서 여러 개 붙어 나올 때 몇 번을 쳐야 하는지 잘 안
+ * 보인다" → 2차: "배경도 검은색인데 외곽선도 검은색이라 안 구분된다" — 처음엔
+ * 배경색(어두움)으로 둘렀다가, 캔버스 배경도 어두워 안 보인다는 지적으로 밝은
+ * 색(`stickingTextColor`, --text)으로 교체함, 아래 호출부 참고).
+ * R/L 텍스트에 이미 쓰던 "먼저 깔고 그 위에 그리기" halo 기법을 도형에도 재사용
+ * — 도형별 분기 없이 "같은 도형을 halo색으로 살짝 더 크게 먼저 그리고, 그 위에
+ * 원래 크기·색으로 다시 그린다"만으로 모든 도형(채워진 도형은 더 큰 실루엣이
+ * 테두리처럼 비어져 나옴, X자 같은 선 도형은 더 두껍고 큰 선이 테두리로 비어져
+ * 나옴)에 동일하게 적용됨. */
 const NOTE_HALO_PADDING = 2
 
 function drawNoteShapePass(
@@ -302,6 +307,11 @@ export function createLaneRenderer(
         }
       }
       for (const v of visibleNotes) {
+        // T3-11 피드백(2026-10-25, 의뢰인 지적) — 캔버스 배경도 어둡고 halo도
+        // 배경색(어두움)이라 서로 구분이 안 됨. `stickingTextColor`(--text,
+        // 밝은 색 — 원래 R/L 글자용)를 재사용 — 피스 색이 전부 파스텔톤(다크
+        // 테마 원칙, intent/08-design.md §1)이라 밝은 흰색 계열과는 항상
+        // 대비가 나고, 모든 노트에 균일 적용해 피스별 분기도 안 늘어남.
         drawNoteShape(
           ctx,
           v.shape,
@@ -309,7 +319,7 @@ export function createLaneRenderer(
           v.shapeY,
           noteSize,
           v.color,
-          options.laneHeaderBackgroundColor,
+          options.stickingTextColor,
         )
       }
       // REQ-12 — 노트 위 R/L(/RF/LF) 글자. 자동 추천 값은 반투명
