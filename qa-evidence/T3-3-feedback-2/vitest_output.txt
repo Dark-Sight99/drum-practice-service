@@ -1,0 +1,17 @@
+
+> web@0.0.0 test
+> vitest run
+
+
+ RUN  v5.0.5 C:/Users/Jaewoo/드럼연습서비스/app/web
+
+
+ Test Files  16 passed (16)
+      Tests  154 passed (154)
+   Start at  11:53:14
+   Duration  2.65s (environment 78%, setup 11%, import 5%, tests 4%, transform 1%, worker 1%)
+
+Environment  jsdom was created 16 times · 15.47s total, 78% of tracked time
+             create it once per worker with pool: 'vmThreads' (keeps per-file isolation) or isolate: false (shares it across files)
+             learn more: https://vitest.dev/guide/improving-performance#test-environments
+
