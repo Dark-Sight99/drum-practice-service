@@ -4,6 +4,14 @@ export { createDrumVoices, disposeDrumVoices } from './drumVoices'
 export type { DrumVoice, DrumVoiceMap } from './drumVoices'
 export { createMetronome } from './metronome'
 export type { Metronome, MetronomeOptions } from './metronome'
+export {
+  CHANNEL_KEYS,
+  defaultMixerState,
+  effectiveGain,
+  linearGainToDb,
+  toggleDrumlessPreset,
+} from './mixer'
+export type { ChannelKey, ChannelState, MixerState } from './mixer'
 export { playDrumScore } from './scorePlayer'
 export type { PlaybackHandle, PlayDrumScoreOptions } from './scorePlayer'
 export { createTrackPlayer } from './trackPlayer'
