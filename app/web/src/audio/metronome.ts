@@ -11,6 +11,13 @@ export interface MetronomeOptions {
 export interface Metronome {
   setEnabled(enabled: boolean): void
   setVolume(volumeDb: number): void
+  /** T3-6(REQ-04) — 일시정지 시 호출. 지금 울리는 클릭을 즉시 release
+   * 단계로 넘겨 테일을 앞당겨 끊는다(Tone.js Monophonic.triggerRelease
+   * 공식 JSDoc: "If no time is given, the release happens immediately" —
+   * 완전 무음은 아니고 release 커브를 지금부터 다시 타는 것, 기본
+   * release 1.4초라 드럼 원샷만큼은 아니지만 무시 못할 크기라 추가함,
+   * work/T3-6/plan.md §3). */
+  stopRinging(): void
   dispose(): void
 }
 
@@ -48,6 +55,9 @@ export function createMetronome(options: MetronomeOptions): Metronome {
     },
     setVolume(volumeDb: number) {
       synth.volume.value = volumeDb
+    },
+    stopRinging() {
+      synth.triggerRelease()
     },
     dispose() {
       transport.clear(eventId)

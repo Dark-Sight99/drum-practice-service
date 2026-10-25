@@ -40,6 +40,14 @@ export interface TrackPlayer {
    * `kind`가 이 플레이어에 없으면 조용히 무시(다른 트랙 종류가 아직 분리
    * 안 된 곡 등 — 호출자가 존재 여부를 매번 확인할 필요 없게). */
   setChannelGain(kind: string, gain: number): void
+  /** T3-6(REQ-04) — 언락된 트랙만 .pause()(HTMLMediaElement 네이티브 —
+   * currentTime은 그대로 보존됨, 스펙 보장). resync()는 이미
+   * `track.element.paused`를 건너뛰는 가드가 있어 수정 불필요. */
+  pause(): void
+  /** T3-6(REQ-04) — 언락된 트랙만 .play() 재호출. 이미 한 번 사용자 제스처
+   * 안에서 성공적으로 재생된 엘리먼트는 이후 play()가 "블레스"된 상태로
+   * 유지되는 게 표준 동작이라 추가 제스처 없이 재생 가능. */
+  resume(): void
   stop(): void
   dispose(): void
 }
@@ -99,6 +107,22 @@ export function createTrackPlayer(sources: TrackSource[]): TrackPlayer {
     track.element.volume = Math.min(1, Math.max(0, gain))
   }
 
+  function pause(): void {
+    for (const track of tracks) {
+      if (!track.unlocked) continue
+      track.element.pause()
+    }
+  }
+
+  function resume(): void {
+    for (const track of tracks) {
+      if (!track.unlocked) continue
+      void track.element.play().catch(() => {
+        track.unlocked = false
+      })
+    }
+  }
+
   function stop(): void {
     for (const track of tracks) {
       track.element.pause()
@@ -113,5 +137,5 @@ export function createTrackPlayer(sources: TrackSource[]): TrackPlayer {
     }
   }
 
-  return { prime, playFrom, resync, setChannelGain, stop, dispose }
+  return { prime, playFrom, resync, setChannelGain, pause, resume, stop, dispose }
 }

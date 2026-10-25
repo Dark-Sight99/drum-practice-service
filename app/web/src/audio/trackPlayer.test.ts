@@ -188,6 +188,62 @@ describe('createTrackPlayer', () => {
     expect(pauseMock).toHaveBeenCalledTimes(1)
   })
 
+  describe('pause()/resume()', () => {
+    it('pause() pauses only unlocked tracks', async () => {
+      let callCount = 0
+      playMock.mockImplementation(() => {
+        callCount += 1
+        if (callCount === 2) return Promise.reject(new DOMException('', 'NotAllowedError'))
+        return Promise.resolve(undefined)
+      })
+      const player = createTrackPlayer([
+        { kind: 'stem_drums', url: 'http://x/drums.wav' },
+        { kind: 'stem_bass', url: 'http://x/bass.wav' },
+      ])
+      await player.prime() // stem_bass(2번째 play() 호출)는 언락 실패
+      pauseMock.mockClear()
+
+      player.pause()
+
+      // 언락된 stem_drums만 pause() 호출, 언락 실패한 stem_bass는 건너뜀
+      expect(pauseMock).toHaveBeenCalledTimes(1)
+    })
+
+    it('resume() calls play() again only on unlocked tracks', async () => {
+      const player = createTrackPlayer([
+        { kind: 'stem_drums', url: 'http://x/drums.wav' },
+        { kind: 'stem_bass', url: 'http://x/bass.wav' },
+      ])
+      await player.prime()
+      playMock.mockClear()
+      playMock.mockResolvedValue(undefined)
+
+      player.resume()
+
+      expect(playMock).toHaveBeenCalledTimes(2)
+    })
+
+    it('resume() skips a track that failed to unlock', async () => {
+      let callCount = 0
+      playMock.mockImplementation(() => {
+        callCount += 1
+        if (callCount === 2) return Promise.reject(new DOMException('', 'NotAllowedError'))
+        return Promise.resolve(undefined)
+      })
+      const player = createTrackPlayer([
+        { kind: 'stem_drums', url: 'http://x/drums.wav' },
+        { kind: 'stem_bass', url: 'http://x/bass.wav' },
+      ])
+      await player.prime() // stem_bass 언락 실패
+      playMock.mockClear()
+      playMock.mockResolvedValue(undefined)
+
+      player.resume()
+
+      expect(playMock).toHaveBeenCalledTimes(1)
+    })
+  })
+
   describe('setChannelGain()', () => {
     it('sets .volume on the matching track only, clamped to [0,1]', async () => {
       const player = createTrackPlayer([

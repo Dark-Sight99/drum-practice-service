@@ -1,6 +1,6 @@
 import * as Tone from 'tone'
 import type { DrumScore } from '../score/types'
-import type { DrumVoiceMap } from './drumVoices'
+import { stopAllRinging, type DrumVoiceMap } from './drumVoices'
 import type { TrackPlayer } from './trackPlayer'
 import {
   audioTrackPositionSeconds,
@@ -12,6 +12,12 @@ import {
 
 export interface PlaybackHandle {
   stop(): void
+  /** T3-6(REQ-04) — Transport는 틱 위치를 동결할 뿐 이미 커밋된 원샷은
+   * 자동으로 안 멈추므로(work/T3-6/plan.md §3) stopAllRinging()·
+   * countInSynth.triggerRelease()로 명시적으로 끊는다. */
+  pause(): void
+  /** 오프셋 없이 transport.start() — 멈춘 지점부터 정확히 재개(plan.md §1). */
+  resume(): void
 }
 
 export interface PlayDrumScoreOptions {
@@ -139,6 +145,16 @@ export function playDrumScore(
       transport.stop()
       countInSynth.dispose()
       tracks?.stop()
+    },
+    pause() {
+      transport.pause()
+      stopAllRinging(voices)
+      countInSynth.triggerRelease()
+      tracks?.pause()
+    },
+    resume() {
+      transport.start()
+      tracks?.resume()
     },
   }
 }
