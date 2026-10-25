@@ -3,7 +3,13 @@ import {
   CHANNEL_KEYS,
   defaultMixerState,
   effectiveGain,
+  isMusicMuted,
+  isMusicSolo,
   linearGainToDb,
+  musicVolume,
+  setMusicMuted,
+  setMusicSolo,
+  setMusicVolume,
   toggleDrumlessPreset,
   type MixerState,
 } from './mixer'
@@ -123,6 +129,108 @@ describe('toggleDrumlessPreset', () => {
     const state = defaultMixerState()
     const twice = toggleDrumlessPreset(toggleDrumlessPreset(state))
     expect(twice.stem_drums.volume).toBe(0)
+  })
+})
+
+describe('music 묶음(stem_bass/stem_vocals/stem_other) — T3-4 게이트 피드백 3차', () => {
+  describe('musicVolume (대표값)', () => {
+    it('returns the average of the 3 stem volumes', () => {
+      const state = defaultMixerState()
+      state.stem_bass.volume = 0.2
+      state.stem_vocals.volume = 0.4
+      state.stem_other.volume = 0.6
+      expect(musicVolume(state)).toBeCloseTo(0.4, 5)
+    })
+
+    it('does not touch stem_drums/synth_drums/metronome', () => {
+      const state = defaultMixerState()
+      state.stem_drums.volume = 0.9
+      state.synth_drums.volume = 0.5
+      expect(musicVolume(state)).toBeCloseTo(1, 5) // 기본값 전부 1
+    })
+  })
+
+  describe('setMusicVolume', () => {
+    it('sets the same volume on all 3 stems, leaving other channels untouched', () => {
+      const state = defaultMixerState()
+      state.synth_drums.volume = 0.3
+
+      const next = setMusicVolume(state, 0.5)
+
+      expect(next.stem_bass.volume).toBe(0.5)
+      expect(next.stem_vocals.volume).toBe(0.5)
+      expect(next.stem_other.volume).toBe(0.5)
+      expect(next.stem_drums).toEqual(state.stem_drums)
+      expect(next.synth_drums).toEqual(state.synth_drums)
+      expect(next.metronome).toEqual(state.metronome)
+    })
+
+    it('normalizes a previously-mixed state to a single value', () => {
+      const state = defaultMixerState()
+      state.stem_bass.volume = 0.1
+      state.stem_vocals.volume = 0.9
+
+      const next = setMusicVolume(state, 0.7)
+
+      expect(next.stem_bass.volume).toBe(0.7)
+      expect(next.stem_vocals.volume).toBe(0.7)
+      expect(next.stem_other.volume).toBe(0.7)
+    })
+  })
+
+  describe('isMusicMuted / setMusicMuted', () => {
+    it('isMusicMuted is false by default (nothing muted)', () => {
+      expect(isMusicMuted(defaultMixerState())).toBe(false)
+    })
+
+    it('isMusicMuted is true only when all 3 stems are muted', () => {
+      const state = defaultMixerState()
+      state.stem_bass.muted = true
+      state.stem_vocals.muted = true
+      expect(isMusicMuted(state)).toBe(false) // stem_other 아직 안 묶임
+
+      state.stem_other.muted = true
+      expect(isMusicMuted(state)).toBe(true)
+    })
+
+    it('setMusicMuted(true) mutes all 3 stems, leaving other channels untouched', () => {
+      const state = defaultMixerState()
+      const next = setMusicMuted(state, true)
+      expect(next.stem_bass.muted).toBe(true)
+      expect(next.stem_vocals.muted).toBe(true)
+      expect(next.stem_other.muted).toBe(true)
+      expect(next.stem_drums.muted).toBe(false)
+      expect(next.synth_drums.muted).toBe(false)
+      expect(next.metronome.muted).toBe(false)
+    })
+
+    it('setMusicMuted(false) unmutes all 3 stems even from a mixed state', () => {
+      const state = defaultMixerState()
+      state.stem_bass.muted = true
+      const next = setMusicMuted(state, false)
+      expect(next.stem_bass.muted).toBe(false)
+      expect(next.stem_vocals.muted).toBe(false)
+      expect(next.stem_other.muted).toBe(false)
+    })
+  })
+
+  describe('isMusicSolo / setMusicSolo', () => {
+    it('isMusicSolo is true only when all 3 stems are soloed', () => {
+      const state = defaultMixerState()
+      state.stem_bass.solo = true
+      state.stem_vocals.solo = true
+      state.stem_other.solo = true
+      expect(isMusicSolo(state)).toBe(true)
+    })
+
+    it('setMusicSolo(true) solos all 3 stems together (verified via effectiveGain)', () => {
+      const state = defaultMixerState()
+      const next = setMusicSolo(state, true)
+      // 솔로 규칙(work/T3-4/plan.md §2)과 합성 — 3개가 같이 솔로되면 나머지
+      // (드럼 원곡·신스 드럼·메트로놈)는 전부 무음이 됨.
+      expect(effectiveGain(next.stem_bass, next)).toBe(next.stem_bass.volume)
+      expect(effectiveGain(next.synth_drums, next)).toBe(0)
+    })
   })
 })
 

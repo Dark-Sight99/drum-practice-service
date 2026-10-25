@@ -8,7 +8,14 @@ export {
   CHANNEL_KEYS,
   defaultMixerState,
   effectiveGain,
+  isMusicMuted,
+  isMusicSolo,
   linearGainToDb,
+  MUSIC_STEM_KEYS,
+  musicVolume,
+  setMusicMuted,
+  setMusicSolo,
+  setMusicVolume,
   toggleDrumlessPreset,
 } from './mixer'
 export type { ChannelKey, ChannelState, MixerState } from './mixer'
