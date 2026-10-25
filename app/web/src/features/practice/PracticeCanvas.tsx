@@ -126,6 +126,19 @@ export function PracticeCanvas({
     return Math.min(maxBpm, Math.max(minBpm, Math.round(value)))
   }
 
+  // 모바일 실사용 피드백(2026-10-25) — 숫자칸 값을 그대로 setState+clamp하면,
+  // 지우는 순간(빈 문자열 → Number('')===0) 즉시 최솟값으로 되돌아가 버려서
+  // "1을 지우고 3을 입력"이 "13"이 되는 버그가 있었다(최솟값이 0 초과인 모든
+  // 숫자칸 공통 문제). 포커스 중엔 별도의 문자열 draft로 자유롭게 입력받고,
+  // 포커스를 벗어날 때만 실제 상태로 커밋(clamp)한다 — 포커스 중이 아닐 땐
+  // draft를 렌더링 중에 playbackBpm에서 바로 파생시켜(oxlint
+  // react(set-state-in-effect) 권장대로 effect로 동기화하지 않음) 슬라이더
+  // 등 다른 경로로 바뀐 값도 항상 반영되게 한다. BPM·루프 시작·루프 끝 3곳
+  // 모두 같은 패턴.
+  const [isEditingBpm, setIsEditingBpm] = useState(false)
+  const [bpmDraft, setBpmDraft] = useState('')
+  const bpmFieldValue = isEditingBpm ? bpmDraft : String(playbackBpm)
+
   // --- 보이는 마디 수(T3-2 게이트 피드백 1차 — 04-ui-ux.md "낙하 속도") ---
   // layout.ts의 pixelsPerSecond()가 보이는 마디 수와 무관하게 BPM이 수식에서
   // 상쇄되는 구조라(퀵 재생 BPM을 낮춰도 노트 사이 "픽셀 간격"은 안 바뀜),
@@ -143,6 +156,15 @@ export function PracticeCanvas({
   const [loopEnabled, setLoopEnabled] = useState(false)
   const [loopStartBar1, setLoopStartBar1] = useState(1)
   const [loopEndBar1, setLoopEndBar1] = useState(Math.min(totalBars, 4))
+
+  // 위 BPM과 같은 이유(모바일 피드백) — 루프 시작/끝 숫자칸도 포커스 중에만
+  // draft, 아닐 땐 렌더링 중 파생.
+  const [isEditingLoopStart, setIsEditingLoopStart] = useState(false)
+  const [loopStartDraft, setLoopStartDraft] = useState('')
+  const loopStartFieldValue = isEditingLoopStart ? loopStartDraft : String(loopStartBar1)
+  const [isEditingLoopEnd, setIsEditingLoopEnd] = useState(false)
+  const [loopEndDraft, setLoopEndDraft] = useState('')
+  const loopEndFieldValue = isEditingLoopEnd ? loopEndDraft : String(loopEndBar1)
 
   function clampLoopStart(value: number): number {
     if (Number.isNaN(value)) return loopStartBar1
@@ -410,8 +432,16 @@ export function PracticeCanvas({
             type="number"
             min={minBpm}
             max={maxBpm}
-            value={playbackBpm}
-            onChange={(e) => setPlaybackBpm(clampBpm(Number(e.target.value)))}
+            value={bpmFieldValue}
+            onFocus={() => {
+              setBpmDraft(String(playbackBpm))
+              setIsEditingBpm(true)
+            }}
+            onChange={(e) => setBpmDraft(e.target.value)}
+            onBlur={(e) => {
+              setPlaybackBpm(clampBpm(Number(e.target.value)))
+              setIsEditingBpm(false)
+            }}
             disabled={isPlaying}
             style={{ width: 56 }}
           />
@@ -461,11 +491,17 @@ export function PracticeCanvas({
               type="number"
               min={1}
               max={totalBars}
-              value={loopStartBar1}
-              onChange={(e) => {
+              value={loopStartFieldValue}
+              onFocus={() => {
+                setLoopStartDraft(String(loopStartBar1))
+                setIsEditingLoopStart(true)
+              }}
+              onChange={(e) => setLoopStartDraft(e.target.value)}
+              onBlur={(e) => {
                 const next = clampLoopStart(Number(e.target.value))
                 setLoopStartBar1(next)
                 if (next >= loopEndBar1) setLoopEndBar1(Math.min(totalBars, next + 1))
+                setIsEditingLoopStart(false)
               }}
               disabled={isPlaying}
               style={{ width: 48 }}
@@ -475,11 +511,17 @@ export function PracticeCanvas({
               type="number"
               min={1}
               max={totalBars}
-              value={loopEndBar1}
-              onChange={(e) => {
+              value={loopEndFieldValue}
+              onFocus={() => {
+                setLoopEndDraft(String(loopEndBar1))
+                setIsEditingLoopEnd(true)
+              }}
+              onChange={(e) => setLoopEndDraft(e.target.value)}
+              onBlur={(e) => {
                 const next = clampLoopEnd(Number(e.target.value))
                 setLoopEndBar1(next)
                 if (next <= loopStartBar1) setLoopStartBar1(Math.max(1, next - 1))
+                setIsEditingLoopEnd(false)
               }}
               disabled={isPlaying}
               style={{ width: 48 }}
