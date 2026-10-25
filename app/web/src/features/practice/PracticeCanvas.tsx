@@ -49,7 +49,9 @@ const TRACK_RESYNC_INTERVAL_MS = 750
 const TRACK_RESYNC_THRESHOLD_SECONDS = 0.1
 
 // 2026-10-25(의뢰인 요청) — "노트가 떨어지는 크기는 고정"(아래 <canvas> 참고).
-const PRACTICE_LANE_MAX_WIDTH_PX = 520
+// T3-11 게이트 피드백 3차(2026-10-25, 의뢰인 "폭을 조금 더 줄여도 될거 같아") —
+// 520 → 400으로 축소. 추정치라 intent/07-open-questions.md Q-29 갱신.
+const PRACTICE_LANE_MAX_WIDTH_PX = 400
 
 // T3-4(REQ-05) — 믹서 UI에 쓸 채널 표시 이름.
 const CHANNEL_LABELS: Record<ChannelKey, string> = {
@@ -1107,10 +1109,13 @@ export function PracticeCanvas({
        * 화면(모바일)에서는 기존처럼 꽉 채우고, 넓은 화면에서는 그 이상
        * 넓어지지 않고 중앙 정렬 + 좌우는 `<main>`의 배경색(--bg)이 그대로
        * 보이게 둔다(laneRenderer.ts가 매 프레임 canvas.clientWidth를 읽어
-       * 내부 해상도를 맞추므로 렌더러 쪽 변경 불필요). 구체 px 값은 의뢰인이
-       * 보낸 스크린샷의 창 폭(약 500px, 레인 폭이 노트 최대 크기 28px에 이미
-       * 도달하는 수준)에서 역산한 추정치 — 너무 좁거나 넓으면 조정 필요
-       * (`intent/07-open-questions.md`에 추가 예정). */}
+       * 내부 해상도를 맞추므로 렌더러 쪽 변경 불필요). 구체 px 값(추정치,
+       * intent/07-open-questions.md Q-29)은 위 상수 선언부 참고.
+       * T3-11 게이트 피드백 3차(2026-10-25, 의뢰인 "레인도 외곽을 선으로
+       * 감싸서 레인크기를 보고 싶어. 이건 밝은 대비되는색이 아니어도 될거
+       * 같고") — 캔버스 폭을 줄이고 나니 좌우 여백과 레인 배경이 같은 색이라
+       * 경계가 안 보였음. 노트 halo(밝은 대비색)와 달리 이건 "크기가 어디서
+       * 끝나는지"만 보여주면 되므로 이미 쓰던 차분한 `--border` 색으로 테두리. */}
       <canvas
         ref={canvasRef}
         style={{
@@ -1120,6 +1125,7 @@ export function PracticeCanvas({
           height: 400,
           margin: '0 auto',
           background: 'var(--bg)',
+          border: '1px solid var(--border)',
         }}
       />
 
