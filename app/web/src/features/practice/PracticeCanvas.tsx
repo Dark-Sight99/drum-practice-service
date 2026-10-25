@@ -783,14 +783,31 @@ export function PracticeCanvas({
         <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)', flex: 1 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)' }}>
             <strong>믹서</strong>
-            <button onClick={applyDrumlessPreset}>🥁 드럼 빼고 듣기</button>
+            <button onClick={applyDrumlessPreset}>
+              🥁 원곡 드럼 {mixerState.stem_drums.volume === 0 ? '켜기' : '끄기'}
+            </button>
           </div>
+          {/* T3-4 게이트 피드백 2차(2026-10-25) — M/S 체크박스를 눌러도 화면에서
+           * 티가 잘 안 난다는 지적 → 약어 뜻을 바로 아래에 적어두고, 아래 각
+           * 채널 행에서 음소거 중이면 흐리게, 솔로 중이면 강조색 테두리로
+           * 즉시 눈에 띄게 한다. */}
+          <span style={{ color: 'var(--text-muted)', fontSize: '0.85em' }}>
+            M = 음소거 · S = 솔로(이 채널만 들림)
+          </span>
           {CHANNEL_KEYS.map((key) => {
             const channel = mixerState[key]
             return (
               <div
                 key={key}
-                style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 'var(--space-2)',
+                  opacity: channel.muted ? 0.5 : 1,
+                  border: channel.solo ? '1px solid var(--accent)' : '1px solid transparent',
+                  borderRadius: 4,
+                  padding: '2px 4px',
+                }}
               >
                 <span style={{ width: 90 }}>{CHANNEL_LABELS[key]}</span>
                 <input
@@ -804,7 +821,10 @@ export function PracticeCanvas({
                 <span style={{ width: 36, textAlign: 'right' }}>
                   {Math.round(channel.volume * 100)}%
                 </span>
-                <label style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-1)' }}>
+                <label
+                  title="음소거"
+                  style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-1)' }}
+                >
                   <input
                     type="checkbox"
                     checked={channel.muted}
@@ -812,7 +832,10 @@ export function PracticeCanvas({
                   />
                   M
                 </label>
-                <label style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-1)' }}>
+                <label
+                  title="솔로 — 이 채널만 들림"
+                  style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-1)' }}
+                >
                   <input
                     type="checkbox"
                     checked={channel.solo}
