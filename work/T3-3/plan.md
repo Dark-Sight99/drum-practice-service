@@ -10,7 +10,7 @@ REQ-04: "오디오 트랙은 **음정 유지** 상태로 속도 변경. MIDI·�
 - **제외(다른 작업 범위)**:
   - 트랙별 볼륨 슬라이더·음소거·솔로·"드럼 빼고 듣기" 프리셋 → **T3-4**(REQ-05). T3-3은 이용 가능한 스템을 전부 **동일 기본 게인(1.0)**으로 튼다(T3-4가 UI를 추가하기 전까지의 임시 기본값).
   - `original`(분리 전 원본) 트랙 재생 선택 UI → T3-4에서 다룸(원본까지 더하면 스템 합과 중복 재생되므로 T3-3은 스템 4종만 다룸, 분리가 아직 안 된 곡은 오디오 트랙 없이 기존 MIDI만 재생 — 저하 없이 그대로 동작).
-  - `audioOffsetMs` 비0 값 처리 → **T3-5**(오디오-MIDI 오프셋 정렬 UI). 지금까지 모든 실측 곡에서 이 값은 항상 0으로 확인됐음(Q-23) — T3-3의 동기화 수식은 0을 가정하고, 비0일 때의 보정은 T3-5에서 다룸(주석으로 명시, 조용히 무시하지 않음).
+  - `audioOffsetMs` 비0 값 처리 → **T3-5**(오디오-MIDI 오프셋 정렬 UI). 지금까지 모든 실측 곡에서 이 값은 항상 0으로 확인됐음(Q-23)이지만, **"항상 0이었다"는 과거 관찰일 뿐 앞으로도 그렇다는 보장은 아니다**(모드C 1라운드 지적, 타당함— 값이 바뀌면 노트와 오디오 트랙의 기준점이 달라짐). 그래서 가정에 의존하지 않고 **런타임에 직접 확인**한다: `score.audioOffsetMs !== 0`이면 오디오 트랙 재생 자체를 켜지 않고(분리 안 된 곡과 같은 "MIDI만" 경로로 조용히 격하) 콘솔 경고를 남긴다 — 잘못된 동기로 재생하는 것보다 "이번엔 오디오 트랙 없음"이 안전함. T3-5가 이 값을 다루게 되면 이 가드도 함께 재검토.
 
 ## 설계
 
@@ -38,8 +38,12 @@ export interface TrackPlayer {
    * `waitForTapThenPlay`)가 iOS Safari에서 새 <audio> 엘리먼트의 첫
    * play()가 제스처 밖이면 NotAllowedError로 거부됨을 실제로 재현한 바 있음
    * — 이번엔 N개를 한 핸들러 안에서 미리 언락하는 방식이라 **그 스파이크와
-   * 똑같은 보장은 아님(추정, 실기기 QA로 확인 필요)**. */
-  prime(): Promise<void>
+   * 똑같은 보장은 아님(추정, 실기기 QA로 확인 필요)**.
+   * 반환값: 각 소스별 언락 성공 여부(모드C 1라운드 MINOR 반영 — 실패를
+   * 조용히 무시하지 않음). `playFrom`은 언락 실패한 트랙을 건너뛴다(그
+   * 트랙만 "이번 재생에선 못 들림", 나머지 트랙·MIDI 재생은 계속됨 —
+   * 하나의 모바일 정책 실패가 전체 재생을 막지 않게). */
+  prime(): Promise<{ kind: string; ok: boolean }[]>
   /** 곡 내 위치(초, 원곡 기준)로 각 트랙을 이동시키고 재생 시작.
    * preservesPitch=true + playbackRate 설정. */
   playFrom(songPositionSeconds: number, playbackRate: number): void
@@ -55,22 +59,25 @@ export function createTrackPlayer(sources: TrackSource[]): TrackPlayer
 
 ### 4. `scorePlayer.ts` 확장
 `PlayDrumScoreOptions`에 `tracks?: TrackPlayer`(선택, 없으면 기존과 동일하게 MIDI만 재생 — 분리 안 된 곡 하위호환) 추가.
-- **동기화 수식(유도, 추측 아님)**: 노트는 `schedule.songStartSeconds + ticksToSeconds(tick, ppq, playbackBpm)` 시각에 울리고, `ticksToSeconds`는 `(tick/ppq)*(60/playbackBpm)`(기존 `timing.ts` 확인) — 이는 연습 BPM 기준 "경과 시각"이다. 오디오 트랙(원곡 그대로 녹음된 파일) 쪽에서 같은 틱에 대응하는 "파일 내부 위치"는 원곡 BPM 기준이므로 `(tick/ppq)*(60/originalBpm)` = `ticksToSeconds(tick,ppq,playbackBpm) * (playbackBpm/originalBpm)`이 된다. 즉 **`audio.currentTime = (transport.seconds - schedule.songStartSeconds) * playbackRate`**(`playbackRate = playbackBpm/originalBpm`)가 두 시간축을 잇는 식 — `audio.playbackRate`를 이 값으로 설정해두면 Transport가 흐르는 동안 재생 중인 오디오도 저절로 같은 비율로 맞게 흘러간다(매 프레임 currentTime을 계산해 넣는 게 아니라 시작 위치만 맞추고 playbackRate로 흘려보냄).
-- **시작 트리거**: `schedule.loopStartSeconds ?? schedule.songStartSeconds` 시각에 `transport.schedule(cb, that)`로 1회 예약. 루프가 켜져 있으면 Tone 네이티브 루프가 같은 절대 시각의 `schedule()` 콜백을 경계마다 재발화함(이미 `transport.setLoopPoints`/A-B 루프 설계 시 소스로 확인된 동작, work/T2-4/plan.md "Tone.js 루프 동작 근거" 재사용) — 최초 진입과 매 루프 반복을 **같은 콜백 하나**로 처리(루프 감지용 별도 폴링 불필요).
-- 콜백 안에서 `tracks.playFrom(0, playbackRate)` 호출(루프 여부와 무관하게 "그 경계 시점의 오디오 위치"는 항상 0, 즉 `loopStartSeconds`가 곧 그 트랙 재생의 기준점 — 루프 구간 자체를 오디오 쪽도 처음부터 다시 재생).
+- **동기화 수식(유도, 추측 아님)**: 노트는 `schedule.songStartSeconds + ticksToSeconds(tick, ppq, playbackBpm)` 시각에 울리고, `ticksToSeconds`는 `(tick/ppq)*(60/playbackBpm)`(기존 `timing.ts` 확인) — 이는 연습 BPM 기준 "경과 시각"이다. 오디오 트랙(원곡 그대로 녹음된 파일) 쪽에서 같은 틱에 대응하는 "파일 내부 위치"는 원곡 BPM 기준이므로 `(tick/ppq)*(60/originalBpm)` = `ticksToSeconds(tick,ppq,playbackBpm) * (playbackBpm/originalBpm)`이 된다. 즉 **`audioPositionSeconds(transportSeconds) = (transportSeconds - schedule.songStartSeconds) * playbackRate`**(`playbackRate = playbackBpm/originalBpm`)가 두 시간축을 잇는 일반식 — `audio.playbackRate`를 이 값으로 설정해두면 Transport가 흐르는 동안 재생 중인 오디오도 저절로 같은 비율로 맞게 흘러간다(매 프레임 currentTime을 계산해 넣는 게 아니라 시작 위치만 맞추고 playbackRate로 흘려보냄).
+- **시작/루프 재진입 트리거(모드C 1라운드 MAJOR 수정)**: `audioStartSeconds = schedule.loopStartSeconds ?? schedule.songStartSeconds` 시각에 `transport.schedule(cb, audioStartSeconds)`로 1회 예약. 루프가 켜져 있으면 Tone 네이티브 루프가 같은 절대 시각의 `schedule()` 콜백을 경계마다 재발화함(이미 `transport.setLoopPoints`/A-B 루프 설계 시 소스로 확인된 동작, work/T2-4/plan.md "Tone.js 루프 동작 근거" 재사용) — 최초 진입과 매 루프 반복을 **같은 콜백 하나**로 처리.
+  콜백 안에서 **`tracks.playFrom(audioPositionSeconds(audioStartSeconds), playbackRate)`를 호출**(위 일반식에 `audioStartSeconds`를 그대로 대입) — ~~루프 여부와 무관하게 항상 0~~(1라운드 지적대로 **틀린 설계**였음: 루프가 0번 마디부터가 아니면 `audioStartSeconds`가 `songStartSeconds`보다 뒤라 `audioPositionSeconds`가 0이 아니다. 예) 8마디 곡에서 4~6마디를 루프하면 매 루프 진입 시 오디오도 "4마디 지점"으로 이동해야 하는데 0(곡 맨 처음)으로 틀어졌을 것). 일반식을 그대로 재사용하면 루프 유무와 무관하게 항상 올바른 위치가 나옴 — 특수 분기 불필요.
 
   **주의(한계, 추측 아님):** 이 설계는 **A-B 루프 구간이 통째로 반복**되는 경우만 다룬다. 지금 UI(`PracticeCanvas`)의 루프는 정확히 "구간 처음부터"만 지원하므로 범위 안. 구간 중간 탐색(스크러빙)은 REQ-04 수용 기준에 없어 범위 밖.
+- **경계에서의 콜백 순서(모드C 1라운드 MAJOR, 한계 인정)**: 같은 절대 시각에 예약된 오디오 재시작 콜백과 기존 노트/메트로놈 재예약 콜백 사이의 **상대적 실행 순서는 보장하지 않는다**(Tone.js 문서·기존 `work/T2-4/plan.md` 근거 모두 "경계에서 재발화한다"만 확인됐지, "여러 콜백 중 어느 게 먼저냐"는 확인된 적 없음 — 추측하지 않음). 다만 둘 다 "look-ahead 스케줄"로 같은 순간에 등록되는 것이고, 오디오 쪽은 `HTMLMediaElement.play()` 자체의 기기별 시작 지연(T0-5 실측상 수백 ms 단위)이 이미 이 순서 차이(통상 수 ms 이하로 추정)보다 훨씬 크게 지배적이라, **콜백 등록 순서 자체가 체감 가능한 차이를 만들 가능성은 낮다고 판단**(확정 아님) — QA 계획 §4에 "루프 경계에서 오디오·MIDI 상대 타이밍"을 별도 항목으로 추가해 실측으로 확인한다.
 - `stop()`에서 `tracks.stop()`도 호출, `transport.clear(scheduledAudioStartId)` 포함.
+- **생명주기(모드C 1라운드 MAJOR 보강)**: `TrackPlayer`는 기존 `DrumVoiceMap`과 같은 "재생 1회당 1개" 수명을 따른다 — `PracticeCanvas.handlePlay()`가 매번 새 `createTrackPlayer(...)`를 만들고(기존 `createDrumVoices()` 패턴과 동일), `PlaybackHandle.stop()`이 `tracks.stop()`+`tracks.dispose()`를 호출해 이전 `<audio>` 엘리먼트를 전부 정리한다. `stopPlayback()`은 (기존 `disposeDrumVoices` 호출과 나란히) 재생이 끝난 `TrackPlayer`를 반드시 버리고, 다음 `handlePlay()`가 새 인스턴스를 만들게 해 이전 트랙 엘리먼트가 남아 다음 재생과 겹치는 일이 없게 한다.
 
 ### 5. 지속적 리싱크 — 임계값은 "확정"이 아니라 Mode C/QA에서 같이 정할 열린 질문
 `PracticeCanvas`의 기존 rAF 루프(매 프레임 `clock.getPositionSeconds()`를 이미 읽고 있음)에 저빈도(예: 500ms~1초 간격 스로틀) `tracks.resync(expected, playbackRate, thresholdSeconds)` 호출을 추가한다.
 - **왜 ±30ms를 threshold로 쓰면 안 될 가능성이 있는지(T0-5 실측 근거)**: T0-5가 실기기에서 측정한 "어긋남"은 배속에 비례하는 **고정 오프셋**(예: 60%≈-250ms대, 130%≈-590ms대)로 보이고, 이는 "누적되는 드리프트"가 아니라 "재생 시작 자체의 고정 지연"으로 해석됐음(`qa-evidence/T0-5/result.md` 결론2). 고정 지연을 매 polling마다 threshold 기준으로 currentTime을 스냅해 "보정"하면, 그 지연이 사라지지 않고 매번 다시 감지돼 **계속 끊어 재생하는(stutter) 역효과**를 낼 위험이 있다 — 이건 추정이며 실제로 겪어본 적은 없다(T0-5는 실제 Transport+분리 오디오 조합으로 측정한 적이 없음, Q-05 미해소로 남아있는 이유 그대로).
-- **제안(마스터 1차 제안, 최종은 Codex 모드C+실기기 QA 이후 조정 가능)**: threshold를 ±30ms보다 느슨하게(예: 80~100ms) 두고 폴링 간격도 느슨하게(500ms~1s) 해서, "루프 경계 같은 큰 점프"는 바로 잡고 "고정 지연 수준의 작은 어긋남"은 상시 보정 대상으로 삼지 않는다. ±30ms 자체를 만족하는지는 실측으로만 확인하고, 못 미치면 "고정 지연"으로 보고 **보정하지 않고 보고**하는 쪽을 기본으로 한다(Q-24에서 의뢰인이 "심하지 않으면 이대로"를 이미 한 번 수용한 선례와 같은 태도).
+- **제안(마스터 1차 제안, 구현 단계에서 쉽게 바꿀 수 있는 상수 — 최종 확정 아님)**: threshold를 ±30ms보다 느슨하게(예: 80~100ms) 두고 폴링 간격도 느슨하게(500ms~1s) 해서, "루프 경계 같은 큰 점프"는 바로 잡고 "고정 지연 수준의 작은 어긋남"은 상시 보정 대상으로 삼지 않는다.
+  **명시(모드C 1라운드 MAJOR 지적 반영)**: 이 값들은 **출시 기준으로 확정하지 않는다**. T0-5의 측정(`qa-evidence/T0-5/result.md`)은 "실제 메트로놈·분리 오디오 트랙 조합"이 아니라 합성 클릭트랙 간 비교였다고 그 문서 자신이 명시하고 있어, 이 설계만으로 ±30ms 충족 여부를 판단할 근거가 못 된다. 그래서 **구현 완료를 "±30ms 충족"으로 보고하지 않고**, QA 단계(§QA계획 3번)의 실측 결과를 있는 그대로 보고한다 — 충족하면 그대로 확정, 못 미치면 "고정 지연로 보이는 수준"인지 "실제 누적 드리프트"인지 구분해 Q-05/Q-24에 갱신하고 사용자 결정을 받는다(Q-24 선례와 같은 태도).
 
 ### 6. `PracticeCanvas.tsx` 연동
 - `songId: number` prop 추가(현재 `score`만 받음 — `App.tsx`가 `practiceSong.song.id`를 이미 갖고 있어 전달만 추가).
 - `song.available_audio_kinds`(API에서 이미 받아온 `SongSummary`)로 어떤 스템이 있는지 파악, `createTrackPlayer(kinds.map(k => ({kind:k, url:`/api/songs/${songId}/audio/${k}`})))` 생성.
-- `handlePlay()`: 기존 `async` 흐름에서 **`await` 이전에** `await trackPlayer.prime()`을 두지 않고(await가 제스처 체인을 끊을 수 있다는 우려, §3 주석 참조) 동기적으로 먼저 호출 후 결과 Promise는 무시하지 않고 기다리되, 제스처 보존을 위한 정확한 호출 순서는 구현 단계에서 실기기로 검증(이 설계 문서에서 "안전하다"고 단정하지 않음).
+- `handlePlay()`: 제스처 체인을 보존하기 위해 `trackPlayer.prime()`의 각 엘리먼트별 `play()+pause()` 호출 자체는 핸들러 진입 직후 **동기적으로**(다른 `await` 앞에) 시작시키되, **그 결과(Promise)는 기다린다**(모드C 1라운드 MINOR 반영 — "기다릴지 여부를 정하지 않음" 지적 해소). 기다리는 이유: 어떤 트랙이 언락에 실패했는지 알아야 `playFrom` 호출 시 그 트랙을 건너뛸 수 있고, 실패를 모른 채 재생을 시작하면 이후 `play()`가 조용히 거부돼 그 트랙만 영원히 무음인 상태를 디버깅하기 어려워짐. 정확한 호출 순서(언제까지가 "같은 제스처"로 인정되는지)는 구현 단계에서 실기기로 검증(이 설계 문서에서 "안전하다"고 단정하지 않음, QA 계획 §5).
 
 ## 위험 분류 — Codex 모드C 대상(`intent/06-pipeline.md` §1-1)
 - **오디오 타이밍·동기**: §4·5가 정면으로 이 범주. 특히 "리싱크 threshold를 어떻게 정하느냐"가 정답이 없는 트레이드오프 설계 질문.
@@ -79,13 +86,15 @@ DB 스키마 변경 없음(기존 Asset 테이블 읽기만), 외부 모델·라
 
 ## QA 계획(이 설계로 구현된 뒤)
 1. 자동 테스트: `trackPlayer.ts`의 동기화 수식(순수 계산 부분, §4 공식)은 단위 테스트 가능. `HTMLAudioElement` 실제 재생·`preservesPitch` 동작은 jsdom이 Web Audio API를 구현 안 해(기존 Tone.js 관련 모듈들과 같은 제약, `clock.ts` 주석 재확인) 단위 테스트 불가 — 실기기 수동 QA로 검증.
-2. 백엔드: 엔드포인트 단위 테스트(소유권 404, 파일 없음 404, Range 요청 시 206 — 실제 `TestClient`로 `Range` 헤더 보내 검증).
-3. **실제 end-to-end(이번 작업의 핵심 증거)**: 이미 분리·채보된 실제 곡(backnumber 또는 희비교차)으로 60%/100%/130% 각각 실제 재생 → 영상 녹화 후 T2-11에서 썼던 교차상관 분석(프레임+오디오 추출)으로 오디오 트랙-메트로놈/레인 어긋남을 실측 — **이것이 Q-05를 사실상 처음으로 "분리된 실제 오디오 트랙"으로 검증하는 기회**(T0-5는 합성 클릭트랙·Phase 0 시점이라 이 조건이 없었음). 결과가 ±30ms를 못 만족해도 숨기지 않고 보고(Q-05/Q-24에 갱신).
-4. A-B 루프 경계에서 오디오 트랙도 끊김·중복 없이 반복되는지 확인(REQ-04 수용 기준).
-5. 모바일 제스처 언락 가정(§3) 검증 — 가능하면 실제 아이폰/아이패드(T0-5 때 썼던 Tailscale 배포 경로 재사용 가능)로 N개 스템을 한 클릭으로 언락했을 때 전부 정상 재생되는지 확인.
+2. 백엔드: 엔드포인트 단위 테스트(소유권 404, 파일 없음 404, 타 사용자 곡 404, **`Range` 헤더를 실제로 보내 206+`Content-Range` 응답을 `TestClient`로 직접 검증** — "Starlette 소스를 읽어봤다"가 아니라 실제 요청-응답으로 확정, 모드C 1라운드 MINOR 반영).
+3. **실제 end-to-end(이번 작업의 핵심 증거)**: 이미 분리·채보된 실제 곡(backnumber 또는 희비교차)으로 60%/100%/130% 각각 실제 재생 → 영상 녹화 후 T2-11에서 썼던 교차상관 분석(프레임+오디오 추출)으로 오디오 트랙-메트로놈/레인 어긋남을 실측 — **이것이 Q-05를 사실상 처음으로 "분리된 실제 오디오 트랙"으로 검증하는 기회**(T0-5는 합성 클릭트랙·Phase 0 시점이라 이 조건이 없었음). 결과가 ±30ms를 못 만족해도 숨기지 않고 보고(Q-05/Q-24에 갱신) — §5에서 명시했듯 이 측정 전엔 "±30ms 충족"을 주장하지 않는다.
+4. A-B 루프 경계에서 (a) 오디오 트랙도 끊김·중복 없이 반복되는지, (b) **오디오 재시작과 MIDI/메트로놈 재예약 사이에 체감 가능한 상대적 어긋남이 생기는지**(모드C 1라운드 MAJOR 반영 — 콜백 순서를 보장하지 않으므로 실측으로 확인) 둘 다 확인(REQ-04 수용 기준).
+5. 모바일 제스처 언락 가정(§3) 검증 — 가능하면 실제 아이폰/아이패드(T0-5 때 썼던 Tailscale 배포 경로 재사용 가능)로 N개 스템을 한 클릭으로 언락했을 때 전부 정상 재생되는지, 일부만 실패했을 때 나머지가 정상 재생되는지 확인.
 
 ## 가정·한계(숨기지 않음)
-- `audioOffsetMs≠0` 미대응(T3-5로 이연, 지금까지 항상 0이었음을 Q-23으로 확인).
-- 리싱크 threshold·폴링 간격은 추정치 제안일 뿐 — Mode C 검수와 실기기 QA 결과에 따라 조정될 수 있음.
-- 모바일 "N개 언락" 가정은 T0-5의 "1개 언락" 실측 선례의 추정 확장일 뿐, 직접 재현된 적 없음.
+- `audioOffsetMs≠0`는 처리하지 않고 오디오 트랙을 끄는 가드로만 대응(§범위경계) — 실제 보정은 T3-5.
+- 리싱크 threshold·폴링 간격은 추정치 제안일 뿐 — Mode C 검수와 실기기 QA 결과에 따라 조정될 수 있음. 이 값으로 ±30ms 충족을 보장하지 않음(§5).
+- 루프 경계에서 오디오 재시작 콜백과 MIDI/메트로놈 재예약 콜백의 상대적 실행 순서는 보장되지 않음 — 체감 영향은 실측으로만 확인(§4, QA계획 4번).
+- 모바일 "N개 언락" 가정은 T0-5의 "1개 언락" 실측 선례의 추정 확장일 뿐, 직접 재현된 적 없음 — 실패 시 해당 트랙만 건너뛰도록 설계했지만 "전부 성공"은 가정이 아니라 QA로 확인할 대상(§3, §6).
 - T3-4(믹서) 전까지 전 트랙 게인 1.0 고정은 임시 기본값 — 영구 설계가 아님.
+- 서빙 중(응답 헤더 전송 후) 파일이 교체·삭제되는 경쟁 상태는 별도 방어를 추가하지 않음 — `FileResponse`가 그 경우 500을 내는 Starlette 기본 동작을 그대로 받아들임(기존 `drumscore` 등 다른 파일 서빙 엔드포인트에도 이런 방어가 없는 것과 같은 수준, 이번 작업에서 새로 생기는 위험이 아님, 모드C 1라운드 MINOR 반영).
