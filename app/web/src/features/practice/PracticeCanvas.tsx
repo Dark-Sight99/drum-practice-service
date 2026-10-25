@@ -203,12 +203,15 @@ export function PracticeCanvas({
     // T3-4(REQ-05) — 신스 드럼 9종이 공용으로 거치는 게인(한 값으로 전체
     // 조절). Metronome은 이번에 처음 재생 흐름에 연결됨(work/T3-4/plan.md §1).
     synthGain: Tone.Gain
-    // T3-7 모드A 지적(리스크) — 킥(+9dB 보정)과 스네어(원래부터 피크
-    // 거의 0dB)처럼 서로 다른 신스 드럼 원샷이 정확히 같은 순간 겹치면
-    // 합산 파형이 0dBFS를 넘어 디지털 클리핑(찢어지는 소리)이 날 수 있음.
-    // synthGain 바로 뒤에 리미터를 둬 신스 드럼 전체 출력이 절대 넘지
-    // 않게 막는다(실제 설치된 Tone.js Limiter.js 소스 확인 — Compressor를
-    // ratio 20·attack 3ms·release 10ms로 감싼 전용 컴포넌트).
+    // T3-7 모드A 1라운드 지적(리스크) — 킥(+9dB 보정)과 스네어(원래부터
+    // 피크 거의 0dB)처럼 서로 다른 신스 드럼 원샷이 정확히 같은 순간
+    // 겹치면 합산 파형이 0dBFS를 넘어 디지털 클리핑(찢어지는 소리)이 날
+    // 수 있음. synthGain 바로 뒤에 리미터를 둬 그 위험을 크게 줄인다
+    // (실제 설치된 Tone.js Limiter.js 소스 확인 — Compressor를 ratio 20·
+    // attack 3ms·release 10ms로 감싼 전용 컴포넌트). 2라운드 지적(리스크)
+    // 반영 — lookahead 버퍼가 없는 WebAudio DynamicsCompressorNode
+    // 기반이라 "0dBFS를 절대 안 넘는다"는 수학적 보장은 아님(아래 생성
+    // 지점 주석에 한계·마스터 판단 근거 상세 기록).
     limiter: Tone.Limiter
     metronome: Metronome
   } | null>(null)
