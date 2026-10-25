@@ -88,6 +88,17 @@ describe('toggleDrumlessPreset — T3-8(2026-10-25, 의뢰인 요청): 신스 �
 
     expect(toggled.synth_drums.volume).toBe(0) // 중간값 보존 안 함 — 의도된 동작
   })
+
+  it('모드A 지적 회귀 — 꺼짐→다시 켜짐 복귀 시 미리 음소거해둔 채널도 실제로 들리게 함(muted도 같이 리셋)', () => {
+    const state = defaultMixerState()
+    state.synth_drums.muted = true // 사용자가 미리 M 체크박스로 음소거해둔 상태
+
+    const on = toggleDrumlessPreset(state) // 원곡 드럼 켜짐 → 신스 드럼 volume 0
+    const off = toggleDrumlessPreset(on) // 다시 꺼짐 → 신스 드럼 volume 1로 복귀
+
+    expect(off.synth_drums.muted).toBe(false) // muted가 안 풀리면 volume=1이어도 안 들림
+    expect(effectiveGain(off.synth_drums)).toBe(1) // 실제로 들리는지까지 확인
+  })
 })
 
 describe('music 묶음(stem_bass/stem_vocals/stem_other) — T3-4 게이트 피드백 3차', () => {

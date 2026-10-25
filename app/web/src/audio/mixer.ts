@@ -62,18 +62,20 @@ export function effectiveGain(channel: ChannelState): number {
  * 그 사이 신스 드럼 볼륨을 따로 조절해뒀어도 이 버튼을 누르면 0/1로
  * 덮어씀(의뢰인이 요청한 "자동 전환" 자체가 핵심이라 중간값 보존은
  * 범위 밖으로 판단).
- * T3-4 게이트 피드백 2차(2026-10-25) — `defaultMixerState()`가 stem_drums를
- * 볼륨 0으로 기본 설정하도록 바뀌면서, 이 프리셋도 `muted`가 아니라
- * **볼륨 자체를 0↔1로 토글**하도록 맞춤(기본값과 같은 "볼륨" 축을 써야
- * 토글이 실제로 의미 있음 — muted만 토글하면 이미 볼륨 0인 기본 상태에서
- * 눌러도 체감 변화가 없었을 것). */
+ * 모드A 지적(필수, 반영) — `volume`만 바꾸고 `muted`를 그대로 두면,
+ * 사용자가 미리 신스 드럼을 M 체크박스로 음소거해둔 상태에서 이 버튼을
+ * 눌렀다 다시 누를 때 volume은 1로 돌아와도 `muted`가 여전히 true라
+ * `effectiveGain()`이 계속 0을 반환 — "꺼짐→다시 켜짐" 복귀가 실제로는
+ * 안 들리는 버그였음. 이 프리셋이 눌리는 순간엔 두 채널의 가청 상태를
+ * 전부 이 버튼이 책임진다는 원칙으로, `muted`도 항상 `false`로 같이
+ * 리셋(볼륨 0/1 덮어쓰기와 같은 "이 버튼이 전적으로 결정한다" 원칙). */
 export function toggleDrumlessPreset(state: MixerState): MixerState {
   const isSilent = state.stem_drums.volume === 0
   const nextStemDrumsVolume = isSilent ? 1 : 0
   return {
     ...state,
-    stem_drums: { ...state.stem_drums, volume: nextStemDrumsVolume },
-    synth_drums: { ...state.synth_drums, volume: isSilent ? 0 : 1 },
+    stem_drums: { ...state.stem_drums, volume: nextStemDrumsVolume, muted: false },
+    synth_drums: { ...state.synth_drums, volume: isSilent ? 0 : 1, muted: false },
   }
 }
 
