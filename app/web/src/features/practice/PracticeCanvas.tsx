@@ -13,12 +13,10 @@ import {
   effectiveGain,
   getMasterClock,
   isMusicMuted,
-  isMusicSolo,
   linearGainToDb,
   musicVolume,
   playDrumScore,
   setMusicMuted,
-  setMusicSolo,
   setMusicVolume,
   toggleDrumlessPreset,
   type ChannelKey,
@@ -73,23 +71,14 @@ interface MixerRowProps {
   label: string
   volume: number
   muted: boolean
-  solo: boolean
   onVolumeChange: (volume: number) => void
   onMutedChange: (muted: boolean) => void
-  onSoloChange: (solo: boolean) => void
 }
 
 /** T3-4 믹서 한 행(채널 1개 또는 묶음) — 피드백 3차에서 "음악(전체)" 묶음
- * 행을 추가하며 기존 CHANNEL_KEYS.map() 안에 있던 JSX를 재사용 가능하게 뺌. */
-function MixerRow({
-  label,
-  volume,
-  muted,
-  solo,
-  onVolumeChange,
-  onMutedChange,
-  onSoloChange,
-}: MixerRowProps) {
+ * 행을 추가하며 기존 CHANNEL_KEYS.map() 안에 있던 JSX를 재사용 가능하게 뺌.
+ * T3-8(2026-10-25, 의뢰인 요청) — 솔로(S) 버튼 제거("필요없다"). */
+function MixerRow({ label, volume, muted, onVolumeChange, onMutedChange }: MixerRowProps) {
   return (
     <div
       style={{
@@ -97,7 +86,6 @@ function MixerRow({
         alignItems: 'center',
         gap: 'var(--space-2)',
         opacity: muted ? 0.5 : 1,
-        border: solo ? '1px solid var(--accent)' : '1px solid transparent',
         borderRadius: 4,
         padding: '2px 4px',
       }}
@@ -115,13 +103,6 @@ function MixerRow({
       <label title="음소거" style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-1)' }}>
         <input type="checkbox" checked={muted} onChange={(e) => onMutedChange(e.target.checked)} />
         M
-      </label>
-      <label
-        title="솔로 — 이 채널만 들림"
-        style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-1)' }}
-      >
-        <input type="checkbox" checked={solo} onChange={(e) => onSoloChange(e.target.checked)} />
-        S
       </label>
     </div>
   )
@@ -400,9 +381,10 @@ export function PracticeCanvas({
 
   // T3-4 게이트 피드백 3차(2026-10-25, 의뢰인 요청) — "원곡 음악이 드럼보다
   // 너무 크다"는 지적에, 베이스·보컬·기타 악기(stem_bass/stem_vocals/
-  // stem_other) 3채널을 UI에서 슬라이더·M·S 하나로 묶어 조작한다. 저장되는
-  // 데이터 구조는 그대로(mixer.ts의 setMusicVolume/setMusicMuted/setMusicSolo가
-  // 3채널에 같은 값을 쓸 뿐) — 백엔드·effectiveGain() 전부 무수정.
+  // stem_other) 3채널을 UI에서 슬라이더·M 하나로 묶어 조작한다(T3-8에서
+  // 솔로 제거돼 S는 없음). 저장되는 데이터 구조는 그대로(mixer.ts의
+  // setMusicVolume/setMusicMuted가 3채널에 같은 값을 쓸 뿐) — 백엔드·
+  // effectiveGain() 전부 무수정.
   function updateMusicVolume(volume: number) {
     userHasEditedMixerRef.current = true
     setMixerState((prev) => setMusicVolume(prev, volume))
@@ -415,12 +397,6 @@ export function PracticeCanvas({
     scheduleMixerSave()
   }
 
-  function updateMusicSolo(solo: boolean) {
-    userHasEditedMixerRef.current = true
-    setMixerState((prev) => setMusicSolo(prev, solo))
-    scheduleMixerSave()
-  }
-
   // 재생 중 믹서 상태가 바뀌면 즉시 반영(REQ-05 "조작 즉시 반영" — BPM/루프와
   // 달리 재생 중에도 잠그지 않음). playbackRef.current 존재 여부로만 게이트해
   // handlePlay() 셋업 중의 경쟁을 원천 차단(모드C 1라운드 C-004).
@@ -428,7 +404,7 @@ export function PracticeCanvas({
     const session = playbackRef.current
     if (!session) return
     for (const key of CHANNEL_KEYS) {
-      const gain = effectiveGain(mixerState[key], mixerState)
+      const gain = effectiveGain(mixerState[key])
       if (key === 'synth_drums') {
         session.synthGain.gain.value = gain
       } else if (key === 'metronome') {
@@ -773,7 +749,7 @@ export function PracticeCanvas({
     // work/T3-4/plan.md §4, "handlePlay()가 세션을 만들 때는 그 시점의
     // mixerStateRef.current를 그대로 읽어 처음부터 맞게 구성").
     for (const key of CHANNEL_KEYS) {
-      const gain = effectiveGain(mixerStateRef.current[key], mixerStateRef.current)
+      const gain = effectiveGain(mixerStateRef.current[key])
       if (key === 'synth_drums') {
         synthGain.gain.value = gain
       } else if (key === 'metronome') {
@@ -996,13 +972,11 @@ export function PracticeCanvas({
               🥁 원곡 드럼 {mixerState.stem_drums.volume === 0 ? '켜기' : '끄기'}
             </button>
           </div>
-          {/* T3-4 게이트 피드백 2차(2026-10-25) — M/S 체크박스를 눌러도 화면에서
+          {/* T3-4 게이트 피드백 2차(2026-10-25) — M 체크박스를 눌러도 화면에서
            * 티가 잘 안 난다는 지적 → 약어 뜻을 바로 아래에 적어두고, 아래 각
-           * 채널 행에서 음소거 중이면 흐리게, 솔로 중이면 강조색 테두리로
-           * 즉시 눈에 띄게 한다. */}
-          <span style={{ color: 'var(--text-muted)', fontSize: '0.85em' }}>
-            M = 음소거 · S = 솔로(이 채널만 들림)
-          </span>
+           * 채널 행에서 음소거 중이면 흐리게 해 즉시 눈에 띄게 한다.
+           * T3-8(2026-10-25, 의뢰인 요청) — 솔로(S) 버튼은 제거("필요없다"). */}
+          <span style={{ color: 'var(--text-muted)', fontSize: '0.85em' }}>M = 음소거</span>
           {MIXER_ROW_KEYS.map((key) => {
             const channel = mixerState[key]
             const rows = [
@@ -1011,15 +985,13 @@ export function PracticeCanvas({
                 label={CHANNEL_LABELS[key]}
                 volume={channel.volume}
                 muted={channel.muted}
-                solo={channel.solo}
                 onVolumeChange={(volume) => updateChannel(key, { volume })}
                 onMutedChange={(muted) => updateChannel(key, { muted })}
-                onSoloChange={(solo) => updateChannel(key, { solo })}
               />,
             ]
             // T3-4 게이트 피드백 3차(2026-10-25, 의뢰인 요청) — "원곡 음악이
             // 드럼보다 너무 크다"는 지적에, 베이스·보컬·기타 악기 3채널을
-            // 원래 위치(드럼(원곡) 바로 다음)에 슬라이더·M·S 하나로 묶어
+            // 원래 위치(드럼(원곡) 바로 다음)에 슬라이더·M 하나로 묶어
             // 보여준다. 저장 구조는 그대로(mixer.ts의 setMusicVolume 등이
             // 3채널에 같은 값을 쓸 뿐) — 순수 UI 묶음.
             if (key === 'stem_drums') {
@@ -1029,10 +1001,8 @@ export function PracticeCanvas({
                   label="음악(베이스·보컬·그 외)"
                   volume={musicVolume(mixerState)}
                   muted={isMusicMuted(mixerState)}
-                  solo={isMusicSolo(mixerState)}
                   onVolumeChange={updateMusicVolume}
                   onMutedChange={updateMusicMuted}
-                  onSoloChange={updateMusicSolo}
                 />,
               )
             }
