@@ -169,6 +169,15 @@ export function PracticeCanvas({
   // handlePause/handlePlay/stopPlayback 세 곳에서만 일어나고 전부 동기적으로
   // 완결됨 — work/T3-6/plan.md §4 "전이 원자성").
   const [isPaused, setIsPaused] = useState(false)
+  // T3-13 모드A 지적(Medium) — 재생/일시정지를 토글 버튼 하나로 합치면서
+  // 버튼에 disabled가 전혀 없어졌는데, handlePlay()의 "새 세션" 경로는
+  // voices/트랙 로딩 등 비동기 구간이 있어 그 사이 토글을 연타하면
+  // stopPlayback()→새 세션 생성이 여러 번 겹쳐 돌 수 있음(세션 id 가드로
+  // 재생 자체가 깨지진 않지만 불필요하게 반복 — Web Audio 그래프까지 다시
+  // 만드는 낭비, 체감 버벅임 유발 가능). ref는 handlePlay() 재진입을 리렌더
+  // 전에 즉시 막기 위함(동기 가드), state는 버튼 disabled 표시용.
+  const isStartingRef = useRef(false)
+  const [isStarting, setIsStarting] = useState(false)
   const isPortraitPhone = usePortraitPhoneLayout()
   // 재생 중인 핸들·보이스를 들고 있다가 정지/언마운트 시 반드시 정리한다 —
   // 안 그러면 Transport에 예약된 이벤트가 남아 있다가 재생을 다시 시작했을 때
@@ -516,8 +525,31 @@ export function PracticeCanvas({
   // T3-3(REQ-04) — 오디오 트랙 리싱크 폴링 스로틀(위 TRACK_RESYNC_INTERVAL_MS).
   const lastTrackResyncAtRef = useRef(0)
 
+  // T3-14(2026-10-25, 의뢰인 피드백 "모바일에서 노트 내려오는게 렉 걸린 것처럼
+  // 버벅인다") — 원인 진단용 임시 FPS 계측. 영상을 ffmpeg로 프레임 분석해
+  // "1초 뒤부터 몇 프레임 멈췄다가 한번에 건너뛰는" 패턴을 확인했으나, Claude가
+  // 접근 가능한 브라우저로는 실제 모바일 CPU를 재현할 수 없어 원인을 추측하지
+  // 않고 실기기에서 직접 재는 쪽을 택함. 1초에 한 번만 setState(그 자체가 매
+  // 프레임 리렌더를 유발하지 않도록 — 계측 코드가 측정 대상을 오염시키면 안
+  // 됨). 원인 특정 후 제거 예정(영구 기능 아님).
+  const fpsFrameCountRef = useRef(0)
+  const fpsWindowStartRef = useRef(performance.now())
+  const [fpsDisplay, setFpsDisplay] = useState<number | null>(null)
+
   useEffect(() => {
     function loop() {
+      // T3-14 FPS 계측(진단용 임시) — 이 loop() 자체가 매 애니메이션 프레임
+      // 호출되므로, 호출 횟수를 1초 단위로 세면 실제 브라우저 프레임레이트.
+      fpsFrameCountRef.current += 1
+      const fpsNow = performance.now()
+      if (fpsNow - fpsWindowStartRef.current >= 1000) {
+        setFpsDisplay(
+          Math.round((fpsFrameCountRef.current * 1000) / (fpsNow - fpsWindowStartRef.current)),
+        )
+        fpsFrameCountRef.current = 0
+        fpsWindowStartRef.current = fpsNow
+      }
+
       const clock = getMasterClock()
       const renderer = rendererRef.current
       const positionSeconds = clock.getPositionSeconds()
@@ -696,6 +728,11 @@ export function PracticeCanvas({
   }
 
   async function handlePlay() {
+    // T3-13 모드A 지적(Medium) — "새 세션" 경로가 비동기로 도는 동안 토글을
+    // 연타해도 재진입 안 하게 즉시 막는다(리렌더로 버튼이 disabled되기 전에도
+    // 막아야 해서 ref로 동기 체크 — state만 쓰면 같은 틱에 두 번째 호출이
+    // 들어올 때 아직 반영 전일 수 있음).
+    if (isStartingRef.current) return
     // T3-6(REQ-04) — 일시정지 중이면 "처음부터 새 세션" 로직(아래의 모든
     // await·stopPlayback() 호출)을 전부 건너뛰고 재개만 한다. 반드시 첫
     // await보다 먼저, 완전히 동기적으로 끝나야 자동 정지 타이머와의 경쟁이
@@ -718,6 +755,8 @@ export function PracticeCanvas({
       setIsPaused(false)
       return
     }
+    isStartingRef.current = true
+    setIsStarting(true)
     stopPlayback() // 혹시 이전 재생이 안 끝났으면 먼저 정리(이중 재생 방지) — playSessionIdRef도 여기서 올라감
     const mySessionId = playSessionIdRef.current
     // T3-3(REQ-04) — audioOffsetMs!==0이면 오디오 트랙 자체를 만들지 않는다
@@ -752,6 +791,11 @@ export function PracticeCanvas({
       limiter?.dispose()
       if (voices) disposeDrumVoices(voices)
       metronome?.dispose()
+      // T3-13 모드A 지적 — 이 함수는 취소/실패로 끝나는 모든 경로(세션 id
+      // 불일치 2곳 + catch)에서 공통으로 불리므로, 여기 한 곳에서만 풀어도
+      // "새 세션" 경로의 모든 비정상 종료를 커버함.
+      isStartingRef.current = false
+      setIsStarting(false)
     }
 
     try {
@@ -808,6 +852,8 @@ export function PracticeCanvas({
       tracks: tracks ?? undefined,
     })
     playbackRef.current = { handle, voices, tracks, synthGain, limiter, metronome }
+    isStartingRef.current = false
+    setIsStarting(false)
     // 방금 만든 세션에 지금 믹서 상태를 바로 적용(처음부터 맞게 시작 —
     // work/T3-4/plan.md §4, "handlePlay()가 세션을 만들 때는 그 시점의
     // mixerStateRef.current를 그대로 읽어 처음부터 맞게 구성").
@@ -942,9 +988,11 @@ export function PracticeCanvas({
          * 토글 버튼 하나로 합치고(표준 미디어 플레이어 패턴), 양옆에 ±10초
          * 탐색 버튼을 둔다. "정지"는 "리셋"으로 이름만 바꿔(동작은 기존
          * handleStop 그대로 — 처음으로 되돌아감) 옆에 유지. 토글 버튼은
-         * 항상 클릭 가능 — 정지 상태면 handlePlay()(새 세션 시작), 재생
-         * 중이면 handlePause(), 일시정지 중이면 handlePlay()가 isPaused
-         * 분기로 알아서 재개한다(기존 로직 무변경, 버튼 묶음만 재구성). */}
+         * 정지/일시정지 상태면 handlePlay()(새 세션 시작, 또는 isPaused
+         * 분기로 재개), 재생 중이면 handlePause() — 기존 로직 무변경, 버튼
+         * 묶음만 재구성. "▶ 재생" 쪽만 `isStarting`일 때 비활성화(모드A
+         * 지적 — handlePlay()의 새 세션 경로가 비동기라 연타하면 세션
+         * 생성이 겹쳐 돈다, 위 isStartingRef 선언부 참고). */}
         <div style={{ display: 'flex', gap: 'var(--space-2)' }}>
           <button onClick={() => handleSeek(-10)} disabled={!isPlaying && !isPaused}>
             ◀◀ 10초
@@ -952,7 +1000,9 @@ export function PracticeCanvas({
           {isPlaying ? (
             <button onClick={handlePause}>⏸ 일시정지</button>
           ) : (
-            <button onClick={handlePlay}>▶ 재생</button>
+            <button onClick={handlePlay} disabled={isStarting}>
+              ▶ 재생
+            </button>
           )}
           <button onClick={() => handleSeek(10)} disabled={!isPlaying && !isPaused}>
             10초 ▶▶
@@ -1115,18 +1165,38 @@ export function PracticeCanvas({
        * 같고") — 캔버스 폭을 줄이고 나니 좌우 여백과 레인 배경이 같은 색이라
        * 경계가 안 보였음. 노트 halo(밝은 대비색)와 달리 이건 "크기가 어디서
        * 끝나는지"만 보여주면 되므로 이미 쓰던 차분한 `--border` 색으로 테두리. */}
-      <canvas
-        ref={canvasRef}
-        style={{
-          display: 'block',
-          width: '100%',
-          maxWidth: PRACTICE_LANE_MAX_WIDTH_PX,
-          height: 400,
-          margin: '0 auto',
-          background: 'var(--bg)',
-          border: '1px solid var(--border)',
-        }}
-      />
+      <div style={{ position: 'relative', maxWidth: PRACTICE_LANE_MAX_WIDTH_PX, margin: '0 auto' }}>
+        <canvas
+          ref={canvasRef}
+          style={{
+            display: 'block',
+            width: '100%',
+            height: 400,
+            background: 'var(--bg)',
+            border: '1px solid var(--border)',
+          }}
+        />
+        {/* T3-14(진단용 임시, 원인 특정되면 제거) — 실기기 FPS를 화면에 바로
+         * 보여줘 영상 녹화 없이도 숫자로 바로 보고 가능하게. */}
+        {fpsDisplay !== null && (
+          <div
+            style={{
+              position: 'absolute',
+              top: 4,
+              left: 4,
+              padding: '2px 6px',
+              background: 'rgba(0,0,0,0.6)',
+              color: fpsDisplay >= 50 ? 'var(--success)' : fpsDisplay >= 30 ? 'var(--warning)' : 'var(--danger)',
+              fontSize: '0.8em',
+              fontFamily: 'monospace',
+              borderRadius: 4,
+              pointerEvents: 'none',
+            }}
+          >
+            FPS: {fpsDisplay}
+          </div>
+        )}
+      </div>
 
       {/* T3-4 게이트 피드백 1차(2026-10-25) — 믹서를 페이지 맨 아래 단독 블록
        * 대신 드럼킷 그림 옆 빈 공간에 둔다. 넓은 화면에서 킷 그림이 320px로
