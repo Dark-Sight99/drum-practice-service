@@ -306,12 +306,15 @@ export function createLaneRenderer(
           })
         }
       }
-      for (const v of visibleNotes) {
-        // T3-11 피드백(2026-10-25, 의뢰인 지적) — 캔버스 배경도 어둡고 halo도
-        // 배경색(어두움)이라 서로 구분이 안 됨. `stickingTextColor`(--text,
-        // 밝은 색 — 원래 R/L 글자용)를 재사용 — 피스 색이 전부 파스텔톤(다크
-        // 테마 원칙, intent/08-design.md §1)이라 밝은 흰색 계열과는 항상
-        // 대비가 나고, 모든 노트에 균일 적용해 피스별 분기도 안 늘어남.
+      // T3-11 피드백 2차(2026-10-25, 의뢰인 질문) — 같은 레인에서 노트끼리
+      // 겹치면 "나중에 칠(미래, 화면 위쪽)" 노트가 위 레이어라 "곧 칠(판정선에
+      // 가까운)" 노트의 halo 일부가 가려졌음(`visibleNotes`는 틱 오름차순이라
+      // 배열 뒤쪽일수록 미래 노트 — 위 setup 주석 참고). 지금 당장 쳐야 하는
+      // 노트가 더 중요하므로, 배열을 거꾸로 돌아 "곧 칠" 노트를 나중에(=위
+      // 레이어) 그린다 — 리듬게임에서 판정선에 가까운 노트가 시각 우선권을
+      // 갖는 통념과도 일치.
+      for (let i = visibleNotes.length - 1; i >= 0; i--) {
+        const v = visibleNotes[i]
         drawNoteShape(
           ctx,
           v.shape,
