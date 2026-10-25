@@ -754,15 +754,77 @@ export function PracticeCanvas({
       </div>
 
       <canvas ref={canvasRef} style={{ width: '100%', height: 400, background: 'var(--bg)' }} />
-      {!isPortraitPhone && (
-        <div style={{ maxWidth: 320 }}>
-          <KitIllustration
-            activeHandByPiece={activeHandByPiece}
-            showSticking={showSticking}
-            pieceColor={readPieceColor}
-          />
+
+      {/* T3-4 게이트 피드백 1차(2026-10-25) — 믹서를 페이지 맨 아래 단독 블록
+       * 대신 드럼킷 그림 옆 빈 공간에 둔다. 넓은 화면(!isPortraitPhone)에서
+       * 킷 그림이 320px로 고정폭이라 그 오른쪽이 항상 비어 있던 걸 의뢰인이
+       * 직접 지적 — `intent/04-ui-ux.md` §3 와이어프레임의 "믹서 열기"
+       * 의도(하단에 큰 블록으로 항상 펼쳐두지 않음)에도 더 가까워짐. 세로
+       * 폰은 킷 자체가 안 보이므로(§반응형, T5-1 전까지의 기존 동작) 믹서가
+       * 캔버스 바로 아래 전체 폭으로 내려온다 — 레이아웃만 바뀌고 동작은
+       * 그대로라 위험 작업 아님(T3-2-feedback-1 "보이는 마디 수"와 같은 기준). */}
+      <div
+        style={{
+          display: 'flex',
+          flexDirection: isPortraitPhone ? 'column' : 'row',
+          gap: 'var(--space-4)',
+          alignItems: 'flex-start',
+        }}
+      >
+        {!isPortraitPhone && (
+          <div style={{ maxWidth: 320 }}>
+            <KitIllustration
+              activeHandByPiece={activeHandByPiece}
+              showSticking={showSticking}
+              pieceColor={readPieceColor}
+            />
+          </div>
+        )}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)', flex: 1 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)' }}>
+            <strong>믹서</strong>
+            <button onClick={applyDrumlessPreset}>🥁 드럼 빼고 듣기</button>
+          </div>
+          {CHANNEL_KEYS.map((key) => {
+            const channel = mixerState[key]
+            return (
+              <div
+                key={key}
+                style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}
+              >
+                <span style={{ width: 90 }}>{CHANNEL_LABELS[key]}</span>
+                <input
+                  type="range"
+                  min={0}
+                  max={100}
+                  value={Math.round(channel.volume * 100)}
+                  onChange={(e) => updateChannel(key, { volume: Number(e.target.value) / 100 })}
+                  style={{ width: 120 }}
+                />
+                <span style={{ width: 36, textAlign: 'right' }}>
+                  {Math.round(channel.volume * 100)}%
+                </span>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-1)' }}>
+                  <input
+                    type="checkbox"
+                    checked={channel.muted}
+                    onChange={(e) => updateChannel(key, { muted: e.target.checked })}
+                  />
+                  M
+                </label>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-1)' }}>
+                  <input
+                    type="checkbox"
+                    checked={channel.solo}
+                    onChange={(e) => updateChannel(key, { solo: e.target.checked })}
+                  />
+                  S
+                </label>
+              </div>
+            )
+          })}
         </div>
-      )}
+      </div>
 
       {loopEnabled && (
         <span style={{ color: 'var(--text-muted)', fontSize: '0.9em' }}>
@@ -785,51 +847,6 @@ export function PracticeCanvas({
             background: loopEnabled ? 'var(--warning)' : 'var(--accent)',
           }}
         />
-      </div>
-
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)' }}>
-          <strong>믹서</strong>
-          <button onClick={applyDrumlessPreset}>🥁 드럼 빼고 듣기</button>
-        </div>
-        {CHANNEL_KEYS.map((key) => {
-          const channel = mixerState[key]
-          return (
-            <div
-              key={key}
-              style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}
-            >
-              <span style={{ width: 90 }}>{CHANNEL_LABELS[key]}</span>
-              <input
-                type="range"
-                min={0}
-                max={100}
-                value={Math.round(channel.volume * 100)}
-                onChange={(e) => updateChannel(key, { volume: Number(e.target.value) / 100 })}
-                style={{ width: 120 }}
-              />
-              <span style={{ width: 36, textAlign: 'right' }}>
-                {Math.round(channel.volume * 100)}%
-              </span>
-              <label style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-1)' }}>
-                <input
-                  type="checkbox"
-                  checked={channel.muted}
-                  onChange={(e) => updateChannel(key, { muted: e.target.checked })}
-                />
-                M
-              </label>
-              <label style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-1)' }}>
-                <input
-                  type="checkbox"
-                  checked={channel.solo}
-                  onChange={(e) => updateChannel(key, { solo: e.target.checked })}
-                />
-                S
-              </label>
-            </div>
-          )
-        })}
       </div>
     </div>
   )
