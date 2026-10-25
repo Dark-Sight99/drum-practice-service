@@ -98,6 +98,7 @@
   - 완료(2026-10-25): 의뢰인 피드백 — "솔로라는 버튼은 (s)은 필요없다. 제거. 그리고 원곡드럼켜기 버튼을 넣을거라면 활성화 되었을 때 신드 드럼은 자동으로 mute처리 되야할 거 같아. 안그러면 버튼을 두 번 눌러야하니까." `effectiveGain()`을 `(channel, allChannels)` 2인자에서 `(channel)` 1인자로 단순화해 `solo`를 완전히 무시(레거시 저장값이 있어도 무해화 — S 체크박스가 없어져 사용자가 끌 방법이 없으므로 반드시 필요). 백엔드 `ChannelStateIn.solo`는 필수 필드라 그대로 두고 계속 `false`로 전송(공개 API 변경 아님). `isMusicSolo`/`setMusicSolo`(T3-4-feedback-3에서 막 추가) 삭제, `MixerRow`에서 S 체크박스·범례 삭제. `toggleDrumlessPreset()`이 `stem_drums` 토글 시 `synth_drums`도 반대 방향으로 같이 전환.
   - Codex 모드A 1라운드(필수) — 프리셋이 `volume`만 바꾸고 `muted`는 그대로 둬서, 신스 드럼을 미리 M 체크박스로 음소거해둔 상태에서 켜기/끄기를 왔다갔다 하면 볼륨은 복구돼도 음소거가 그대로 남아 계속 안 들리는 버그 → 두 채널의 `muted`를 토글 때마다 항상 `false`로 같이 리셋해 해소. 2라운드 APPROVE(비차단 권장 — stem_drums 쪽 대칭 테스트 보강).
   - 테스트 185개 전부 통과, 타입체크/린트 0건. 브라우저로 S 제거·양방향 자동 토글·음소거 리셋 재현 시나리오 전부 확인. 증거: `qa-evidence/T3-8/`
+- [ ] T3-9 재생 위치 탐색(±10초) + 현재 위치로 A-B 구간 지정 (REQ-04) — 2026-10-25 의뢰인 실사용 피드백 신규 등록. "악보 없이 듣기만 해서는 지금이 몇 번째 마디인지 몰라 마디 번호 입력 UI를 못 쓰겠다"는 지적 → 재생 위치를 ±10초 이동하는 탐색 버튼 + 재생/일시정지 중 "여기서 시작"/"여기까지" 버튼으로 현재 위치를 가장 가까운 마디로 변환해 바로 A-B 루프에 지정. "오디오 타이밍·동기" 위험 작업(Transport 위치를 임의로 점프시키고 분리 오디오 트랙도 같이 맞춰야 함) — 설계 전 Codex 모드C 필요. 사전 조사: 실제 설치된 Tone.js 15.1.22 소스로 `Transport.seconds` setter가 "Setting the value will jump to that position right away"로 공식 지원됨을 확인(Transport.js), `schedule()`이 만드는 `TransportEvent`는 기본 `_once: false`라 이미 발화한 노트도 같은 틱을 다시 지나가면 자동으로 재발화함(TransportEvent.js `invoke()`) — 즉 되감기 재생을 위해 스케줄을 다시 짤 필요가 없음(루프 재진입과 같은 메커니즘).
 - [ ] **게이트**: 의뢰인 음원 2곡으로 연습, 정확도 측정값 보고
 
 ## Phase 4 — 종이 악보로 연습
