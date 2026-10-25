@@ -214,6 +214,13 @@ export function PracticeCanvas({
     mixerStateRef.current = mixerState
   }, [mixerState])
 
+  // T3-4 모드A 1라운드 지적(High) — 불러오기(GET)가 아직 끝나기 전에
+  // 사용자가 믹서를 직접 조작하면, 뒤늦게 도착하는 GET 응답이 그 조작을
+  // 덮어써버릴 수 있었다. 사용자가 한 번이라도 조작했으면 그 이후의 GET
+  // 응답은 무시한다 — 사용자의 지금 조작이 항상 이긴다(그 상태는 어차피
+  // 아래 저장 로직이 알아서 서버에 반영함).
+  const userHasEditedMixerRef = useRef(false)
+
   // 마운트 시(=곡 진입 시, 이 컴포넌트는 곡이 바뀌면 통째로 다시 마운트됨)
   // 저장된 설정을 불러온다 — §4.
   useEffect(() => {
@@ -221,7 +228,7 @@ export function PracticeCanvas({
     let cancelled = false
     fetchPracticeSetting(songId)
       .then(({ volumes }) => {
-        if (cancelled) return
+        if (cancelled || userHasEditedMixerRef.current) return
         if (!volumes) {
           setMixerState(defaultMixerState())
           return
@@ -235,7 +242,7 @@ export function PracticeCanvas({
         setMixerState(merged)
       })
       .catch(() => {
-        if (!cancelled) setMixerState(defaultMixerState())
+        if (!cancelled && !userHasEditedMixerRef.current) setMixerState(defaultMixerState())
       })
     return () => {
       cancelled = true
@@ -292,11 +299,13 @@ export function PracticeCanvas({
   }, [songId])
 
   function updateChannel(key: ChannelKey, patch: Partial<ChannelState>) {
+    userHasEditedMixerRef.current = true
     setMixerState((prev) => ({ ...prev, [key]: { ...prev[key], ...patch } }))
     scheduleMixerSave()
   }
 
   function applyDrumlessPreset() {
+    userHasEditedMixerRef.current = true
     setMixerState((prev) => toggleDrumlessPreset(prev))
     scheduleMixerSave()
   }
@@ -456,7 +465,15 @@ export function PracticeCanvas({
     }
   }, [score, displayScore, barsVisible, totalBars])
 
+  // T3-4 모드A 1라운드 지적(High) — handlePlay()의 비동기 셋업 구간(아래
+  // await들 사이)에는 아직 playbackRef.current가 없어, 그 틈에 정지를
+  // 누르거나 재생을 다시 누르면 지금 막 만들어지는 세션을 아무도 취소·정리
+  // 못 했다. 매 handlePlay()/stopPlayback() 호출마다 세대 번호를 올려,
+  // 셋업 중간중간 "내가 아직 최신 세션인지" 확인하게 한다.
+  const playSessionIdRef = useRef(0)
+
   function stopPlayback() {
+    playSessionIdRef.current += 1 // 진행 중인 handlePlay() 셋업이 있으면 무효화
     if (!playbackRef.current) return
     playbackRef.current.handle.stop()
     disposeDrumVoices(playbackRef.current.voices)
@@ -481,7 +498,8 @@ export function PracticeCanvas({
   }
 
   async function handlePlay() {
-    stopPlayback() // 혹시 이전 재생이 안 끝났으면 먼저 정리(이중 재생 방지)
+    stopPlayback() // 혹시 이전 재생이 안 끝났으면 먼저 정리(이중 재생 방지) — playSessionIdRef도 여기서 올라감
+    const mySessionId = playSessionIdRef.current
     // T3-3(REQ-04) — audioOffsetMs!==0이면 오디오 트랙 자체를 만들지 않는다
     // (work/T3-3/plan.md §범위경계 — 가드를 적용하는 단일 지점. scorePlayer.ts에
     // tracks를 안 넘기면 최초 재생·루프 재진입 전부 기존 MIDI-only 경로를
@@ -499,16 +517,46 @@ export function PracticeCanvas({
     const tracks = canUseAudioTracks
       ? createTrackPlayer(stemKinds.map((kind) => ({ kind, url: songAudioUrl(songId, kind) })))
       : null
-    const primePromise = tracks?.prime()
-    // T3-4(REQ-05, work/T3-4/plan.md §3) — 신스 드럼 9종이 공용으로 거치는
-    // Gain(linear 게인, Tone.Gain 기본 단위가 "gain" — 실제 설치된 Tone.js
-    // 소스로 확인) 하나를 만들어 destination에 연결해두고 넘긴다 — 이걸로
-    // "신스 드럼 전체" 볼륨을 한 번에 조절할 수 있다. 메트로놈은 이번에
-    // 처음 재생 흐름에 연결됨(§범위경계 — T2-4가 믹서로 미뤄뒀던 부분).
-    const synthGain = new Tone.Gain(1).connect(Tone.getDestination())
-    const voices = await createDrumVoices(synthGain)
-    const metronome = createMetronome({ timeSignature: score.meta.timeSignature })
-    if (primePromise) await primePromise
+
+    // T3-4 모드A 1라운드 지적(High/Medium) — 아래 셋업 구간에서 (a) stop()/
+    // 다른 handlePlay()가 끼어들거나(세션 id가 바뀜) (b) 생성 자체가 실패하면,
+    // 그때까지 만든 리소스(트랙·Gain·voices·메트로놈)를 전부 정리하고
+    // 중단한다 — 안 그러면 취소된 세션의 오디오가 계속 돌거나 리소스가 샌다.
+    let synthGain: Tone.Gain | undefined
+    let voices: DrumVoiceMap | undefined
+    let metronome: Metronome | undefined
+    function cleanupAbortedSetup(): void {
+      tracks?.dispose()
+      synthGain?.dispose()
+      if (voices) disposeDrumVoices(voices)
+      metronome?.dispose()
+    }
+
+    try {
+      const primePromise = tracks?.prime()
+      // T3-4(REQ-05, work/T3-4/plan.md §3) — 신스 드럼 9종이 공용으로 거치는
+      // Gain(linear 게인, Tone.Gain 기본 단위가 "gain" — 실제 설치된 Tone.js
+      // 소스로 확인) 하나를 만들어 destination에 연결해두고 넘긴다 — 이걸로
+      // "신스 드럼 전체" 볼륨을 한 번에 조절할 수 있다.
+      synthGain = new Tone.Gain(1).connect(Tone.getDestination())
+      voices = await createDrumVoices(synthGain)
+      if (playSessionIdRef.current !== mySessionId) {
+        cleanupAbortedSetup()
+        return
+      }
+      // 메트로놈은 이번에 처음 재생 흐름에 연결됨(§범위경계 — T2-4가 믹서로
+      // 미뤄뒀던 부분).
+      metronome = createMetronome({ timeSignature: score.meta.timeSignature })
+      if (primePromise) await primePromise
+      if (playSessionIdRef.current !== mySessionId) {
+        cleanupAbortedSetup()
+        return
+      }
+    } catch (err) {
+      cleanupAbortedSetup()
+      throw err
+    }
+
     const loop: LoopBars | undefined = loopEnabled
       ? { startBar: loopStartBar1 - 1, endBar: loopEndBar1 }
       : undefined
