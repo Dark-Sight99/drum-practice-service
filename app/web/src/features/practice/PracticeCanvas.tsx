@@ -1,15 +1,19 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
+  audioTrackPositionSeconds,
   barDurationSeconds,
   barIndexForTick,
   createDrumVoices,
+  createTrackPlayer,
   disposeDrumVoices,
   getMasterClock,
   playDrumScore,
   type DrumVoiceMap,
   type LoopBars,
   type PlaybackHandle,
+  type TrackPlayer,
 } from '../../audio'
+import { songAudioUrl } from '../../api/songs'
 import type { DrumPiece, DrumScore, Hand } from '../../score/types'
 import { DEFAULT_START_HAND, recommendSticking } from '../../score/sticking'
 import { createLaneRenderer, type LaneRenderer } from '../../render/laneRenderer'
@@ -21,6 +25,13 @@ import { KitIllustration } from '../../render/KitIllustration'
 /** REQ-04 "카운트인: 재생 전 1마디" — 진행바 계산(아래 rAF 루프)과 실제 재생
  * 호출(handlePlay)이 같은 값을 써야 하므로 상수로 공유한다. */
 const COUNT_IN_BARS = 1
+
+// T3-3(REQ-04, work/T3-3/plan.md §5) — 느슨한 값(최종 확정 아님, 실기기 QA로
+// 조정 가능). ±30ms처럼 빡빡하게 두면 T0-5가 실측한 "고정 지연처럼 보이는
+// 어긋남"을 매번 다시 감지해 끊어 재생하는(stutter) 역효과를 낼 위험이 있어,
+// "루프 경계 같은 큰 점프"만 잡고 고정 지연 수준은 상시 보정하지 않게 한다.
+const TRACK_RESYNC_INTERVAL_MS = 750
+const TRACK_RESYNC_THRESHOLD_SECONDS = 0.1
 
 function readPieceColor(piece: DrumPiece): string {
   const varName =
@@ -55,9 +66,19 @@ function usePortraitPhoneLayout(): boolean {
 export interface PracticeCanvasProps {
   score: DrumScore
   barsVisible?: number
+  /** T3-3(REQ-04) — 분리된 오디오 트랙 재생에 필요. `songId`/`availableAudioKinds`
+   * 둘 다 있고 `score.audioOffsetMs===0`일 때만 오디오 트랙을 튼다
+   * (work/T3-3/plan.md §범위경계 — 비0이면 이 재생 세션은 MIDI만, T3-5 범위). */
+  songId?: number
+  availableAudioKinds?: string[]
 }
 
-export function PracticeCanvas({ score, barsVisible: initialBarsVisible = 2 }: PracticeCanvasProps) {
+export function PracticeCanvas({
+  score,
+  barsVisible: initialBarsVisible = 2,
+  songId,
+  availableAudioKinds = [],
+}: PracticeCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const rendererRef = useRef<LaneRenderer | null>(null)
   const rafIdRef = useRef<number | null>(null)
@@ -76,7 +97,11 @@ export function PracticeCanvas({ score, barsVisible: initialBarsVisible = 2 }: P
   // 이미 폐기된(또는 아직 로드 전인) 버퍼로 Player.start()를 호출해 실제로
   // "buffer is either not set or not loaded" 예외가 나는 것을 실제 브라우저로
   // 재현 확인함(work/T2-3/plan.md, qa-evidence/T2-3/result.md).
-  const playbackRef = useRef<{ handle: PlaybackHandle; voices: DrumVoiceMap } | null>(null)
+  const playbackRef = useRef<{
+    handle: PlaybackHandle
+    voices: DrumVoiceMap
+    tracks: TrackPlayer | null
+  } | null>(null)
   // Codex 모드A C-001(재현됨): 렌더 루프가 재생 여부와 무관하게 매 프레임
   // activePieces를 계산해서, 정지 중(마스터 클록 위치가 고정된 상태)에도
   // 그 고정 위치 근처에 노트가 있으면 킷이 계속 켜진 채로 남아있을 수 있었음
@@ -162,6 +187,8 @@ export function PracticeCanvas({ score, barsVisible: initialBarsVisible = 2 }: P
   const lastActiveKeyRef = useRef('')
   const [progressPercent, setProgressPercent] = useState(0)
   const lastProgressKeyRef = useRef(-1)
+  // T3-3(REQ-04) — 오디오 트랙 리싱크 폴링 스로틀(위 TRACK_RESYNC_INTERVAL_MS).
+  const lastTrackResyncAtRef = useRef(0)
 
   // REQ-12 — 손 정보가 없는(또는 일부만 지정된) 곡도 연습 화면에서 바로 R/L을
   // 볼 수 있게, 저장 없이 그 자리에서 자동 추천을 계산해 보여준다(편집기에서
@@ -183,6 +210,24 @@ export function PracticeCanvas({ score, barsVisible: initialBarsVisible = 2 }: P
       // 기준으로 그려야 판정선 통과 시점과 소리가 맞는다.
       const barSeconds = barDurationSeconds(score.meta.timeSignature, playbackBpmRef.current)
       const songStartSeconds = barSeconds * COUNT_IN_BARS
+      // T3-3(REQ-04, work/T3-3/plan.md §5) — 저빈도 리싱크. 매 프레임이 아니라
+      // TRACK_RESYNC_INTERVAL_MS마다만 확인(60fps로 매번 돌리면 아래 Date.now()
+      // 호출 자체는 가볍지만, 의도적으로 "느슨한 폴링"이라는 설계를 코드로도
+      // 분명히 하기 위해 스로틀 자체를 생략하지 않음).
+      const tracks = playbackRef.current?.tracks
+      if (isPlayingRef.current && tracks) {
+        const now = Date.now()
+        if (now - lastTrackResyncAtRef.current >= TRACK_RESYNC_INTERVAL_MS) {
+          lastTrackResyncAtRef.current = now
+          const playbackRate = playbackBpmRef.current / score.meta.bpm
+          const expectedSongPositionSeconds = audioTrackPositionSeconds(
+            positionSeconds,
+            songStartSeconds,
+            playbackRate,
+          )
+          tracks.resync(expectedSongPositionSeconds, playbackRate, TRACK_RESYNC_THRESHOLD_SECONDS)
+        }
+      }
       if (renderer) {
         const rendered = renderer.render(
           displayScore,
@@ -256,6 +301,10 @@ export function PracticeCanvas({ score, barsVisible: initialBarsVisible = 2 }: P
     if (!playbackRef.current) return
     playbackRef.current.handle.stop()
     disposeDrumVoices(playbackRef.current.voices)
+    // T3-3(REQ-04) — TrackPlayer는 재생 1회당 1개 수명(work/T3-3/plan.md §4
+    // 생명주기) — DrumVoiceMap과 똑같이 여기서 버려야 다음 handlePlay()가 새
+    // 인스턴스를 만들 때 이전 <audio> 엘리먼트가 남아 겹치지 않는다.
+    playbackRef.current.tracks?.dispose()
     playbackRef.current = null
     isPlayingRef.current = false
     lastActiveKeyRef.current = ''
@@ -267,7 +316,26 @@ export function PracticeCanvas({ score, barsVisible: initialBarsVisible = 2 }: P
 
   async function handlePlay() {
     stopPlayback() // 혹시 이전 재생이 안 끝났으면 먼저 정리(이중 재생 방지)
+    // T3-3(REQ-04) — audioOffsetMs!==0이면 오디오 트랙 자체를 만들지 않는다
+    // (work/T3-3/plan.md §범위경계 — 가드를 적용하는 단일 지점. scorePlayer.ts에
+    // tracks를 안 넘기면 최초 재생·루프 재진입 전부 기존 MIDI-only 경로를
+    // 그대로 타므로 별도 분기가 더 필요 없음). prime()의 각 트랙 play()+pause()
+    // 호출은 아래 await 이전에 동기적으로 시작돼야 모바일 제스처 체인이
+    // 보존된다(§3·§6) — 그래서 Promise 자체는 여기서 바로 만들고, 기다리는
+    // 건 voices 로딩과 동시에 진행한다.
+    // work/T3-3/plan.md §범위경계 — "original"(분리 전 원본)은 스템 합과 중복
+    // 재생되므로 T3-3은 스템 4종만 다룬다(원본 선택 UI는 T3-4). 백엔드의
+    // available_audio_kinds는 범용 목록(이후 T3-4가 "원본"도 쓸 수 있게)이라
+    // 프런트 쪽에서 걸러낸다.
+    const stemKinds = availableAudioKinds.filter((kind) => kind !== 'original')
+    const canUseAudioTracks =
+      songId !== undefined && score.audioOffsetMs === 0 && stemKinds.length > 0
+    const tracks = canUseAudioTracks
+      ? createTrackPlayer(stemKinds.map((kind) => ({ kind, url: songAudioUrl(songId, kind) })))
+      : null
+    const primePromise = tracks?.prime()
     const voices = await createDrumVoices()
+    if (primePromise) await primePromise
     const loop: LoopBars | undefined = loopEnabled
       ? { startBar: loopStartBar1 - 1, endBar: loopEndBar1 }
       : undefined
@@ -275,8 +343,9 @@ export function PracticeCanvas({ score, barsVisible: initialBarsVisible = 2 }: P
       countInBars: COUNT_IN_BARS,
       playbackBpm,
       loop,
+      tracks: tracks ?? undefined,
     })
-    playbackRef.current = { handle, voices }
+    playbackRef.current = { handle, voices, tracks }
     isPlayingRef.current = true
     setIsPlaying(true)
     // 루프가 켜져 있으면 사용자가 직접 정지할 때까지 계속 반복돼야 하므로
