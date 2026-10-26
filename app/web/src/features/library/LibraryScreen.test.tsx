@@ -352,14 +352,18 @@ describe('LibraryScreen — 목록 새로고침 경합(모드A 지적 반영)', 
     expect(screen.getByText('목록을 불러오지 못했습니다')).toBeInTheDocument()
   })
 
-  it('이미 목록이 떠 있는 상태(최초 로딩 완료 후)의 배경 폴링 실패는 조용히 무시됨(에러 배너 안 뜸)', async () => {
+  // 모드A 재검토 지적(권장, 반영) — 이 테스트는 실제 2초 배경 폴링 타이머가
+  // 아니라 onSongCreated 버튼으로 silentReload()를 직접 유발한다(배경 폴링도
+  // 내부적으로 같은 silentReload()를 부르므로 실패 처리 로직 자체는 동일하게
+  // 검증됨) — 제목을 그 경로에 맞게 명확히 함.
+  it('silentReload(배경 폴링·onSongCreated 공용)가 이미 목록이 떠 있는 상태에서 실패하면 조용히 무시됨(에러 배너 안 뜸)', async () => {
     listSongsMock.mockResolvedValueOnce([makeSong({ status: 'pending' })])
     render(<LibraryScreen onOpenSong={() => {}} onEditSong={() => {}} onLoggedOut={() => {}} />)
     await screen.findByText('테스트곡') // 최초 로딩 완료(loading===false)
 
     listSongsMock.mockRejectedValueOnce(new Error('transient'))
     fireEvent.click(screen.getByRole('button', { name: '+ 업로드' }))
-    fireEvent.click(screen.getByRole('button', { name: 'mock-song-created' }))
+    fireEvent.click(screen.getByRole('button', { name: 'mock-song-created' })) // silentReload() 트리거
 
     await waitFor(() => expect(listSongsMock).toHaveBeenCalled())
     expect(screen.queryByText('목록을 불러오지 못했습니다')).not.toBeInTheDocument()
