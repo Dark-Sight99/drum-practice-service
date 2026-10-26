@@ -525,4 +525,82 @@ describe('LibraryScreen — 목록 새로고침 경합(모드A 지적 반영)', 
     })
     expect(screen.getByText('A곡-바뀜')).toBeInTheDocument()
   })
+
+  it('모드A 9차 재검토 지적(필수, 반영) — 백그라운드 조회 응답에 곡이 통째로 없어도 방금 끝난 이름변경은 사라지지 않음', async () => {
+    const song = makeSong({ id: 21, title: '원래이름' })
+    listSongsMock.mockResolvedValueOnce([song])
+    render(<LibraryScreen onOpenSong={() => {}} onEditSong={() => {}} onLoggedOut={() => {}} />)
+    await screen.findByText('원래이름')
+
+    // 배경 조회(silentReload)를 하나 띄워두되 아직 응답 안 함.
+    let resolveStaleReload: ((songs: SongSummary[]) => void) | undefined
+    listSongsMock.mockImplementationOnce(
+      () =>
+        new Promise<SongSummary[]>((resolve) => {
+          resolveStaleReload = resolve
+        }),
+    )
+    fireEvent.click(screen.getByRole('button', { name: '+ 업로드' }))
+    fireEvent.click(screen.getByRole('button', { name: 'mock-song-created' }))
+
+    // 그 사이 이름변경을 끝낸다.
+    renameSongMock.mockResolvedValue({ ...song, title: '바뀐이름' })
+    fireEvent.click(screen.getByRole('button', { name: '이름변경' }))
+    const input = screen.getByDisplayValue('원래이름')
+    fireEvent.change(input, { target: { value: '바뀐이름' } })
+    fireEvent.blur(input)
+    await waitFor(() => expect(screen.getByText('바뀐이름')).toBeInTheDocument())
+
+    // 이제서야 배경 조회가 응답하는데, 이 특정 응답엔 그 곡이 통째로 없다
+    // (삭제된 게 아니라 응답 자체에 곡이 빠진 경우를 흉내냄) — latest만
+    // 순회하던 9차 이전 병합이면 여기서 곡 자체가 사라졌을 것.
+    await act(async () => {
+      resolveStaleReload?.([])
+    })
+    expect(screen.getByText('바뀐이름')).toBeInTheDocument()
+    expect(screen.queryByText('원래이름')).not.toBeInTheDocument()
+  })
+
+  it('모드A 9차 재검토 지적 — 삭제가 서버엔 이미 반영됐지만 클라이언트 응답이 아직 안 온 곡은, 응답에 없는 배경 조회로도 되살아나지 않음', async () => {
+    const song = makeSong({ id: 22, title: '지울곡' })
+    listSongsMock.mockResolvedValueOnce([song])
+    render(<LibraryScreen onOpenSong={() => {}} onEditSong={() => {}} onLoggedOut={() => {}} />)
+    await screen.findByText('지울곡')
+
+    let resolveBackgroundReload: ((songs: SongSummary[]) => void) | undefined
+    listSongsMock.mockImplementationOnce(
+      () =>
+        new Promise<SongSummary[]>((resolve) => {
+          resolveBackgroundReload = resolve
+        }),
+    )
+    fireEvent.click(screen.getByRole('button', { name: '+ 업로드' }))
+    fireEvent.click(screen.getByRole('button', { name: 'mock-song-created' }))
+
+    // 삭제를 시작하되(deleteSong은 아직 응답 안 함) 확인창은 통과시킨다.
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    let resolveDelete: (() => void) | undefined
+    deleteSongMock.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveDelete = resolve
+        }),
+    )
+    fireEvent.click(screen.getByRole('button', { name: '삭제' }))
+    confirmSpy.mockRestore()
+
+    // 배경 조회가 응답 — 삭제가 서버엔 이미 반영돼 그 곡이 없는 목록이
+    // 왔다고 가정(클라이언트의 deleteSong 응답은 아직 안 옴). 마지막 수정이
+    // 'delete'인 곡은 되살리면 안 된다(되살리면 멀쩩히 지워진 곡이 다시
+    // 나타나는 반대 버그가 됨).
+    await act(async () => {
+      resolveBackgroundReload?.([])
+    })
+    expect(screen.queryByText('지울곡')).not.toBeInTheDocument()
+
+    await act(async () => {
+      resolveDelete?.()
+    })
+    expect(screen.queryByText('지울곡')).not.toBeInTheDocument()
+  })
 })

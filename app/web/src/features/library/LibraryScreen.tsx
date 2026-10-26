@@ -98,6 +98,15 @@ export function LibraryScreen({ onOpenSong, onEditSong, onLoggedOut }: LibrarySc
   //     나머지 곡들은 조회 결과를 정상적으로 반영한다(8차 재검토가 지적한
   //     "무관한 곡까지 버려지는" 문제를 피함).
   const songMutationSeqRef = useRef<Map<number, number>>(new Map())
+  // 모드A 9차 재검토 지적(필수, 반영) — 위 songMutationSeqRef만으로는
+  // "이 곡이 조회 응답(latest)에 아예 없다"는 사실이 "삭제됐다"인지
+  // "응답에 어쩌다 빠졌다"인지 구분이 안 됐다. fetchSongs의 병합이
+  // latest만 순회해서, 조회 시작 뒤 이름변경이 이미 끝난 곡이 그 특정
+  // 응답에만 빠져 있으면 로컬에 남아있는데도 결과에서 통째로 사라졌음
+  // (실제로 재현 가능한 지적 — 아래 fetchSongs 병합 코멘트 참고). 곡별
+  // "가장 최근 수정의 종류"를 같이 기록해, latest에 없는 로컬 곡을
+  // 되살릴지(이름변경 등) 말지(삭제)를 구분한다.
+  const songMutationKindRef = useRef<Map<number, 'rename' | 'delete'>>(new Map())
   // songs state의 "지금 당장" 값을 미러 — 과거엔 이걸 useEffect로 동기화
   // 했는데(모드A 4차 재검토 지적), setState 호출과 effect 실행 사이에 생기는
   // 비동기 틈 사이로 다른 응답의 catch가 끼어들면 묵은 값을 읽을 수 있었다.
@@ -131,7 +140,8 @@ export function LibraryScreen({ onOpenSong, onEditSong, onLoggedOut }: LibrarySc
     try {
       const latest = await listSongs()
       if (generation !== songsFetchGenerationRef.current) return
-      const localById = new Map((songsRef.current ?? []).map((s) => [s.id, s] as const))
+      const localSongs = songsRef.current ?? []
+      const localById = new Map(localSongs.map((s) => [s.id, s] as const))
       // 이 조회 시작 이후 수정이 "새로 시작된" 곡만 로컬 값으로 대체(또는
       // 삭제됐으면 결과에서 제외)하고, 나머지 곡은 조회 결과를 그대로 쓴다.
       const merged = latest.flatMap((fetched) => {
@@ -141,6 +151,24 @@ export function LibraryScreen({ onOpenSong, onEditSong, onLoggedOut }: LibrarySc
         const local = localById.get(fetched.id)
         return local ? [local] : [] // 로컬에 없으면(삭제) 결과에서 뺀다
       })
+      // 모드A 9차 재검토 지적(필수, 반영) — 위 병합은 latest만 순회하므로,
+      // 조회 시작 뒤 수정이 시작된 곡이 이 응답에 전혀 없으면(위 flatMap이
+      // 다룰 기회조차 없음) 그냥 사라졌다. 삭제가 성공하면 handleDelete가
+      // 이미 그 즉시 songsRef에서 그 곡을 빼므로, 여기 localSongs에 "삭제가
+      // 아닌" 수정(이름변경)이 걸린 곡만 남아있다는 보장이 됨 — 그런 곡은
+      // latest에 없어도 되살린다. 반대로 삭제가 서버에 반영됐지만 이
+      // 클라이언트의 deleteSong 응답이 아직 안 돌아온 경우(마지막 수정
+      // 종류가 'delete')는 되살리지 않는다 — 안 그러면 정상적으로 사라진
+      // 곡이 영원히 되살아나는 반대 버그가 생긴다.
+      const mergedIds = new Set(merged.map((s) => s.id))
+      for (const local of localSongs) {
+        if (mergedIds.has(local.id)) continue
+        const startedAfterFetch =
+          songMutationSeqRef.current.get(local.id) !== mutationSeqAtStart.get(local.id)
+        if (!startedAfterFetch) continue
+        if (songMutationKindRef.current.get(local.id) === 'delete') continue
+        merged.push(local)
+      }
       songsRef.current = merged
       setSongs(merged)
       setError(null)
@@ -231,11 +259,13 @@ export function LibraryScreen({ onOpenSong, onEditSong, onLoggedOut }: LibrarySc
       // 혹시 이 곡에 대해 떠 있던 이전 이름변경 요청이 있었다면 무효화
       // (빈 값으로 커밋 = 취소 의도로 해석).
       songMutationSeqRef.current.set(id, (songMutationSeqRef.current.get(id) ?? 0) + 1)
+      songMutationKindRef.current.set(id, 'rename')
       setRenamingId(null)
       return
     }
     const mySeq = (songMutationSeqRef.current.get(id) ?? 0) + 1
     songMutationSeqRef.current.set(id, mySeq)
+    songMutationKindRef.current.set(id, 'rename')
     try {
       const updated = await renameSong(id, { title })
       if (songMutationSeqRef.current.get(id) !== mySeq) return // 같은 곡에 대한 더 최신 수정이 있었으면 무시
@@ -260,6 +290,7 @@ export function LibraryScreen({ onOpenSong, onEditSong, onLoggedOut }: LibrarySc
     if (!window.confirm(`"${song.title}"을(를) 삭제할까요?`)) return
     const mySeq = (songMutationSeqRef.current.get(song.id) ?? 0) + 1
     songMutationSeqRef.current.set(song.id, mySeq)
+    songMutationKindRef.current.set(song.id, 'delete')
     try {
       await deleteSong(song.id)
       if (songMutationSeqRef.current.get(song.id) !== mySeq) return
