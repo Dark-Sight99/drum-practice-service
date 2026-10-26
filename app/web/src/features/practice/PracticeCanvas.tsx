@@ -157,7 +157,11 @@ export interface PracticeCanvasProps {
 
 export function PracticeCanvas({
   score,
-  barsVisible: initialBarsVisible = 2,
+  // 2026-10-26(의뢰인 피드백) — 기본값 2마디는 노트가 자주 겹쳐 보여 읽기
+  // 어렵다는 재지적. T3-2 게이트 피드백 1차(실제 음원 QA)에서 이미 "1마디로
+  // 하면 개별 타격이 또렷이 분리된다"고 확인된 적이 있어, 그 결론대로 기본값을
+  // 1로 바꿈(조절 가능한 컨트롤 자체는 그대로 유지 — intent/04-ui-ux.md 참고).
+  barsVisible: initialBarsVisible = 1,
   songId,
   availableAudioKinds = [],
 }: PracticeCanvasProps) {
