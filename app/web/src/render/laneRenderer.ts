@@ -105,6 +105,8 @@ function shapeBottomExtent(shape: NoteShape, size: number): number {
       return half * 1.2
     case 'bar':
       return (size * 0.4) / 2
+    case 'bar-ring':
+      return half * 1.5 // x-ring과 같은 반지름의 테두리 원이 막대보다 더 아래까지 그려짐
   }
 }
 
@@ -179,10 +181,16 @@ function drawNoteShapePass(
       ctx.fill()
       break
     }
-    case 'bar': {
+    case 'bar':
+    case 'bar-ring': {
       const w = size * 1.8
       const h = size * 0.4
       ctx.fillRect(x - w / 2, y - h / 2, w, h)
+      if (shape === 'bar-ring') {
+        ctx.beginPath()
+        ctx.arc(x, y, half * 1.5, 0, Math.PI * 2)
+        ctx.stroke()
+      }
       break
     }
   }
