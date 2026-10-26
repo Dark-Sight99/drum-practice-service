@@ -23,3 +23,10 @@ pretty_midi
 # 의존성으로 이미 깔리지만, 우리 코드가 직접 import하므로 명시적으로 기록.
 librosa
 soundfile
+
+# T3-16-feedback(네트워크 스트리밍) — bass/other/vocals 스템을 MP3로 압축해
+# 저장하는 데 씀(modules/separator/demucs_separator.py의 encode_mp3()).
+# 패키지 자체(BSD-2-Clause)는 ffmpeg 바이너리를 pip wheel에 번들로 넣어
+# 배포 — 그 바이너리는 직접 실행해 확인한 결과 GPLv3 빌드(intent/
+# 03-architecture-stack.md 라이선스 표 참고, 의뢰인 승인 2026-10-26).
+imageio-ffmpeg
