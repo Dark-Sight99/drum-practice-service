@@ -10,7 +10,7 @@ import time
 from pathlib import Path
 
 from db import session as db_session
-from db.models import Asset, AssetKind, Job, Song, SongStatus
+from db.models import Asset, AssetKind, Job, JobType, Song, SongStatus
 from file_storage import resolve_asset_path, write_song_file
 from modules.separator.demucs_separator import encode_mp3, separate
 
@@ -114,7 +114,19 @@ def separate_handler(job: Job) -> None:
                         file_path=rel_path,
                     )
                 )
-            song.status = SongStatus.COMPLETED
+            # T3-19(2026-10-26, 의뢰인 결정) — 종이 악보(Phase 4) 경로가 드롭되면서
+            # "분리 뒤 악보를 추가로 올릴 기회를 준다"던 수동 트리거 사유(work/T3-2/
+            # plan.md "T3-1과의 관계" #2)가 없어져, 분리가 끝나면 채보(TRANSCRIBE)
+            # 작업을 자동으로 큐에 넣는다. Song.status는 COMPLETED로 올리지
+            # **않고** PROCESSING에 그대로 둔다(Codex 모드A 지적 Medium 반영 —
+            # 처음엔 COMPLETED로 커밋했다가 TRANSCRIBE가 시작되기 전까지 "완료"로
+            # 보이는 짧은 구간이 있었는데, 그 사이 사용자가 곡을 열면 아직 없는
+            # DrumScore를 조회하다 에러가 난다는 걸 실제로 지적받음 — 단순
+            # 깜빡임이 아니라 진짜 버그였음). `_sync_song_status_with_job()`
+            # 안전망도 "이 곡에 대기 중인 다른 작업이 있으면 그대로 둔다"로 같이
+            # 고쳐서, 여기서 PROCESSING으로 남겨둬도 그 안전망이 오작동하지
+            # 않는다(worker/runner.py 참고). 채보가 끝나야 비로소 COMPLETED.
+            db.add(Job(user_id=song.user_id, song_id=song.id, job_type=JobType.TRANSCRIBE))
             db.commit()
         except Exception:
             db.rollback()

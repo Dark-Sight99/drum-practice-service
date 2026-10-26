@@ -12,7 +12,7 @@ import time
 from sqlalchemy.orm import Session
 
 from auth.security import utcnow_naive
-from db.models import Job, JobStatus, Song, SongStatus
+from db.models import Job, JobStatus, JobType, Song, SongStatus
 from db.session import SessionLocal
 from worker.handlers import get_handler
 
@@ -109,6 +109,17 @@ def _run_job(db: Session, job: Job) -> None:
     _sync_song_status_with_job(db, job)
 
 
+# T3-19(2026-10-26) — 한 Job이 성공하면 자동으로 이어 큐에 넣는 "다음 작업
+# 종류"를 명시적으로 적어둔다(지금은 SEPARATE→TRANSCRIBE 하나뿐,
+# modules/separator/handler.py가 실제로 이 관계대로 큐잉함). 아래
+# _sync_song_status_with_job()의 안전망이 "이 Job 다음엔 정확히 이 종류의
+# 작업이 와야 정상"을 판단할 때 쓴다 — 여기 없는 job_type은 체인이 없다는
+# 뜻이라 안전망이 기존 동작(바로 FAILED 판단) 그대로 적용된다.
+_CHAIN_NEXT_JOB_TYPE: dict[JobType, JobType] = {
+    JobType.SEPARATE: JobType.TRANSCRIBE,
+}
+
+
 def _sync_song_status_with_job(db: Session, job: Job) -> None:
     """T3-1 모드C 3차 BLOCKING 지적 반영 — 핸들러가 자기 작업의 Song.status를
     스스로 맞추는 게 기본 경로지만, 그 커밋 자체가 실패하는 극히 드문 경우(예:
@@ -131,12 +142,43 @@ def _sync_song_status_with_job(db: Session, job: Job) -> None:
     경우를 놓친다. 그래서 "아직 종료 상태(COMPLETED/FAILED)가 아닌 모든 경우"를
     대상으로 넓혔다 — 정상 흐름에서 Job이 끝나는 시점엔 Song이 이미 PROCESSING
     이어야 하므로(해당 핸들러가 가장 먼저 하는 일), PENDING까지 포함해도 정상
-    흐름에서 잘못 발동할 일은 없다."""
+    흐름에서 잘못 발동할 일은 없다.
+
+    T3-19(2026-10-26, Codex 모드A 지적 Medium 반영) — `separate_handler`가
+    분리 성공 시 TRANSCRIBE 작업을 자동으로 이어 큐에 넣게 되면서, "핸들러가
+    끝났는데 Song이 아직 종료 상태가 아니면 버그"라는 이 함수의 원래 전제가
+    더는 항상 참이 아니다 — 체인의 중간 단계(분리는 끝났지만 채보가 아직
+    안 끝난 상태)도 의도적으로 비종료 상태일 수 있다. 그래서 강제로 FAILED
+    처리하기 전에, 이 곡에 **그 작업이 끝나면 다음에 와야 할 정확한 종류의
+    작업**이 대기 중인지(QUEUED/PROCESSING) 먼저 확인한다 — 있으면 체인이
+    정상 진행 중이라는 뜻이라 그대로 둔다(다음에 그 작업이 끝날 때 이 함수가
+    다시 호출돼 그때 가서 같은 판단을 반복함).
+
+    모드A 재검토 지적(Medium, 반영) — 처음엔 "이 곡에 대한 다른 작업이면
+    아무거나" 있어도 넘어갔는데, 그러면 이 곡과 무관하게 남아있는 오래된
+    작업(예: 수동 `POST /songs/{id}/transcribe` 재호출이 남긴 작업, 지금
+    코드에선 실제로 안 생기지만 미래에 재분리 기능 등이 생기면 생길 수 있음)
+    때문에 진짜 실패를 영영 FAILED로 못 바꾸는 경우가 생길 수 있었다 —
+    `_CHAIN_NEXT_JOB_TYPE`에 "이 job_type 다음엔 이 job_type이 와야 정상"을
+    명시적으로 적어두고, 그 정확한 종류의 다음 작업이 있을 때만 봐준다."""
     if job.status not in (JobStatus.COMPLETED, JobStatus.FAILED):
         return
     song = db.get(Song, job.song_id)
     if song is None or song.status in (SongStatus.COMPLETED, SongStatus.FAILED):
         return
+    expected_next_type = _CHAIN_NEXT_JOB_TYPE.get(job.job_type)
+    if expected_next_type is not None:
+        pending_job = (
+            db.query(Job)
+            .filter(
+                Job.song_id == song.id,
+                Job.job_type == expected_next_type,
+                Job.status.in_((JobStatus.QUEUED, JobStatus.PROCESSING)),
+            )
+            .first()
+        )
+        if pending_job is not None:
+            return
     song.status = SongStatus.FAILED
     db.commit()
 

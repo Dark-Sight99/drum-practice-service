@@ -19,6 +19,7 @@ from db.models import (
     AssetKind,
     Base,
     Job,
+    JobStatus,
     JobType,
     Song,
     SongSourceType,
@@ -81,7 +82,10 @@ def test_separate_handler_success_creates_four_stem_assets(db, monkeypatch, tmp_
     handler_module.separate_handler(job)
 
     db.refresh(song)
-    assert song.status == SongStatus.COMPLETED
+    # T3-19 — 분리 성공만으로는 COMPLETED가 되지 않음(채보까지 자동으로 이어지므로
+    # PROCESSING에 머무름) — 별도 테스트(test_separate_handler_success_queues_transcribe_job)
+    # 참고.
+    assert song.status == SongStatus.PROCESSING
     stems = db.query(Asset).filter(Asset.song_id == song.id, Asset.kind != AssetKind.ORIGINAL).all()
     assert {a.kind for a in stems} == {
         AssetKind.STEM_DRUMS,
@@ -102,6 +106,53 @@ def test_separate_handler_success_creates_four_stem_assets(db, monkeypatch, tmp_
             assert sidecar.exists()
         else:
             assert path.suffix == ".mp3"
+
+
+def test_separate_handler_success_queues_transcribe_job(db, monkeypatch) -> None:
+    """T3-19(2026-10-26) — 종이 악보 경로 드롭으로 "분리 뒤 수동 트리거" 사유가
+    없어져, 분리 성공 시 TRANSCRIBE 작업을 자동으로 큐에 넣는다."""
+    _, song, job = _make_user_song_job(db)
+
+    def fake_separate(input_path: Path, output_dir: Path, device=None):
+        stems = {}
+        for name in ("drums", "bass", "other", "vocals"):
+            p = output_dir / f"{name}.wav"
+            p.write_bytes(f"stem-{name}".encode())
+            stems[name] = p
+        return stems
+
+    monkeypatch.setattr(handler_module, "separate", fake_separate)
+    monkeypatch.setattr(handler_module, "encode_mp3", _fake_encode_mp3)
+
+    handler_module.separate_handler(job)
+
+    transcribe_jobs = (
+        db.query(Job)
+        .filter(Job.song_id == song.id, Job.job_type == JobType.TRANSCRIBE)
+        .all()
+    )
+    assert len(transcribe_jobs) == 1
+    assert transcribe_jobs[0].status == JobStatus.QUEUED
+    assert transcribe_jobs[0].user_id == song.user_id
+
+
+def test_separate_handler_failure_does_not_queue_transcribe_job(db, monkeypatch) -> None:
+    _, song, job = _make_user_song_job(db)
+
+    def failing_separate(input_path: Path, output_dir: Path, device=None):
+        raise SeparationError("데모 중 터진 에러")
+
+    monkeypatch.setattr(handler_module, "separate", failing_separate)
+
+    with pytest.raises(SeparationError):
+        handler_module.separate_handler(job)
+
+    transcribe_jobs = (
+        db.query(Job)
+        .filter(Job.song_id == song.id, Job.job_type == JobType.TRANSCRIBE)
+        .all()
+    )
+    assert transcribe_jobs == []
 
 
 def test_separate_handler_succeeds_even_if_drums_mp3_sidecar_encode_fails(
@@ -130,7 +181,8 @@ def test_separate_handler_succeeds_even_if_drums_mp3_sidecar_encode_fails(
     handler_module.separate_handler(job)
 
     db.refresh(song)
-    assert song.status == SongStatus.COMPLETED
+    # T3-19 — 분리 성공만으로는 COMPLETED가 되지 않음(위 테스트와 같은 사유).
+    assert song.status == SongStatus.PROCESSING
     drums_asset = (
         db.query(Asset)
         .filter(Asset.song_id == song.id, Asset.kind == AssetKind.STEM_DRUMS)

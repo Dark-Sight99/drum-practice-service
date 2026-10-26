@@ -42,6 +42,25 @@ export async function uploadSong(
   return apiFetchJson<SongSummary>('/songs', { method: 'POST', body: form })
 }
 
+/** T3-19(REQ-01) — 음원(또는 음원 트랙이 있는 mp4)을 올려 Demucs 분리 작업을
+ * 큐에 넣는다. `POST /songs` (디지털 악보, 위 uploadSong)와 달리 DrumScore를
+ * 클라이언트가 안 만든다 — 서버가 분리 후 자동으로 채보 작업까지 이어 큐에
+ * 넣는다(`modules/separator/handler.py`). 응답의 song은 아직 처리중 상태. */
+export async function uploadAudioSong(
+  file: File,
+  title: string,
+  artist: string,
+): Promise<{ song: SongSummary; job_id: number }> {
+  const form = new FormData()
+  form.append('file', file)
+  form.append('title', title)
+  if (artist) form.append('artist', artist)
+  return apiFetchJson<{ song: SongSummary; job_id: number }>('/songs/audio', {
+    method: 'POST',
+    body: form,
+  })
+}
+
 export async function renameSong(
   id: number,
   patch: { title?: string; artist?: string | null },

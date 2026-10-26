@@ -89,7 +89,9 @@ def test_upload_rejects_unsupported_extension(client: TestClient, db_session) ->
     _make_user(db_session, "u1")
     _login(client, "u1")
 
-    resp = _upload_audio(client, filename="video.mp4")
+    # 2026-10-26 — mp4는 더 이상 거부 대상이 아님(아래 mp4 확장 테스트 참고).
+    # 진짜 지원 안 하는 확장자로 교체.
+    resp = _upload_audio(client, filename="video.ogg")
     assert resp.status_code == 400
 
 
@@ -99,6 +101,17 @@ def test_upload_accepts_req01_extensions(client: TestClient, db_session, ext: st
     _login(client, "u1")
 
     resp = _upload_audio(client, filename=f"song{ext}")
+    assert resp.status_code == 201
+
+
+def test_upload_accepts_mp4(client: TestClient, db_session) -> None:
+    # 2026-10-26(의뢰인 요청) — Demucs(ffmpeg 백엔드)가 mp4 비디오 컨테이너에서도
+    # 오디오 트랙을 바로 추출해 분리할 수 있음을 이미 확인(qa-evidence/T3-1/
+    # demucs_mp4_spike.md) — REQ-01 허용 확장자에 추가.
+    _make_user(db_session, "u1")
+    _login(client, "u1")
+
+    resp = _upload_audio(client, filename="song.mp4")
     assert resp.status_code == 201
 
 

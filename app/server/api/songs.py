@@ -79,8 +79,12 @@ ALLOWED_EXTENSIONS: dict[str, str] = {
 }
 MAX_UPLOAD_BYTES = 20 * 1024 * 1024  # work/T2-5/plan.md §설계 2 — 디스크 보호용 상한
 
-# REQ-01 명시 입력 형식 그대로(mp4 등 비디오는 범위 밖 — work/T3-1/plan.md §가정).
-ALLOWED_AUDIO_EXTENSIONS: frozenset[str] = frozenset({".mp3", ".wav", ".m4a", ".flac"})
+# REQ-01 명시 입력 형식(mp3/wav/m4a/flac) + mp4(2026-10-26 의뢰인 요청으로 확장).
+# mp4는 음원이 아니라 비디오 컨테이너지만, Demucs(ffmpeg 백엔드)가 오디오 트랙만
+# 바로 추출해 분리할 수 있음을 실제 의뢰인 파일로 이미 확인해둔 상태였음
+# (`qa-evidence/T3-1/demucs_mp4_spike.md` — 당시엔 "범위 밖"이라 허용 목록엔
+# 안 넣었던 것뿐, 기술적으로는 이미 검증됨).
+ALLOWED_AUDIO_EXTENSIONS: frozenset[str] = frozenset({".mp3", ".wav", ".m4a", ".flac", ".mp4"})
 # 3~5분 음원은 수십 MB대라 디지털 악보용 20MB 상한보다 훨씬 커야 함 — REQ-01에
 # 수치 명시는 없어 디스크 보호 목적으로 정한 값(work/T3-1/plan.md §2).
 MAX_AUDIO_UPLOAD_BYTES = 100 * 1024 * 1024

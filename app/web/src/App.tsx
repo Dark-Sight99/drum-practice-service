@@ -4,7 +4,6 @@ import { fetchCurrentUser, type CurrentUser } from './api/auth'
 import type { SongSummary } from './api/songs'
 import { LoginScreen } from './features/auth/LoginScreen'
 import { LibraryScreen } from './features/library/LibraryScreen'
-import { UploadScreen } from './features/upload/UploadScreen'
 import { PracticeCanvas } from './features/practice/PracticeCanvas'
 import { EditorScreen } from './features/editor/EditorScreen'
 import type { DrumScore } from './score/types'
@@ -13,7 +12,9 @@ import type { DrumScore } from './score/types'
 // 요구사항이 없어 react-router-dom 추가는 과한 설계로 판단
 // (work/T2-5/plan.md §설계 3, Codex 모드C 리스크 의견 C-007: 나중에 URL 공유·
 // 뒤로가기가 필요해지면 이 선택을 재검토).
-type Screen = 'checking' | 'login' | 'library' | 'upload' | 'practice' | 'editor'
+// T3-19(2026-10-26) — 업로드는 더 이상 독립 화면이 아니라 LibraryScreen이
+// 내부적으로 띄우는 모달이라 'upload'는 여기서 제거.
+type Screen = 'checking' | 'login' | 'library' | 'practice' | 'editor'
 
 function App() {
   const [screen, setScreen] = useState<Screen>('checking')
@@ -52,12 +53,6 @@ function App() {
           setScreen('library')
         }}
       />
-    )
-  }
-
-  if (screen === 'upload') {
-    return (
-      <UploadScreen onUploaded={() => setScreen('library')} onCancel={() => setScreen('library')} />
     )
   }
 
@@ -105,7 +100,6 @@ function App() {
 
   return (
     <LibraryScreen
-      onUpload={() => setScreen('upload')}
       onOpenSong={(song, drumScore) => {
         setPracticeSong({ song, drumScore })
         setScreen('practice')

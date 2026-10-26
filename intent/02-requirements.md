@@ -5,7 +5,7 @@
 표기: **[MVP]** 이번 범위 / **[확장]** 구조만 대비, 구현 안 함
 
 ## REQ-01 오디오 분리 [MVP]
-- 입력: mp3, wav, m4a, flac (사용자 소장 음원)
+- 입력: mp3, wav, m4a, flac, mp4(2026-10-26 의뢰인 요청으로 확장 — 비디오 컨테이너지만 Demucs가 ffmpeg로 오디오 트랙만 추출해 분리 가능함을 이미 실제 파일로 확인, `qa-evidence/T3-1/demucs_mp4_spike.md`) (사용자 소장 음원)
 - 처리: 처리 서버에서 Demucs로 `drums / bass / vocals / other` 분리. 결과를 곡 단위로 저장.
 - [확장] 다른 악기 분리: 분리 모델을 인터페이스(`Separator`)로 추상화해 6트랙 모델 등으로 교체 가능하게.
 - 수용 기준
