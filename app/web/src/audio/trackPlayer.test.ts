@@ -116,6 +116,20 @@ describe('createTrackPlayer', () => {
     expect(gainNodes[1].connect).toHaveBeenCalledWith(FAKE_DESTINATION)
   })
 
+  it('T3-16-feedback-3 모드A 지적(C-001) 반영 — UA에 "iPad"가 그대로 찍히는 기기도 iOS로 인식', () => {
+    // iPadOS 13+ 기본값은 "Macintosh" 위장 UA를 보내지만(아래 다른 테스트가
+    // 그 경로를 이미 검증), 구버전·일부 설정은 UA에 "iPad"가 그대로 남는다 —
+    // 멀티터치 폴백에만 의존하면 이 경우를 놓쳐 Web Audio를 건너뛰고
+    // element.volume으로 빠져 T3-12 버그가 재발할 뻔했음(모드A 발견).
+    vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue(
+      'Mozilla/5.0 (iPad; CPU OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
+    )
+
+    createTrackPlayer([{ kind: 'stem_drums', url: 'http://x/drums.wav' }])
+
+    expect(createMediaElementSourceMock).toHaveBeenCalledTimes(1)
+  })
+
   it('T3-16-feedback-3: 데스크톱(iOS 아님)에서는 Web Audio를 전혀 안 거침', () => {
     // jsdom 기본 User-Agent는 이미 iOS가 아니므로 별도 스텁 없이 기본 상태로 검증.
     createTrackPlayer([

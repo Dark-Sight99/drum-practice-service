@@ -28,13 +28,16 @@
 // 버그도 여전히 고쳐진 채로, 맥의 재생 지연 문제도 없앤다.
 import * as Tone from 'tone'
 
-/** T3-16-feedback-3 — iPhone/iPod은 UA로 바로 식별되고, iPadOS 13+는 데스크톱
- * Safari와 똑같은 UA("Macintosh")를 보내 UA만으로 못 가른다(iPadOS는 맥과
- * 달리 멀티터치를 보고하므로 `maxTouchPoints`로 구분 — iOS 기기 판별의
- * 표준적인 우회법, Mac은 0~1). */
+/** T3-16-feedback-3 — iPhone/iPod/iPad는 보통 UA에 그대로 찍히지만(일부
+ * 설정·구버전 iPadOS는 "iPad"가 그대로 남음), iPadOS 13+ 기본값은 데스크톱
+ * Safari와 똑같은 UA("Macintosh")를 보내 UA만으론 못 가른다 — 모드A 지적
+ * (2026-10-26, C-001): 처음엔 "iPad" 리터럴 자체를 안 보고 "Macintosh+터치"
+ * 폴백에만 의존해서, UA에 "iPad"가 남아있는 기기를 놓치고 있었음. 두
+ * 가지를 OR로 합쳐 둘 다 잡는다(iPadOS 13+ 위장은 멀티터치로 구분 — Mac은
+ * `maxTouchPoints` 0~1). */
 function isIOS(): boolean {
   const ua = navigator.userAgent
-  if (/iPhone|iPod/.test(ua)) return true
+  if (/iPhone|iPad|iPod/.test(ua)) return true
   return ua.includes('Macintosh') && navigator.maxTouchPoints > 1
 }
 
