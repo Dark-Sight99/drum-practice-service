@@ -137,4 +137,38 @@ describe('LibraryScreen — 업로드 완료 토스트(2026-10-26 의뢰인 요�
     })
     expect(screen.queryByRole('status')).not.toBeInTheDocument()
   })
+
+  it('모드A 재검토 지적(반영) — 토스트가 떠 있는 중 또 업로드를 완료하면 타이머가 새로 시작됨', async () => {
+    render(<LibraryScreen onOpenSong={() => {}} onEditSong={() => {}} onLoggedOut={() => {}} />)
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0)
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: '+ 업로드' }))
+    fireEvent.click(screen.getByRole('button', { name: 'mock-upload-complete' }))
+    expect(screen.getByRole('status')).toBeInTheDocument()
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2000) // 첫 토스트가 뜬 지 2초 — 아직 안 사라짐
+    })
+    expect(screen.getByRole('status')).toBeInTheDocument()
+
+    // 같은 문구라 메시지 텍스트만으론 React가 새 토스트인지 구분 못 함(key로 구분) — 이
+    // 시점(첫 타이머 기준 2초)에 두 번째 업로드가 완료되면 타이머가 새로 시작돼야 함.
+    fireEvent.click(screen.getByRole('button', { name: '+ 업로드' }))
+    fireEvent.click(screen.getByRole('button', { name: 'mock-upload-complete' }))
+    expect(screen.getByRole('status')).toBeInTheDocument()
+
+    await act(async () => {
+      // 누적 4초 — 고쳐지기 전이면 첫 타이머(3초)가 1초 전에 이미 끝나 토스트가
+      // 사라졌어야 함. 두 번째 완료로부터는 아직 2초(3초 안 지남).
+      await vi.advanceTimersByTimeAsync(2000)
+    })
+    expect(screen.getByRole('status')).toBeInTheDocument()
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1000) // 두 번째 완료로부터 3초
+    })
+    expect(screen.queryByRole('status')).not.toBeInTheDocument()
+  })
 })
