@@ -72,17 +72,32 @@ export function LibraryScreen({ onOpenSong, onEditSong, onLoggedOut }: LibrarySc
   const [renameValue, setRenameValue] = useState('')
   const [openingId, setOpeningId] = useState<number | null>(null)
 
-  // 모드A 지적(필수, 반영. 7차 재검토에서 범위를 reload()/silentReload()
-  // 뿐 아니라 commitRename()/handleDelete()까지 넓힘) — songs를 바꾸는
-  // 비동기 작업(목록 재조회·이름변경·삭제)이 여러 개 겹쳐 돌 수 있다(배경
-  // 폴링 도중 이름변경·삭제, 같은 곡을 연달아 두 번 이름변경 등). 응답이
-  // 시작한 순서와 다르게 도착하면(네트워크 지연) 더 오래된(먼저 시작한)
-  // 작업의 응답이 나중에 와서 이미 최신으로 갱신된 songs를 옛 상태로
-  // 덮어쓸 수 있었음(완료된 곡이 다시 "처리 중"으로 보이거나, 바꾼 이름이
-  // 되돌아가거나, 지운 곡이 되살아나는 식) — songs를 바꾸는 모든 작업이
-  // 이 하나의 세대 번호를 공유해, 자기 시작 이후 더 최신 작업이 있었으면
-  // 응답을 무시한다(UploadScreen의 submitGenerationRef와 같은 패턴).
+  // 모드A 지적(필수, 반영) — 목록 재조회(reload/silentReload)가 여러 개
+  // 겹쳐 돌 수 있다(배경 폴링 2초 간격 도중 다른 reload()가 또 불리는 등).
+  // 응답이 시작한 순서와 다르게 도착하면(네트워크 지연) 더 오래된 조회의
+  // 응답이 나중에 와서 이미 최신으로 갱신된 songs를 옛 상태로 덮어쓸 수
+  // 있었음(완료된 곡이 다시 "처리 중"으로 보이는 식) — 조회끼리는 이
+  // 세대 번호로 "더 최신 조회가 있었으면 응답을 무시"한다(UploadScreen의
+  // submitGenerationRef와 같은 패턴). 아래 songMutationSeqRef와는 별개 —
+  // 처음엔(모드A 7~8차) 이름변경·삭제도 이 번호 하나를 공유하게 했었는데,
+  // 모드A 8차 재검토에서 "서로 다른 곡에 대한 독립적인 수정까지 전역
+  // 순서 하나로 뭉뚱그려 버려서, A를 이름변경하는 중 B를 삭제하면 B가
+  // 먼저 응답한 것만으로 A의 정상적인 결과가 통째로 버려진다"는 지적을
+  // 받아 분리함 — 조회는 "조회끼리"만, 수정은 "같은 곡끼리"만 순서를
+  // 비교해야 맞다(아래 songMutationSeqRef).
   const songsFetchGenerationRef = useRef(0)
+  // 모드A 8차 재검토 지적(필수, 반영) — 곡 id별 "가장 최근에 시작된 수정
+  // (이름변경/삭제) 순번". 용도 둘:
+  // (1) 같은 곡에 대한 두 번째 이름변경이 첫 번째보다 먼저 시작됐으면,
+  //     첫 번째(더 오래된) 요청이 나중에 응답해도 무시한다(모드A 8차
+  //     재검토가 지적한 "같은 곡 연속 이름변경" 경합).
+  // (2) fetchSongs가 응답을 반영할 때, 자기 시작 시점 이후 수정이 "시작"된
+  //     곡은 그 수정 결과가 아직 이 조회에 안 실렸을 수 있으니 조회
+  //     결과 대신 로컬 값을 유지한다(모드A 7차가 원래 잡으려던 "낡은
+  //     조회가 방금 바꾼 제목을 덮어쓰는" 문제) — 단, 그 곡만 그렇게 하고
+  //     나머지 곡들은 조회 결과를 정상적으로 반영한다(8차 재검토가 지적한
+  //     "무관한 곡까지 버려지는" 문제를 피함).
+  const songMutationSeqRef = useRef<Map<number, number>>(new Map())
   // songs state의 "지금 당장" 값을 미러 — 과거엔 이걸 useEffect로 동기화
   // 했는데(모드A 4차 재검토 지적), setState 호출과 effect 실행 사이에 생기는
   // 비동기 틈 사이로 다른 응답의 catch가 끼어들면 묵은 값을 읽을 수 있었다.
@@ -100,6 +115,10 @@ export function LibraryScreen({ onOpenSong, onEditSong, onLoggedOut }: LibrarySc
   // 재검토 지적).
   async function fetchSongs({ silent }: { silent: boolean }) {
     const generation = ++songsFetchGenerationRef.current
+    // 이 조회가 시작되는 "이 순간" 각 곡의 수정 순번을 찍어둔다 — 응답이
+    // 왔을 때 "이 조회가 시작된 뒤에 그 곡에 대한 수정이 새로 시작됐는지"를
+    // 판가름하는 기준점(아래 병합 로직).
+    const mutationSeqAtStart = new Map(songMutationSeqRef.current)
     // 모드A 5차 재검토 지적(필수, 반영) — 첫 로딩이 실패해 error가 설정된
     // 뒤(songs는 여전히 null) reload()로 재시도하면, 여기서 error를 안 지우면
     // loading(=songs null && error null)이 계속 false라 스켈레톤도 안 뜨고
@@ -112,8 +131,18 @@ export function LibraryScreen({ onOpenSong, onEditSong, onLoggedOut }: LibrarySc
     try {
       const latest = await listSongs()
       if (generation !== songsFetchGenerationRef.current) return
-      songsRef.current = latest
-      setSongs(latest)
+      const localById = new Map((songsRef.current ?? []).map((s) => [s.id, s] as const))
+      // 이 조회 시작 이후 수정이 "새로 시작된" 곡만 로컬 값으로 대체(또는
+      // 삭제됐으면 결과에서 제외)하고, 나머지 곡은 조회 결과를 그대로 쓴다.
+      const merged = latest.flatMap((fetched) => {
+        const startedAfterFetch =
+          songMutationSeqRef.current.get(fetched.id) !== mutationSeqAtStart.get(fetched.id)
+        if (!startedAfterFetch) return [fetched]
+        const local = localById.get(fetched.id)
+        return local ? [local] : [] // 로컬에 없으면(삭제) 결과에서 뺀다
+      })
+      songsRef.current = merged
+      setSongs(merged)
       setError(null)
     } catch (err) {
       if (generation !== songsFetchGenerationRef.current) return
@@ -189,51 +218,56 @@ export function LibraryScreen({ onOpenSong, onEditSong, onLoggedOut }: LibrarySc
     setRenameValue(song.title)
   }
 
-  // 모드A 7차 재검토 지적(필수, 반영) — commitRename()이 songsFetchGenerationRef를
-  // "올리기"만 하고(목록 재조회를 무효화) 자기 자신은 그 번호를 "확인"하지
-  // 않아서, 같은 곡을 연달아 두 번 이름변경(예: Enter로 커밋했는데 요청이
-  // 아직 안 끝난 사이 입력창이 그대로 열려 있어 — renamingId는 finally에서만
-  // 풀림 — 값을 또 바꾸고 blur)하면 두 renameSong() 요청이 동시에 떠 있을
-  // 수 있었다. 응답이 보낸 순서와 다르게 도착하면(네트워크 지연) 나중에
-  // 보낸(최신) 제목이 먼저 반영됐다가 먼저 보낸(낡은) 제목이 뒤늦게 와서
-  // 덮어쓸 수 있었음 — fetchSongs와 같은 세대 번호를 commitRename/
-  // handleDelete도 "확인"하게 통합해(한 카운터가 조회·이름변경·삭제 전부를
-  // 아우름), 뭐가 됐든 가장 나중에 시작된 작업의 응답만 반영되게 한다.
+  // 모드A 7~8차 재검토 지적(필수, 반영) — commitRename()/handleDelete()가
+  // "같은 곡"에 대한 연속 수정과는 순서를 맞춰야 하면서도(7~8차), "다른
+  // 곡"의 독립적인 수정까지 서로 가로막으면 안 된다(8차 재검토가 바로잡은
+  // 부분 — 전역 세대 번호 하나를 공유했더니 A를 이름변경하는 중 B를
+  // 삭제하면 B가 먼저 응답한 것만으로 A의 정상적인 결과가 버려졌었음).
+  // 그래서 "곡 id별" 순번(위 songMutationSeqRef)을 쓴다 — 같은 곡이면
+  // 나중에 "시작된" 쪽만 반영되고, 다른 곡이면 서로 전혀 간섭하지 않는다.
   async function commitRename(id: number) {
     const title = renameValue.trim()
     if (!title) {
-      songsFetchGenerationRef.current += 1 // 혹시 떠 있던 이전 이름변경 요청이 있었다면 무효화
+      // 혹시 이 곡에 대해 떠 있던 이전 이름변경 요청이 있었다면 무효화
+      // (빈 값으로 커밋 = 취소 의도로 해석).
+      songMutationSeqRef.current.set(id, (songMutationSeqRef.current.get(id) ?? 0) + 1)
       setRenamingId(null)
       return
     }
-    const generation = ++songsFetchGenerationRef.current
+    const mySeq = (songMutationSeqRef.current.get(id) ?? 0) + 1
+    songMutationSeqRef.current.set(id, mySeq)
     try {
       const updated = await renameSong(id, { title })
-      if (generation !== songsFetchGenerationRef.current) return
+      if (songMutationSeqRef.current.get(id) !== mySeq) return // 같은 곡에 대한 더 최신 수정이 있었으면 무시
       // songsRef도 setSongs와 같은 자리에서 같이 갱신(위 fetchSongs 코멘트의
       // 불변식 — 미러가 항상 최신이어야 함).
       const next = (songsRef.current ?? []).map((s) => (s.id === id ? updated : s))
       songsRef.current = next
       setSongs(next)
     } catch (err) {
-      if (generation !== songsFetchGenerationRef.current) return
+      if (songMutationSeqRef.current.get(id) !== mySeq) return
       setError(err instanceof ApiError ? err.message : '이름 변경에 실패했습니다')
     } finally {
-      setRenamingId(null)
+      // 모드A 8차 재검토 권장 사항(반영) — 이 호출이 이미 낡은 상태라면(더
+      // 최신 수정이 같은 곡에 대해 진행 중) 입력창을 닫지 않는다 — 안 그러면
+      // 아직 끝나지 않은 더 최신 수정이 있는데도 화면에서 편집 UI가 먼저
+      // 사라져버릴 수 있다.
+      if (songMutationSeqRef.current.get(id) === mySeq) setRenamingId(null)
     }
   }
 
   async function handleDelete(song: SongSummary) {
     if (!window.confirm(`"${song.title}"을(를) 삭제할까요?`)) return
-    const generation = ++songsFetchGenerationRef.current
+    const mySeq = (songMutationSeqRef.current.get(song.id) ?? 0) + 1
+    songMutationSeqRef.current.set(song.id, mySeq)
     try {
       await deleteSong(song.id)
-      if (generation !== songsFetchGenerationRef.current) return
+      if (songMutationSeqRef.current.get(song.id) !== mySeq) return
       const next = (songsRef.current ?? []).filter((s) => s.id !== song.id)
       songsRef.current = next
       setSongs(next)
     } catch (err) {
-      if (generation !== songsFetchGenerationRef.current) return
+      if (songMutationSeqRef.current.get(song.id) !== mySeq) return
       setError(err instanceof ApiError ? err.message : '삭제에 실패했습니다')
     }
   }
