@@ -404,4 +404,38 @@ describe('LibraryScreen — 목록 새로고침 경합(모드A 지적 반영)', 
     expect(screen.getByText('완료')).toBeInTheDocument()
     expect(container.querySelectorAll('.skeleton')).toHaveLength(0)
   })
+
+  it('모드A 6차 재검토 지적(필수, 반영) — 목록 재조회가 떠 있는 동안 이름을 바꾸면, 뒤늦게 온(이름 변경 전) 재조회 응답이 바뀐 이름을 덮어쓰지 않음', async () => {
+    const song = makeSong({ id: 7, title: '원래이름' })
+    listSongsMock.mockResolvedValueOnce([song])
+    render(<LibraryScreen onOpenSong={() => {}} onEditSong={() => {}} onLoggedOut={() => {}} />)
+    await screen.findByText('원래이름')
+
+    // 배경 폴링을 흉내내는 재조회(silentReload, onSongCreated로 직접 트리거)를
+    // 하나 띄워두되 아직 응답 안 함 — 이 요청은 "이름 변경 전" 시점에 나간 것.
+    let resolveStaleReload: ((songs: SongSummary[]) => void) | undefined
+    listSongsMock.mockImplementationOnce(
+      () =>
+        new Promise<SongSummary[]>((resolve) => {
+          resolveStaleReload = resolve
+        }),
+    )
+    fireEvent.click(screen.getByRole('button', { name: '+ 업로드' }))
+    fireEvent.click(screen.getByRole('button', { name: 'mock-song-created' }))
+
+    // 그 사이 이름을 바꾸고 커밋(완료)시킨다.
+    renameSongMock.mockResolvedValue({ ...song, title: '바뀐이름' })
+    fireEvent.click(screen.getByRole('button', { name: '이름변경' }))
+    const input = screen.getByDisplayValue('원래이름')
+    fireEvent.change(input, { target: { value: '바뀐이름' } })
+    fireEvent.blur(input)
+    await waitFor(() => expect(screen.getByText('바뀐이름')).toBeInTheDocument())
+
+    // 이제서야 이름 변경보다 먼저 나갔던(낡은) 재조회가 옛 이름으로 응답.
+    await act(async () => {
+      resolveStaleReload?.([{ ...song, title: '원래이름' }])
+    })
+    expect(screen.getByText('바뀐이름')).toBeInTheDocument() // 덮어쓰이면 안 됨
+    expect(screen.queryByText('원래이름')).not.toBeInTheDocument()
+  })
 })
