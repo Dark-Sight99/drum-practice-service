@@ -1134,8 +1134,15 @@ export function PracticeCanvas({
   // 마디로 변환해 바로 loopStartBar1/loopEndBar1에 반영한다. 숫자 입력칸과
   // 달리 재생 중에도 활성(work/T3-9/plan.md §5) — 듣다가 바로 누르는 게
   // 기능의 목적이라 잠그면 성립이 안 됨.
-  function markLoopPointFromCurrentPosition(which: 'start' | 'end') {
-    if (!playbackRef.current) return
+  // 모드A 지적(필수, 반영) — playbackRef.current가 없으면(재생 핸들이 아직
+  // 없거나 그 사이 사라진 경우) 조용히 아무 것도 안 하고 리턴하는데, 호출
+  // 쪽(아래 handleLoopButtonClick)이 성공 여부를 안 보고 무조건 loopPhase를
+  // 다음 단계로 넘기면 "여기까지"를 눌렀을 때 UI는 active(루프 진행중,
+  // 구간 입력칸 노출)인데 실제 loopEnabled는 꺼진 채로 어긋날 수 있었다 —
+  // 버튼 disabled 조건(아래)이 보통은 이 이른 리턴을 막아주지만, 그 전제가
+  // 깨지는 경우까지 대비해 성공 여부를 반환하고 호출 쪽이 그걸 확인한다.
+  function markLoopPointFromCurrentPosition(which: 'start' | 'end'): boolean {
+    if (!playbackRef.current) return false
     const clock = getMasterClock()
     const barSeconds = barDurationSeconds(score.meta.timeSignature, playbackBpm)
     const songStartSeconds = barSeconds * COUNT_IN_BARS
@@ -1152,16 +1159,18 @@ export function PracticeCanvas({
       // 두 지점을 다 찍은 순간이 "이제 반복해줘"라는 의도로 해석).
       setLoopEnabled(true)
     }
+    return true
   }
 
-  // 2026-10-27(의뢰인 요청) — 통합 루프 버튼의 3단계 전환.
+  // 2026-10-27(의뢰인 요청) — 통합 루프 버튼의 3단계 전환. 마커 설정이 실제로
+  // 성공했을 때만(위 함수의 반환값) 단계를 넘긴다 — 실패(이른 리턴)했는데도
+  // 단계만 넘어가면 버튼 표시(UI)와 실제 loopEnabled가 어긋나는 버그가 됨
+  // (모드A 지적, 위 코멘트 참고).
   function handleLoopButtonClick() {
     if (loopPhase === 'idle') {
-      markLoopPointFromCurrentPosition('start')
-      setLoopPhase('start-marked')
+      if (markLoopPointFromCurrentPosition('start')) setLoopPhase('start-marked')
     } else if (loopPhase === 'start-marked') {
-      markLoopPointFromCurrentPosition('end') // 내부에서 loopEnabled도 true로 켬
-      setLoopPhase('active')
+      if (markLoopPointFromCurrentPosition('end')) setLoopPhase('active') // 내부에서 loopEnabled도 true로 켬
     } else {
       setLoopEnabled(false)
       setLoopPhase('idle')
