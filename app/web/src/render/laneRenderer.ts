@@ -99,6 +99,8 @@ function shapeBottomExtent(shape: NoteShape, size: number): number {
       return half
     case 'rounded-rect':
       return (size * 0.7) / 2
+    case 'rect-ring':
+      return half * 1.5 // x-ring과 같은 반지름의 테두리 원이 둥근 사각형보다 더 아래까지 그려짐
     case 'circle':
       return half
     case 'circle-large':
@@ -164,13 +166,19 @@ function drawNoteShapePass(
       ctx.fill()
       break
     }
-    case 'rounded-rect': {
+    case 'rounded-rect':
+    case 'rect-ring': {
       const w = size
       const h = size * 0.7
       const r = 4
       ctx.beginPath()
       ctx.roundRect(x - w / 2, y - h / 2, w, h, r)
       ctx.fill()
+      if (shape === 'rect-ring') {
+        ctx.beginPath()
+        ctx.arc(x, y, half * 1.5, 0, Math.PI * 2)
+        ctx.stroke()
+      }
       break
     }
     case 'circle':

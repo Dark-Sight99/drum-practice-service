@@ -10,7 +10,16 @@ import {
 } from '../audio/timing'
 
 export type NoteShape =
-  'x' | 'x-ring' | 'x-large' | 'diamond' | 'rounded-rect' | 'circle' | 'circle-large' | 'bar' | 'bar-ring'
+  | 'x'
+  | 'x-ring'
+  | 'x-large'
+  | 'diamond'
+  | 'rounded-rect'
+  | 'rect-ring'
+  | 'circle'
+  | 'circle-large'
+  | 'bar'
+  | 'bar-ring'
 
 export interface LaneDef {
   /** 이 레인에 속하는 DrumPiece(하이햇 닫힘/열림은 한 레인을 공유 — 04-ui-ux.md §3). */
@@ -28,24 +37,28 @@ export interface LaneDef {
 // 2026-10-26(의뢰인 피드백) — 원래는 피스마다 다른 모양(✕/◇/사각형/원 등)이었는데,
 // 레인이 피스별로 이미 나뉘어 있어 그 자체로 피스를 구분할 수 있는데도 모양까지
 // 다르면 "같은 타이밍인지 다른 타이밍인지" 순간적으로 읽기 더 어렵다는 지적 —
-// 빠르게 훑어볼 때는 모양 차이가 오히려 방해. 전부 킥(KK)의 막대 모양으로
-// 통일하고 색으로만 구분(레인 위치+ 색이 이미 접근성을 보장 — intent/08-design.md
-// §1의 "색약 대응" 취지는 레인 구조 자체로 유지됨, 모양을 더할 필요 없음).
+// 빠르게 훑어볼 때는 모양 차이가 오히려 방해. 통일 모양으로 전부 바꾸고
+// 색으로만 구분(레인 위치+색이 이미 접근성을 보장 — intent/08-design.md §1의
+// "색약 대응" 취지는 레인 구조 자체로 유지됨, 모양을 더할 필요 없음).
 // 하이햇 열림/닫힘만 예외 — 모양이 아니라 "치는 방법 자체"가 달라 구분이 필요해
-// 막대 위에 테두리 원(`bar-ring`)을 얹어 유지.
+// 테두리 원을 얹어 유지.
+// T3-17(2026-10-26) 1차: 킥(KK) 막대 모양으로 통일 → 의뢰인이 실제로 써보고
+// "다 같은 모양으로 떨어지니 별로"라고 피드백 — 2차: 스네어(SN)의 둥근
+// 사각형으로 교체. 이것도 별로면 피스별 원래 모양으로 되돌릴 수 있음
+// (git 커밋 7d52594 이전 상태, 또는 이 커밋의 바로 다음 리비전 참고).
 export const LANES: readonly LaneDef[] = [
   {
     pieces: ['hihat_closed', 'hihat_open'],
     label: 'HH',
-    shapeByPiece: { hihat_closed: 'bar', hihat_open: 'bar-ring' },
+    shapeByPiece: { hihat_closed: 'rounded-rect', hihat_open: 'rect-ring' },
   },
-  { pieces: ['crash'], label: 'CR', shapeByPiece: { crash: 'bar' } },
-  { pieces: ['snare'], label: 'SN', shapeByPiece: { snare: 'bar' } },
-  { pieces: ['kick'], label: 'KK', shapeByPiece: { kick: 'bar' } },
-  { pieces: ['tom_high'], label: 'HT', shapeByPiece: { tom_high: 'bar' } },
-  { pieces: ['tom_mid'], label: 'MT', shapeByPiece: { tom_mid: 'bar' } },
-  { pieces: ['tom_floor'], label: 'FT', shapeByPiece: { tom_floor: 'bar' } },
-  { pieces: ['ride'], label: 'RD', shapeByPiece: { ride: 'bar' } },
+  { pieces: ['crash'], label: 'CR', shapeByPiece: { crash: 'rounded-rect' } },
+  { pieces: ['snare'], label: 'SN', shapeByPiece: { snare: 'rounded-rect' } },
+  { pieces: ['kick'], label: 'KK', shapeByPiece: { kick: 'rounded-rect' } },
+  { pieces: ['tom_high'], label: 'HT', shapeByPiece: { tom_high: 'rounded-rect' } },
+  { pieces: ['tom_mid'], label: 'MT', shapeByPiece: { tom_mid: 'rounded-rect' } },
+  { pieces: ['tom_floor'], label: 'FT', shapeByPiece: { tom_floor: 'rounded-rect' } },
+  { pieces: ['ride'], label: 'RD', shapeByPiece: { ride: 'rounded-rect' } },
 ]
 
 export function laneIndexForPiece(piece: DrumPiece): number {
