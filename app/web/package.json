@@ -14,6 +14,7 @@
   "dependencies": {
     "@coderline/alphatab": "^1.8.4",
     "@tonejs/midi": "^2.0.28",
+    "lucide-react": "^0.550.0",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
     "tone": "^15.1.22"

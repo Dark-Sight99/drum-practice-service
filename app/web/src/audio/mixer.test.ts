@@ -80,13 +80,30 @@ describe('toggleDrumlessPreset — T3-8(2026-10-25, 의뢰인 요청): 신스 �
     expect(twice.synth_drums.volume).toBe(1)
   })
 
-  it('overwrites a custom synth_drums volume with the auto-toggled 0/1 value', () => {
+  it('끄는 방향(원곡 드럼 켜기)은 신스 드럼 볼륨을 항상 0으로 — 중간값이었어도', () => {
     const state = defaultMixerState()
     state.synth_drums.volume = 0.5 // 사용자가 따로 조절해둔 값
 
     const toggled = toggleDrumlessPreset(state)
 
-    expect(toggled.synth_drums.volume).toBe(0) // 중간값 보존 안 함 — 의도된 동작
+    expect(toggled.synth_drums.volume).toBe(0) // 끄는 쪽은 항상 0 — 복원 대상은 "켜지는" 방향뿐
+  })
+
+  it('2026-10-27(의뢰인 요청) — 복원 볼륨을 넘기면 100%가 아니라 그 값으로 되돌아감', () => {
+    const state = defaultMixerState()
+    state.synth_drums.volume = 1
+    const off = toggleDrumlessPreset(state, 0.3) // 원곡 드럼 켜짐 → 신스 드럼 0으로
+
+    const on = toggleDrumlessPreset(off, 0.3) // 다시 꺼짐 → 신스 드럼이 "기억해둔" 0.3으로(1이 아님)
+
+    expect(on.synth_drums.volume).toBe(0.3)
+  })
+
+  it('restoreSynthDrumsVolume을 안 넘기면 기존처럼 100%로 복귀(기본값 호환)', () => {
+    const state = defaultMixerState()
+    const off = toggleDrumlessPreset(state)
+    const on = toggleDrumlessPreset(off)
+    expect(on.synth_drums.volume).toBe(1)
   })
 
   it('모드A 지적 회귀 — 꺼짐→다시 켜짐 복귀 시 미리 음소거해둔 채널도 실제로 들리게 함(muted도 같이 리셋)', () => {

@@ -58,24 +58,33 @@ export function effectiveGain(channel: ChannelState): number {
  * T3-8(2026-10-25, 의뢰인 요청)에서 "버튼을 두 번 눌러야 하니까"라는
  * 이유로 신스 드럼을 반대 방향으로 자동 전환하도록 변경 — 원곡 드럼을
  * 켜면 신스 드럼은 자동으로 꺼지고(겹쳐 들릴 필요 없음), 원곡 드럼을
- * 끄면 신스 드럼이 자동으로 다시 켜짐(기존 연습 모드로 복귀). 사용자가
- * 그 사이 신스 드럼 볼륨을 따로 조절해뒀어도 이 버튼을 누르면 0/1로
- * 덮어씀(의뢰인이 요청한 "자동 전환" 자체가 핵심이라 중간값 보존은
- * 범위 밖으로 판단).
+ * 끄면 신스 드럼이 자동으로 다시 켜짐(기존 연습 모드로 복귀).
+ * 2026-10-27(의뢰인 요청) — "꺼졌다 다시 켜질 때 무조건 100%로 가서
+ * 너무 크게 들린다" 지적 반영. 되돌아갈 때의 볼륨을 호출자가
+ * `restoreSynthDrumsVolume`로 넘긴다(기본값 1 — 과거 동작·기존 테스트와
+ * 호환, PracticeCanvas는 "마지막으로 0이 아니었던 값"을 기억해 넘김).
+ * 이 함수 자체는 여전히 순수함수 — "기억"은 호출자(컴포넌트) 책임.
  * 모드A 지적(필수, 반영) — `volume`만 바꾸고 `muted`를 그대로 두면,
  * 사용자가 미리 신스 드럼을 M 체크박스로 음소거해둔 상태에서 이 버튼을
- * 눌렀다 다시 누를 때 volume은 1로 돌아와도 `muted`가 여전히 true라
+ * 눌렀다 다시 누를 때 volume은 복원돼도 `muted`가 여전히 true라
  * `effectiveGain()`이 계속 0을 반환 — "꺼짐→다시 켜짐" 복귀가 실제로는
  * 안 들리는 버그였음. 이 프리셋이 눌리는 순간엔 두 채널의 가청 상태를
  * 전부 이 버튼이 책임진다는 원칙으로, `muted`도 항상 `false`로 같이
- * 리셋(볼륨 0/1 덮어쓰기와 같은 "이 버튼이 전적으로 결정한다" 원칙). */
-export function toggleDrumlessPreset(state: MixerState): MixerState {
+ * 리셋(볼륨 덮어쓰기와 같은 "이 버튼이 전적으로 결정한다" 원칙). */
+export function toggleDrumlessPreset(
+  state: MixerState,
+  restoreSynthDrumsVolume = 1,
+): MixerState {
   const isSilent = state.stem_drums.volume === 0
   const nextStemDrumsVolume = isSilent ? 1 : 0
   return {
     ...state,
     stem_drums: { ...state.stem_drums, volume: nextStemDrumsVolume, muted: false },
-    synth_drums: { ...state.synth_drums, volume: isSilent ? 0 : 1, muted: false },
+    synth_drums: {
+      ...state.synth_drums,
+      volume: isSilent ? 0 : restoreSynthDrumsVolume,
+      muted: false,
+    },
   }
 }
 
