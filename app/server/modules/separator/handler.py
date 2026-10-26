@@ -61,6 +61,7 @@ def separate_handler(job: Job) -> None:
         # 귀결돼야 한다 — 핸들러 단위 테스트로 직접 재현해 발견한 간극).
         temp_dir: Path | None = None
         written: list[tuple[str, str]] = []
+        sidecar_written: list[str] = []
         try:
             original_path = _original_asset_path(db, song.id)
             temp_dir = Path(tempfile.mkdtemp(prefix=f"separate_{song.id}_"))
@@ -82,6 +83,29 @@ def separate_handler(job: Job) -> None:
                 else:
                     rel_path = write_song_file(song.id, f"stem_{name}.mp3", encode_mp3(stem_path))
                 written.append((name, rel_path))
+
+            # T3-16-feedback-2(네트워크 스트리밍) — stem_drums.wav(38.7MB)는
+            # Asset으로는 그대로 두되(채보 파이프라인이 이 경로를 읽음, 위
+            # 주석 참고), 재생 전용 MP3 사본을 "같은 이름.mp3"로 옆에 하나 더
+            # 만들어둔다. `songs.py`의 서빙 엔드포인트가 이 사본이 있으면
+            # 우선 서빙한다(아래 songs.py 변경) — 맥에서 실측한 결과 압축한
+            # bass/other/vocals는 한 번에 깔끔히 받아졌는데, 압축 안 한
+            # stem_drums.wav만 같은 38.7MB 범위를 반복·중도취소하며 재요청하는
+            # 패턴이 네트워크 탭에서 확인됨. Asset이 아니라 사이드카 파일이라
+            # 실패해도(ffmpeg 일시 오류 등) Song 처리 전체를 실패시키지 않음
+            # — 재생 최적화일 뿐, 없으면 그냥 기존 WAV로 서빙될 뿐 기능 자체는
+            # 안 깨짐.
+            try:
+                sidecar_rel = write_song_file(
+                    song.id, "stem_drums.mp3", encode_mp3(stems["drums"])
+                )
+                sidecar_written.append(sidecar_rel)
+            except Exception:
+                logger.warning(
+                    "song=%s stem_drums 재생용 MP3 사이드카 생성 실패(기능에는 영향 없음)",
+                    song.id,
+                    exc_info=True,
+                )
             for name, rel_path in written:
                 db.add(
                     Asset(
@@ -98,6 +122,10 @@ def separate_handler(job: Job) -> None:
             # written이 비어있으면(ORIGINAL 조회 실패·Demucs 실패 등 쓰기 전 단계)
             # 이 루프는 자연히 no-op.
             for _, rel_path in written:
+                p = resolve_asset_path(rel_path)
+                if p is not None:
+                    p.unlink(missing_ok=True)
+            for rel_path in sidecar_written:
                 p = resolve_asset_path(rel_path)
                 if p is not None:
                     p.unlink(missing_ok=True)

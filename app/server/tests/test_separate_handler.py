@@ -96,8 +96,49 @@ def test_separate_handler_success_creates_four_stem_assets(db, monkeypatch, tmp_
         # (채보 파이프라인이 drums WAV를 직접 읽으므로 손대지 않음).
         if asset.kind == AssetKind.STEM_DRUMS:
             assert path.suffix == ".wav"
+            # T3-16-feedback-2 — drums Asset은 WAV 그대로지만, 옆에 재생용
+            # MP3 사이드카(Asset으로 등록되지 않음)도 같이 생겨야 한다.
+            sidecar = path.with_suffix(".mp3")
+            assert sidecar.exists()
         else:
             assert path.suffix == ".mp3"
+
+
+def test_separate_handler_succeeds_even_if_drums_mp3_sidecar_encode_fails(
+    db, monkeypatch
+) -> None:
+    """T3-16-feedback-2 — 사이드카는 재생 최적화일 뿐이라, 생성이 실패해도
+    Song 처리 전체는 COMPLETED로 끝나야 한다(기존 WAV로 그냥 서빙됨)."""
+    _, song, job = _make_user_song_job(db)
+
+    def fake_separate(input_path: Path, output_dir: Path, device=None):
+        stems = {}
+        for name in ("drums", "bass", "other", "vocals"):
+            p = output_dir / f"{name}.wav"
+            p.write_bytes(f"stem-{name}".encode())
+            stems[name] = p
+        return stems
+
+    def flaky_encode_mp3(wav_path: Path) -> bytes:
+        if wav_path.name == "drums.wav":
+            raise RuntimeError("ffmpeg 일시 오류 시뮬레이션")
+        return _fake_encode_mp3(wav_path)
+
+    monkeypatch.setattr(handler_module, "separate", fake_separate)
+    monkeypatch.setattr(handler_module, "encode_mp3", flaky_encode_mp3)
+
+    handler_module.separate_handler(job)
+
+    db.refresh(song)
+    assert song.status == SongStatus.COMPLETED
+    drums_asset = (
+        db.query(Asset)
+        .filter(Asset.song_id == song.id, Asset.kind == AssetKind.STEM_DRUMS)
+        .first()
+    )
+    path = file_storage.resolve_asset_path(drums_asset.file_path)
+    assert path is not None and path.exists()  # WAV는 정상 존재
+    assert not path.with_suffix(".mp3").exists()  # 사이드카만 없음
 
 
 def test_separate_handler_demucs_failure_marks_song_failed_and_reraises(db, monkeypatch) -> None:
