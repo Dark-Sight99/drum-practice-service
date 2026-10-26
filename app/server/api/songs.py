@@ -427,7 +427,17 @@ def get_song_audio(
         if sidecar.exists():
             path = sidecar
     media_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
-    return FileResponse(path, media_type=media_type)
+    # T3-16-feedback-5(네트워크, 2026-10-26) — 기본값은 Cache-Control이 아예
+    # 없어 브라우저가 재생(Range 요청) 때마다 서버에 재확인하러 감(최소
+    # 304 재검증이라도 왕복 발생) — 원격(Tailscale) 네트워크에서 이 왕복마다
+    # 끊길 여지가 생긴다. 이 song_id의 이 kind 파일은 **절대 안 바뀐다**는
+    # 걸 코드로 확인함(`POST /songs/audio`가 새 Song 생성 시 JobType.SEPARATE를
+    # 딱 한 번만 큐에 넣음 — 기존 곡을 재분리해 같은 경로를 덮어쓰는 엔드포인트
+    # 자체가 없음, grep으로 전체 API 확인). 그래서 `immutable`로 안전하게
+    # 장기 캐싱 가능 — 프런트의 재생 전 프리페치(PracticeCanvas.tsx)와 합쳐져
+    # 재생 시점엔 네트워크 왕복이 아예 없어짐.
+    headers = {"Cache-Control": "private, max-age=31536000, immutable"}
+    return FileResponse(path, media_type=media_type, headers=headers)
 
 
 def _find_edited_asset(db: Session, song_id: int) -> Asset | None:

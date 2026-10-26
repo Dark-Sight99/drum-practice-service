@@ -92,6 +92,20 @@ def test_get_audio_returns_file_bytes(client: TestClient, db_session) -> None:
     assert resp.headers["accept-ranges"] == "bytes"
 
 
+def test_get_audio_sets_long_lived_immutable_cache_control(client: TestClient, db_session) -> None:
+    """T3-16-feedback-5 — 이 song_id/kind 조합의 파일은 재분리 엔드포인트가
+    없어 절대 안 바뀌므로, 브라우저가 매 재생마다 재검증 왕복 없이 오래
+    캐시해도 안전하다(원격 네트워크에서 재생 중 왕복 자체를 없애는 목적)."""
+    user = _make_user(db_session, "u1")
+    song = _make_song_with_audio(db_session, user)
+    _login(client, "u1")
+
+    resp = client.get(f"/songs/{song.id}/audio/stem_drums")
+
+    assert resp.status_code == 200
+    assert resp.headers["cache-control"] == "private, max-age=31536000, immutable"
+
+
 def test_get_audio_supports_range_requests(client: TestClient, db_session) -> None:
     """모드C 1라운드 MINOR — Range 지원을 소스 열람이 아니라 실제 요청-응답으로
     확정한다."""
