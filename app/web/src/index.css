@@ -105,3 +105,20 @@ textarea:focus {
   border-radius: var(--radius-control);
   animation: skeleton-pulse 1.4s ease-in-out infinite;
 }
+
+/* 2026-10-26 의뢰인 요청 — 음원 업로드 후 노트 생성 중임을 보여주는 스피너.
+ * 실제 진행률(%)은 서버가 안 갖고 있어(Job에 progress 필드 없음, 상태만
+ * queued/processing/completed/failed) 숫자를 지어내지 않고(§0 규칙) 도는
+ * 원으로만 "진행 중"을 표시한다. */
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.spinner {
+  border: 3px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 900ms linear infinite;
+}

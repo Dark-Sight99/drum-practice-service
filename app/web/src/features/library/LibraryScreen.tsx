@@ -77,6 +77,19 @@ export function LibraryScreen({ onOpenSong, onEditSong, onLoggedOut }: LibrarySc
     }
   }
 
+  // 2026-10-26 의뢰인 요청 — "처리 중" 곡이 완료돼도 사용자가 직접 새로고침을
+  // 눌러야만 반영됐었다. loading을 안 건드리는 조용한 새로고침 — 배경 폴링과
+  // 업로드 직후(onSongCreated)에 쓴다. 실패해도 에러 화면을 띄우지 않고 다음
+  // 폴링에서 다시 시도(목록이 이미 떠 있는 상태에서 일시적 네트워크 오류로
+  // 화면 전체를 에러로 덮을 필요는 없음).
+  async function silentReload() {
+    try {
+      setSongs(await listSongs())
+    } catch {
+      // 조용히 무시 — 다음 폴링에서 재시도
+    }
+  }
+
   useEffect(() => {
     // oxlint react(set-state-in-effect)가 여기서도 걸리지만, 이건 그 규칙이 막으려는
     // "렌더에서 바로 구할 수 있는 값을 괜히 effect로 재계산"하는 경우가 아니라 마운트
@@ -86,6 +99,21 @@ export function LibraryScreen({ onOpenSong, onEditSong, onLoggedOut }: LibrarySc
     // oxlint-disable-next-line react/set-state-in-effect
     void reload()
   }, [])
+
+  // 2026-10-26 의뢰인 요청 — "노트 생성이 끝나면 사용자가 스스로 새로고침하지
+  // 않아도 되게" — 처리 중(pending/processing)인 곡이 하나라도 있으면 몇 초
+  // 간격으로 조용히 목록을 다시 불러온다. 다 끝나면(다음 reload에서 pending/
+  // processing이 하나도 안 남으면) 이 effect가 다시 돌 때 조건을 안 만족해
+  // 자연히 멈춘다 — 업로드 모달을 닫고 나가도(모달과 무관하게 이 화면이 계속
+  // 떠 있는 한) 계속 돈다.
+  useEffect(() => {
+    const hasPending = songs.some((s) => s.status === 'pending' || s.status === 'processing')
+    if (!hasPending) return
+    const timer = setInterval(() => {
+      void silentReload()
+    }, 2000)
+    return () => clearInterval(timer)
+  }, [songs])
 
   async function handleOpen(song: SongSummary) {
     setOpeningId(song.id)
@@ -179,6 +207,8 @@ export function LibraryScreen({ onOpenSong, onEditSong, onLoggedOut }: LibrarySc
           setToast({ id: toastIdRef.current, message: '✓ 업로드가 완료되었습니다' })
           void reload()
         }}
+        onSongCreated={() => void silentReload()}
+        onPlaySong={onOpenSong}
       />
 
       {toast && (

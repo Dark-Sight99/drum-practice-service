@@ -28,6 +28,12 @@ export async function listSongs(): Promise<SongSummary[]> {
   return apiFetchJson<SongSummary[]>('/songs')
 }
 
+/** 2026-10-26 의뢰인 요청 — 음원 업로드 후 분리·채보 진행 상태를 폴링하려고
+ * 곡 하나만 가볍게 조회(목록 전체를 다시 불러올 필요 없음). */
+export async function fetchSong(id: number): Promise<SongSummary> {
+  return apiFetchJson<SongSummary>(`/songs/${id}`)
+}
+
 export async function uploadSong(
   file: File,
   title: string,
