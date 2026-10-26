@@ -15,7 +15,9 @@ export type Hand = 'R' | 'L' | 'RF' | 'LF' | null
 
 export type HandSource = 'auto' | 'user'
 
-export type ScoreSource = 'audio' | 'omr' | 'midi' | 'musicxml' | 'gp'
+// 2026-10-26 — 종이 악보(OMR) 경로 드롭(의뢰인 결정, intent/01-vision.md "2026-10-26
+// 갱신" 참고)으로 'omr'은 더 이상 유효한 값이 아님.
+export type ScoreSource = 'audio' | 'midi' | 'musicxml' | 'gp'
 
 export interface DrumNote {
   tick: number

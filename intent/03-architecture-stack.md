@@ -14,14 +14,14 @@
   ▼
 [집 PC — 처리 서버]
   ├ API 서버 (FastAPI)  ── 인증, 라이브러리, 파일 제공
-  ├ 작업 워커 (별도 프로세스) ── 분리 / 채보 / OMR / 변환
+  ├ 작업 워커 (별도 프로세스) ── 분리 / 채보 / 변환
   ├ SQLite (메타데이터, 작업 큐)
   └ 파일 저장소 (data/songs/<song_id>/...)
 ```
 
 ### 설계 원칙 (업계 표준 패턴)
 - **UI와 무거운 연산 분리**: Electron의 메인/렌더러 분리와 같은 원칙을 웹에 적용 — 무거운 연산은 서버 워커 프로세스로, 브라우저 내부 연산(파싱, 오디오 처리)은 Web Worker/AudioWorklet으로.
-- **교체 가능한 모듈**: `Separator`, `DrumTranscriber`, `ScoreRecognizer(OMR)`, `ScoreImporter` 인터페이스. 구현체 교체만으로 모델 변경.
+- **교체 가능한 모듈**: `Separator`, `DrumTranscriber`, `ScoreImporter` 인터페이스. 구현체 교체만으로 모델 변경. (~~`ScoreRecognizer(OMR)`~~ — 2026-10-26 종이 악보 경로 드롭으로 불필요, `intent/01-vision.md` "2026-10-26 갱신" 참고)
 - **단일 내부 형식 DrumScore**: 모든 입력이 이 형식으로 수렴, 모든 화면이 이 형식만 읽음.
 - **단일 마스터 클록**: 오디오 컨텍스트 시간을 기준으로 레인·메트로놈·MIDI 소리 스케줄링(REQ-11 대비).
 
@@ -29,7 +29,7 @@
 ```json
 {
   "version": 1,
-  "meta": { "title": "", "bpm": 120, "timeSignature": [4, 4], "source": "audio|omr|midi|musicxml|gp" },
+  "meta": { "title": "", "bpm": 120, "timeSignature": [4, 4], "source": "audio|midi|musicxml|gp" },
   "notes": [ { "tick": 0, "piece": "kick", "velocity": 100, "hand": "RF", "handSource": "auto|user" } ],
   "ppq": 480,
   "audioOffsetMs": 0
@@ -57,8 +57,8 @@
 | 인증 | 비밀번호 해시(argon2 또는 bcrypt) + HttpOnly 세션 쿠키 | | |
 | 분리 | Demucs htdemucs (PyTorch), device 자동 선택 cuda→mps→cpu | MIT | ⚠ 현재 유지 저장소·설치 방법 확인 |
 | 드럼 채보 | ADTOF (1순위), 대안 조사 포함 | | ⚠ NC 라이선스, 실행 환경 확인 |
-| OMR | Audiveris (Java, CLI 배치 모드) → MusicXML | | ⚠ AGPL-3.0, 드럼 악보 품질 |
-| PDF → 이미지 | **pypdfium2 채택 확정**(Apache-2.0/BSD-3-Clause 확인, 2026-10-23). PyMuPDF는 AGPL/상업 듀얼이라 제외 | | Q-12 해소 |
+| ~~OMR~~ | ~~Audiveris (Java, CLI 배치 모드) → MusicXML~~ | | **드롭(2026-10-26, 의뢰인 결정)** — 종이 악보 경로 자체를 안 만듦, 둘 다 미구현 상태에서 드롭(설치도 안 됨). `intent/01-vision.md` "2026-10-26 갱신" 참고 |
+| ~~PDF → 이미지~~ | ~~pypdfium2(Apache-2.0/BSD-3-Clause, 2026-10-23 채택 확정했었음)~~ | | **드롭(2026-10-26)** — 위와 같은 사유, OMR 전용 용도였음 |
 | 원격 접속 | Tailscale | 개인 무료 플랜(최대 6명, 비상업)으로 확정(2026-10-23). 지인은 Tailscale 네트워크 초대로 접속. Funnel(링크 공개) 포함 여부는 참고 조사(Q-13), 채택 여부는 별도 결정 | 사용자 설치 필요 |
 | 테스트 | Vitest, Playwright(스크린샷 증거), pytest | | |
 
