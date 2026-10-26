@@ -46,6 +46,10 @@ export function UploadScreen({ open, onUploaded, onCancel }: UploadScreenProps) 
   const [submitError, setSubmitError] = useState<string | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [justUploaded, setJustUploaded] = useState(false)
+  // 모드A 지적(Medium, 반영) — 파일 input을 시각적으로 숨기면서(라벨을 버튼처럼
+  // 꾸며 대신 보여줌) 키보드 포커스가 1x1px 안으로 들어가 안 보이게 됐다 —
+  // 포커스 상태를 들고 있다가 라벨에 직접 포커스 링을 그려준다.
+  const [fileInputFocused, setFileInputFocused] = useState(false)
   // T3-19 모드A 지적(Low, 반영) — 업로드 성공 직후(마이크로 인터랙션 지연 중)
   // 사용자가 취소/배경 클릭/Esc로 모달을 닫으면, 안 지워진 타이머가 나중에
   // 그대로 발동해 resetState()·onUploaded()를 또 부르는 버그가 있었음 — 타이머
@@ -209,6 +213,8 @@ export function UploadScreen({ open, onUploaded, onCancel }: UploadScreenProps) 
               border: '1px solid var(--border)',
               borderRadius: 'var(--radius-control)',
               cursor: 'pointer',
+              outline: fileInputFocused ? '2px solid var(--accent)' : 'none',
+              outlineOffset: 2,
             }}
           >
             파일 선택
@@ -218,6 +224,8 @@ export function UploadScreen({ open, onUploaded, onCancel }: UploadScreenProps) 
             type="file"
             accept={ACCEPT}
             onChange={(e) => void handleFileChange(e)}
+            onFocus={() => setFileInputFocused(true)}
+            onBlur={() => setFileInputFocused(false)}
             style={{
               position: 'absolute',
               width: 1,
