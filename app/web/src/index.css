@@ -17,6 +17,7 @@ body {
  * 보이게 할 때 같이 쓴다. */
 button,
 .btn {
+  display: inline-block;
   font: inherit;
   color: var(--text);
   background: var(--surface-2);
