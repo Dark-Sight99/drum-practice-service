@@ -415,6 +415,17 @@ def get_song_audio(
     path = resolve_asset_path(asset.file_path)
     if path is None or not path.exists():
         raise HTTPException(status.HTTP_404_NOT_FOUND, "오디오 트랙을 찾을 수 없습니다")
+    # T3-16-feedback-2(네트워크 스트리밍) — 등록된 자산이 WAV면(현재
+    # stem_drums만 해당 — 채보 파이프라인이 이 Asset 경로를 그대로 읽으므로
+    # Asset 자체는 WAV로 유지) 옆에 재생 전용 MP3 사이드카가 있는지 먼저
+    # 본다(`modules/separator/handler.py`가 best-effort로 만들어둠). 있으면
+    # 그걸 대신 서빙 — 맥 원격 접속 실측으로 38.7MB WAV가 반복·중도취소
+    # 재요청되며 끊기는 걸 확인(이 사이드카로 해결). 사이드카가 없으면(아직
+    # 생성 안 됐거나 실패) 기존 WAV를 그대로 서빙 — 동작 자체는 안 깨짐.
+    if path.suffix == ".wav":
+        sidecar = path.with_suffix(".mp3")
+        if sidecar.exists():
+            path = sidecar
     media_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
     return FileResponse(path, media_type=media_type)
 

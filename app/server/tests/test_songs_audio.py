@@ -107,6 +107,37 @@ def test_get_audio_supports_range_requests(client: TestClient, db_session) -> No
     assert resp.headers["content-range"] == f"bytes 2-5/{len(content)}"
 
 
+def test_get_audio_prefers_mp3_sidecar_over_wav_asset(client: TestClient, db_session) -> None:
+    """T3-16-feedback-2 — 등록된 Asset은 WAV(stem_drums, 채보 파이프라인용)지만
+    재생 전용 MP3 사이드카가 옆에 있으면(핸들러가 best-effort로 생성) 그걸
+    대신 서빙해야 한다. Asset.file_path는 그대로 WAV를 가리킨다(채보가 영향
+    안 받음을 확인하는 게 목적이 아니라, 서빙만 사이드카를 쓰는지 확인)."""
+    user = _make_user(db_session, "u1")
+    song = _make_song_with_audio(db_session, user, content=b"original-wav-bytes")
+    file_storage.write_song_file(song.id, "stem_drums.mp3", b"sidecar-mp3-bytes")
+    _login(client, "u1")
+
+    resp = client.get(f"/songs/{song.id}/audio/stem_drums")
+
+    assert resp.status_code == 200
+    assert resp.content == b"sidecar-mp3-bytes"
+    assert resp.headers["content-type"] == "audio/mpeg"
+
+
+def test_get_audio_falls_back_to_wav_when_no_sidecar(client: TestClient, db_session) -> None:
+    """사이드카가 없으면(아직 생성 안 됐거나 생성 실패) 기존 WAV를 그대로
+    서빙 — 기능이 깨지지 않아야 한다."""
+    user = _make_user(db_session, "u1")
+    song = _make_song_with_audio(db_session, user, content=b"original-wav-bytes")
+    _login(client, "u1")
+
+    resp = client.get(f"/songs/{song.id}/audio/stem_drums")
+
+    assert resp.status_code == 200
+    assert resp.content == b"original-wav-bytes"
+    assert resp.headers["content-type"] == "audio/wav"
+
+
 def test_get_audio_404_when_asset_row_missing(client: TestClient, db_session) -> None:
     user = _make_user(db_session, "u1")
     song = Song(user_id=user.id, title="곡", source_type=SongSourceType.AUDIO)
