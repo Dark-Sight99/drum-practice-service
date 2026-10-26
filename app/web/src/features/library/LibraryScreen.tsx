@@ -72,11 +72,15 @@ export function LibraryScreen({ onOpenSong, onEditSong, onLoggedOut }: LibrarySc
   const [renameValue, setRenameValue] = useState('')
   const [openingId, setOpeningId] = useState<number | null>(null)
 
-  // 모드A 지적(필수, 반영) — reload()/silentReload()가 겹쳐 돌 수 있다(배경
-  // 폴링 2초 간격 도중 다른 reload()가 또 불리는 경우 등). 응답이 요청 순서와
-  // 다르게 도착하면(네트워크 지연) 더 오래된 응답이 나중에 와서 이미 최신으로
-  // 갱신된 songs를 옛 상태로 덮어쓸 수 있었음(예: 완료된 곡이 다시 "처리 중"으로
-  // 보임) — 세대 번호를 공유해, 자기 호출 이후 더 최신 호출이 있었으면
+  // 모드A 지적(필수, 반영. 7차 재검토에서 범위를 reload()/silentReload()
+  // 뿐 아니라 commitRename()/handleDelete()까지 넓힘) — songs를 바꾸는
+  // 비동기 작업(목록 재조회·이름변경·삭제)이 여러 개 겹쳐 돌 수 있다(배경
+  // 폴링 도중 이름변경·삭제, 같은 곡을 연달아 두 번 이름변경 등). 응답이
+  // 시작한 순서와 다르게 도착하면(네트워크 지연) 더 오래된(먼저 시작한)
+  // 작업의 응답이 나중에 와서 이미 최신으로 갱신된 songs를 옛 상태로
+  // 덮어쓸 수 있었음(완료된 곡이 다시 "처리 중"으로 보이거나, 바꾼 이름이
+  // 되돌아가거나, 지운 곡이 되살아나는 식) — songs를 바꾸는 모든 작업이
+  // 이 하나의 세대 번호를 공유해, 자기 시작 이후 더 최신 작업이 있었으면
   // 응답을 무시한다(UploadScreen의 submitGenerationRef와 같은 패턴).
   const songsFetchGenerationRef = useRef(0)
   // songs state의 "지금 당장" 값을 미러 — 과거엔 이걸 useEffect로 동기화
@@ -185,28 +189,34 @@ export function LibraryScreen({ onOpenSong, onEditSong, onLoggedOut }: LibrarySc
     setRenameValue(song.title)
   }
 
+  // 모드A 7차 재검토 지적(필수, 반영) — commitRename()이 songsFetchGenerationRef를
+  // "올리기"만 하고(목록 재조회를 무효화) 자기 자신은 그 번호를 "확인"하지
+  // 않아서, 같은 곡을 연달아 두 번 이름변경(예: Enter로 커밋했는데 요청이
+  // 아직 안 끝난 사이 입력창이 그대로 열려 있어 — renamingId는 finally에서만
+  // 풀림 — 값을 또 바꾸고 blur)하면 두 renameSong() 요청이 동시에 떠 있을
+  // 수 있었다. 응답이 보낸 순서와 다르게 도착하면(네트워크 지연) 나중에
+  // 보낸(최신) 제목이 먼저 반영됐다가 먼저 보낸(낡은) 제목이 뒤늦게 와서
+  // 덮어쓸 수 있었음 — fetchSongs와 같은 세대 번호를 commitRename/
+  // handleDelete도 "확인"하게 통합해(한 카운터가 조회·이름변경·삭제 전부를
+  // 아우름), 뭐가 됐든 가장 나중에 시작된 작업의 응답만 반영되게 한다.
   async function commitRename(id: number) {
     const title = renameValue.trim()
     if (!title) {
+      songsFetchGenerationRef.current += 1 // 혹시 떠 있던 이전 이름변경 요청이 있었다면 무효화
       setRenamingId(null)
       return
     }
+    const generation = ++songsFetchGenerationRef.current
     try {
       const updated = await renameSong(id, { title })
-      // 모드A 6차 재검토 지적(필수, 반영) — 이름변경·삭제는 reload()/
-      // silentReload()와 같은 songsFetchGenerationRef를 안 건드려서, 이
-      // 응답이 오기 "전"에 이미 날아가 있던 목록 재조회(fetchSongs)가 이
-      // 이후에 응답하면 "낡은 응답이 아니다"로 통과해 방금 바꾼 제목을
-      // 그대로 덮어쓸 수 있었다(삭제도 같은 이유로 삭제한 곡이 되살아날
-      // 수 있었음) — 여기서도 세대 번호를 올려, 이 시점보다 먼저 시작된
-      // 목록 재조회는 전부 "낡은 응답"으로 무시되게 한다.
-      songsFetchGenerationRef.current += 1
+      if (generation !== songsFetchGenerationRef.current) return
       // songsRef도 setSongs와 같은 자리에서 같이 갱신(위 fetchSongs 코멘트의
       // 불변식 — 미러가 항상 최신이어야 함).
       const next = (songsRef.current ?? []).map((s) => (s.id === id ? updated : s))
       songsRef.current = next
       setSongs(next)
     } catch (err) {
+      if (generation !== songsFetchGenerationRef.current) return
       setError(err instanceof ApiError ? err.message : '이름 변경에 실패했습니다')
     } finally {
       setRenamingId(null)
@@ -215,14 +225,15 @@ export function LibraryScreen({ onOpenSong, onEditSong, onLoggedOut }: LibrarySc
 
   async function handleDelete(song: SongSummary) {
     if (!window.confirm(`"${song.title}"을(를) 삭제할까요?`)) return
+    const generation = ++songsFetchGenerationRef.current
     try {
       await deleteSong(song.id)
-      // 모드A 6차 재검토 지적(필수, 반영) — commitRename과 같은 이유.
-      songsFetchGenerationRef.current += 1
+      if (generation !== songsFetchGenerationRef.current) return
       const next = (songsRef.current ?? []).filter((s) => s.id !== song.id)
       songsRef.current = next
       setSongs(next)
     } catch (err) {
+      if (generation !== songsFetchGenerationRef.current) return
       setError(err instanceof ApiError ? err.message : '삭제에 실패했습니다')
     }
   }
