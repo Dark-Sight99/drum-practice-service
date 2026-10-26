@@ -62,8 +62,10 @@ function stubIOSUserAgent(): void {
 // 대부분이 쓰던 "sources 배열 → 바로 플레이어" 한 단계 호출을 그대로
 // 흉내내는 헬퍼. 풀 자체(prime() 캐싱, destroy())를 검증하는 테스트는
 // `createAudioTrackPool()`을 직접 불러 풀 레퍼런스를 따로 들고 있는다.
-function createPlayer(sources: TrackSource[]) {
-  return createTrackPlayer(createAudioTrackPool(sources))
+// T3-16-feedback-7 — createAudioTrackPool()이 비동기(파일 전체를 fetch()로
+// 미리 받음)로 바뀌어서 이 헬퍼도 async로 바뀜 — 모든 호출부에 await 필요.
+async function createPlayer(sources: TrackSource[]) {
+  return createTrackPlayer(await createAudioTrackPool(sources))
 }
 
 describe('createTrackPlayer', () => {
@@ -76,6 +78,17 @@ describe('createTrackPlayer', () => {
   // vi.spyOn(window, 'Audio')는 화살표 함수 mockImplementation이 `new`로 호출이
   // 안 돼("is not a constructor") 실제 실행으로 확인 — 생성자는 직접 교체·복원.
   const OriginalAudio = window.Audio
+  // T3-16-feedback-7 — jsdom엔 fetch()의 실제 네트워크 구현이 없고(있어도
+  // 실제 요청을 보내면 안 됨), URL.createObjectURL/revokeObjectURL은 jsdom이
+  // 아예 구현하지 않아("Not implemented") 호출하면 콘솔 에러만 찍고 undefined를
+  // 반환한다(실제 실행으로 확인) — 셋 다 직접 교체·복원.
+  const OriginalFetch = window.fetch
+  const OriginalCreateObjectURL = window.URL.createObjectURL
+  const OriginalRevokeObjectURL = window.URL.revokeObjectURL
+  let fetchMock: ReturnType<typeof vi.fn>
+  let createObjectURLMock: ReturnType<typeof vi.fn>
+  let revokeObjectURLMock: ReturnType<typeof vi.fn>
+  let objectUrlCounter: number
 
   beforeEach(() => {
     playMock = vi.fn().mockResolvedValue(undefined)
@@ -88,6 +101,17 @@ describe('createTrackPlayer', () => {
       createdAudioElements.push(el)
       return el
     } as unknown as typeof Audio
+    objectUrlCounter = 0
+    fetchMock = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      blob: async () => new Blob(['fake-audio'], { type: 'audio/mpeg' }),
+    }))
+    window.fetch = fetchMock as unknown as typeof window.fetch
+    createObjectURLMock = vi.fn(() => `blob:mock-${++objectUrlCounter}`)
+    revokeObjectURLMock = vi.fn()
+    window.URL.createObjectURL = createObjectURLMock as unknown as typeof URL.createObjectURL
+    window.URL.revokeObjectURL = revokeObjectURLMock as unknown as typeof URL.revokeObjectURL
     // afterEach의 vi.restoreAllMocks()가 일반 vi.fn()의 구현까지 비워버리므로
     // (spyOn 대상이 아니라 "복원할 원본"이 없어 매번 다시 설정해야 함), 매
     // 테스트 시작마다 구현을 다시 붙인다.
@@ -108,12 +132,15 @@ describe('createTrackPlayer', () => {
   afterEach(() => {
     vi.restoreAllMocks()
     window.Audio = OriginalAudio
+    window.fetch = OriginalFetch
+    window.URL.createObjectURL = OriginalCreateObjectURL
+    window.URL.revokeObjectURL = OriginalRevokeObjectURL
   })
 
-  it('T3-12/T3-16-feedback-3: iOS에서 각 트랙을 Web Audio로 연결(source → gain → destination)', () => {
+  it('T3-12/T3-16-feedback-3: iOS에서 각 트랙을 Web Audio로 연결(source → gain → destination)', async () => {
     stubIOSUserAgent()
 
-    createPlayer([
+    await createPlayer([
       { kind: 'stem_drums', url: 'http://x/drums.wav' },
       { kind: 'stem_bass', url: 'http://x/bass.wav' },
     ])
@@ -126,7 +153,7 @@ describe('createTrackPlayer', () => {
     expect(gainNodes[1].connect).toHaveBeenCalledWith(FAKE_DESTINATION)
   })
 
-  it('T3-16-feedback-3 모드A 지적(C-001) 반영 — UA에 "iPad"가 그대로 찍히는 기기도 iOS로 인식', () => {
+  it('T3-16-feedback-3 모드A 지적(C-001) 반영 — UA에 "iPad"가 그대로 찍히는 기기도 iOS로 인식', async () => {
     // iPadOS 13+ 기본값은 "Macintosh" 위장 UA를 보내지만(아래 다른 테스트가
     // 그 경로를 이미 검증), 구버전·일부 설정은 UA에 "iPad"가 그대로 남는다 —
     // 멀티터치 폴백에만 의존하면 이 경우를 놓쳐 Web Audio를 건너뛰고
@@ -135,14 +162,14 @@ describe('createTrackPlayer', () => {
       'Mozilla/5.0 (iPad; CPU OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
     )
 
-    createPlayer([{ kind: 'stem_drums', url: 'http://x/drums.wav' }])
+    await createPlayer([{ kind: 'stem_drums', url: 'http://x/drums.wav' }])
 
     expect(createMediaElementSourceMock).toHaveBeenCalledTimes(1)
   })
 
-  it('T3-16-feedback-3: 데스크톱(iOS 아님)에서는 Web Audio를 전혀 안 거침', () => {
+  it('T3-16-feedback-3: 데스크톱(iOS 아님)에서는 Web Audio를 전혀 안 거침', async () => {
     // jsdom 기본 User-Agent는 이미 iOS가 아니므로 별도 스텁 없이 기본 상태로 검증.
-    createPlayer([
+    await createPlayer([
       { kind: 'stem_drums', url: 'http://x/drums.wav' },
       { kind: 'stem_bass', url: 'http://x/bass.wav' },
     ])
@@ -151,8 +178,49 @@ describe('createTrackPlayer', () => {
     expect(createGainMock).not.toHaveBeenCalled()
   })
 
+  describe('T3-16-feedback-7 — createAudioTrackPool(): 재생 전 fetch()로 전체를 받아 blob URL로 변환', () => {
+    it('각 소스를 fetch()로 받아 blob URL을 만들고 엘리먼트 src로 씀', async () => {
+      await createPlayer([
+        { kind: 'stem_drums', url: 'http://x/drums.mp3' },
+        { kind: 'stem_bass', url: 'http://x/bass.mp3' },
+      ])
+
+      expect(fetchMock).toHaveBeenCalledWith('http://x/drums.mp3')
+      expect(fetchMock).toHaveBeenCalledWith('http://x/bass.mp3')
+      expect(createObjectURLMock).toHaveBeenCalledTimes(2)
+      expect(createdAudioElements[0].src).toBe('blob:mock-1')
+      expect(createdAudioElements[1].src).toBe('blob:mock-2')
+    })
+
+    it('HTTP 응답이 ok:false면 상태 코드를 포함한 에러를 던짐', async () => {
+      fetchMock.mockResolvedValueOnce({ ok: false, status: 404, blob: async () => new Blob([]) })
+
+      await expect(createAudioTrackPool([{ kind: 'stem_drums', url: 'http://x/drums.mp3' }])).rejects.toThrow('404')
+    })
+
+    it('모드C 지적(C-001) 반영 — 트랙 하나의 fetch가 실패해도(Promise.allSettled) 이미 받은 다른 트랙의 blob URL은 새지 않고 해제됨', async () => {
+      let callCount = 0
+      fetchMock.mockImplementation(async () => {
+        callCount += 1
+        if (callCount === 2) throw new Error('네트워크 끊김 시뮬레이션')
+        return { ok: true, status: 200, blob: async () => new Blob(['fake-audio']) }
+      })
+
+      await expect(
+        createAudioTrackPool([
+          { kind: 'stem_drums', url: 'http://x/drums.mp3' },
+          { kind: 'stem_bass', url: 'http://x/bass.mp3' },
+        ]),
+      ).rejects.toThrow('네트워크 끊김 시뮬레이션')
+
+      // stem_drums는 fetch까지 성공해 blob URL을 만들었을 것 — 바깥 정리
+      // 루프가 반드시 revokeObjectURL로 해제해야 함(새지 않아야 함).
+      expect(revokeObjectURLMock).toHaveBeenCalledWith('blob:mock-1')
+    })
+  })
+
   it('prime() reports ok:true for every source when play() succeeds', async () => {
-    const player = createPlayer([
+    const player = await createPlayer([
       { kind: 'stem_drums', url: 'http://x/drums.wav' },
       { kind: 'stem_bass', url: 'http://x/bass.wav' },
     ])
@@ -172,7 +240,7 @@ describe('createTrackPlayer', () => {
       if (callCount === 2) return Promise.reject(new DOMException('', 'NotAllowedError'))
       return Promise.resolve(undefined)
     })
-    const player = createPlayer([
+    const player = await createPlayer([
       { kind: 'stem_drums', url: 'http://x/drums.wav' },
       { kind: 'stem_bass', url: 'http://x/bass.wav' },
     ])
@@ -185,7 +253,7 @@ describe('createTrackPlayer', () => {
 
   describe('T3-16-feedback-6 — AudioTrackPool: prime()은 풀 스코프, 세션마다 다시 안 함', () => {
     it('prime()을 두 번 불러도 이미 언락된 트랙은 play()를 다시 시도하지 않음(모드C 1라운드 C-001/2라운드 C-006)', async () => {
-      const pool = createAudioTrackPool([{ kind: 'stem_drums', url: 'http://x/drums.wav' }])
+      const pool = await createAudioTrackPool([{ kind: 'stem_drums', url: 'http://x/drums.wav' }])
       await pool.prime()
       playMock.mockClear()
 
@@ -202,7 +270,7 @@ describe('createTrackPlayer', () => {
             resolvePlay = resolve
           }),
       )
-      const pool = createAudioTrackPool([{ kind: 'stem_drums', url: 'http://x/drums.wav' }])
+      const pool = await createAudioTrackPool([{ kind: 'stem_drums', url: 'http://x/drums.wav' }])
 
       const first = pool.prime()
       const second = pool.prime() // 1차가 아직 안 끝난 상태에서 재호출
@@ -216,7 +284,7 @@ describe('createTrackPlayer', () => {
 
     it('새 세션(createTrackPlayer)을 여러 번 만들어도 같은 풀이면 createMediaElementSource는 트랙당 1번만(모드C 3라운드 C-007)', async () => {
       stubIOSUserAgent()
-      const pool = createAudioTrackPool([
+      const pool = await createAudioTrackPool([
         { kind: 'stem_drums', url: 'http://x/drums.wav' },
         { kind: 'stem_bass', url: 'http://x/bass.wav' },
       ])
@@ -234,7 +302,7 @@ describe('createTrackPlayer', () => {
     })
 
     it('재생 거부로 unlocked가 false가 된 트랙은 다음 prime()에서 실제로 재언락을 시도(모드C 2라운드 C-006)', async () => {
-      const pool = createAudioTrackPool([{ kind: 'stem_drums', url: 'http://x/drums.wav' }])
+      const pool = await createAudioTrackPool([{ kind: 'stem_drums', url: 'http://x/drums.wav' }])
       await pool.prime() // 1차 언락 성공
       const session = createTrackPlayer(pool)
       playMock.mockClear()
@@ -257,7 +325,7 @@ describe('createTrackPlayer', () => {
             resolvePlay = resolve
           }),
       )
-      const pool = createAudioTrackPool([{ kind: 'stem_drums', url: 'http://x/drums.wav' }])
+      const pool = await createAudioTrackPool([{ kind: 'stem_drums', url: 'http://x/drums.wav' }])
       const primePromise = pool.prime() // 아직 안 끝남
 
       pool.destroy() // 화면을 벗어남 — 풀 파괴
@@ -277,7 +345,7 @@ describe('createTrackPlayer', () => {
       if (callCount === 2) return Promise.reject(new DOMException('', 'NotAllowedError'))
       return Promise.resolve(undefined)
     })
-    const player = createPlayer([
+    const player = await createPlayer([
       { kind: 'stem_drums', url: 'http://x/drums.wav' },
       { kind: 'stem_bass', url: 'http://x/bass.wav' },
     ])
@@ -296,7 +364,7 @@ describe('createTrackPlayer', () => {
     // (예: 네트워크 문제 등으로) 이번엔 거부되는 경우. unlocked=false가 되면
     // 이후 pause()/resume()이 전부 이 트랙을 건너뛰므로, play() 거부 시점에
     // 명시적으로 pause()해두지 않으면 끌 방법이 없는 소리가 남을 수 있었다.
-    const player = createPlayer([{ kind: 'stem_drums', url: 'http://x/drums.wav' }])
+    const player = await createPlayer([{ kind: 'stem_drums', url: 'http://x/drums.wav' }])
     await player.prime()
     playMock.mockClear()
     pauseMock.mockClear()
@@ -309,7 +377,7 @@ describe('createTrackPlayer', () => {
   })
 
   it('playFrom() sets preservesPitch/playbackRate/currentTime on unlocked tracks', async () => {
-    const player = createPlayer([{ kind: 'stem_drums', url: 'http://x/drums.wav' }])
+    const player = await createPlayer([{ kind: 'stem_drums', url: 'http://x/drums.wav' }])
     await player.prime()
     playMock.mockClear()
 
@@ -330,7 +398,7 @@ describe('createTrackPlayer', () => {
     // 직접 스파이해(call-through 유지) 실제로 보정됐는지/안 됐는지를
     // 값으로 검증한다.
     async function primedUnpausedPlayer(initialCurrentTime: number, playbackRate = 1) {
-      const player = createPlayer([{ kind: 'stem_drums', url: 'http://x/drums.wav' }])
+      const player = await createPlayer([{ kind: 'stem_drums', url: 'http://x/drums.wav' }])
       await player.prime()
       vi.spyOn(HTMLMediaElement.prototype, 'paused', 'get').mockReturnValue(false)
       player.playFrom(initialCurrentTime, playbackRate)
@@ -375,7 +443,7 @@ describe('createTrackPlayer', () => {
 
     it('skips a track that failed to unlock, even with a huge drift', async () => {
       playMock.mockRejectedValueOnce(new DOMException('', 'NotAllowedError'))
-      const player = createPlayer([{ kind: 'stem_drums', url: 'http://x/drums.wav' }])
+      const player = await createPlayer([{ kind: 'stem_drums', url: 'http://x/drums.wav' }])
       await player.prime() // 언락 실패
       const setSpy = vi.spyOn(HTMLMediaElement.prototype, 'currentTime', 'set')
       setSpy.mockClear()
@@ -387,7 +455,7 @@ describe('createTrackPlayer', () => {
 
     it('skips a track that is still paused (never actually started), even with a huge drift', async () => {
       // primedUnpausedPlayer를 안 쓰고 paused를 그대로 둔다(jsdom 기본값 true).
-      const player = createPlayer([{ kind: 'stem_drums', url: 'http://x/drums.wav' }])
+      const player = await createPlayer([{ kind: 'stem_drums', url: 'http://x/drums.wav' }])
       await player.prime() // 언락은 성공하지만 playFrom()을 호출 안 해 paused=true 그대로
       const setSpy = vi.spyOn(HTMLMediaElement.prototype, 'currentTime', 'set')
       setSpy.mockClear()
@@ -399,7 +467,7 @@ describe('createTrackPlayer', () => {
   })
 
   it('stop() pauses every track', async () => {
-    const player = createPlayer([
+    const player = await createPlayer([
       { kind: 'stem_drums', url: 'http://x/drums.wav' },
       { kind: 'stem_bass', url: 'http://x/bass.wav' },
     ])
@@ -413,7 +481,7 @@ describe('createTrackPlayer', () => {
 
   describe('reset() — T3-16-feedback-6: 세션만 정리, 엘리먼트는 재사용(구 dispose()를 대체)', () => {
     it('일시정지만 하고 unlocked는 그대로 유지(풀 스코프라 다음 세션도 재언락 불필요 — 모드C 2라운드 C-005)', async () => {
-      const player = createPlayer([{ kind: 'stem_drums', url: 'http://x/drums.wav' }])
+      const player = await createPlayer([{ kind: 'stem_drums', url: 'http://x/drums.wav' }])
       await player.prime()
       pauseMock.mockClear()
       playMock.mockClear()
@@ -428,7 +496,7 @@ describe('createTrackPlayer', () => {
     })
 
     it('started를 false로 되돌려 resume()이 조기 재생하지 않게 함', async () => {
-      const player = createPlayer([{ kind: 'stem_drums', url: 'http://x/drums.wav' }])
+      const player = await createPlayer([{ kind: 'stem_drums', url: 'http://x/drums.wav' }])
       await player.prime()
       player.playFrom(0, 1) // started=true
 
@@ -440,7 +508,7 @@ describe('createTrackPlayer', () => {
     })
 
     it('엘리먼트를 파괴하지 않음(src를 안 비움) — 다음 세션이 재사용할 수 있어야 함', async () => {
-      const player = createPlayer([{ kind: 'stem_drums', url: 'http://x/drums.wav' }])
+      const player = await createPlayer([{ kind: 'stem_drums', url: 'http://x/drums.wav' }])
       await player.prime()
       const el = createdAudioElements[0]
       const originalSrc = el.src
@@ -453,7 +521,7 @@ describe('createTrackPlayer', () => {
 
   describe('AudioTrackPool.destroy() — T3-16-feedback-6: 풀 전체 파괴(구 dispose()의 "엘리먼트 파괴" 부분을 이어받음)', () => {
     it('모든 트랙을 일시정지시킴', async () => {
-      const pool = createAudioTrackPool([{ kind: 'stem_drums', url: 'http://x/drums.wav' }])
+      const pool = await createAudioTrackPool([{ kind: 'stem_drums', url: 'http://x/drums.wav' }])
       await pool.prime()
       pauseMock.mockClear()
 
@@ -464,7 +532,7 @@ describe('createTrackPlayer', () => {
 
     it('iOS에서는 Web Audio 그래프 노드를 끊음(T3-12)', async () => {
       stubIOSUserAgent()
-      const pool = createAudioTrackPool([{ kind: 'stem_drums', url: 'http://x/drums.wav' }])
+      const pool = await createAudioTrackPool([{ kind: 'stem_drums', url: 'http://x/drums.wav' }])
       await pool.prime()
 
       pool.destroy()
@@ -474,14 +542,14 @@ describe('createTrackPlayer', () => {
     })
 
     it('데스크톱(노드 없음)에서도 안 터짐', async () => {
-      const pool = createAudioTrackPool([{ kind: 'stem_drums', url: 'http://x/drums.wav' }])
+      const pool = await createAudioTrackPool([{ kind: 'stem_drums', url: 'http://x/drums.wav' }])
       await pool.prime()
 
       expect(() => pool.destroy()).not.toThrow()
     })
 
     it('모드C 3라운드 지적(Medium, C-003/C-008) — 트랙 하나 정리가 실패해도 나머지 트랙은 계속 정리됨', async () => {
-      const pool = createAudioTrackPool([
+      const pool = await createAudioTrackPool([
         { kind: 'stem_drums', url: 'http://x/drums.wav' },
         { kind: 'stem_bass', url: 'http://x/bass.wav' },
       ])
@@ -498,10 +566,24 @@ describe('createTrackPlayer', () => {
       // 1번째가 던져도 2번째 트랙의 pause()는 여전히 호출돼야 함.
       expect(pauseMock).toHaveBeenCalledTimes(2)
     })
+
+    it('T3-16-feedback-7 — 모든 트랙의 blob URL을 revokeObjectURL로 해제함(안 하면 페이지가 떠 있는 동안 메모리에 남음)', async () => {
+      const pool = await createAudioTrackPool([
+        { kind: 'stem_drums', url: 'http://x/drums.mp3' },
+        { kind: 'stem_bass', url: 'http://x/bass.mp3' },
+      ])
+      await pool.prime()
+      revokeObjectURLMock.mockClear()
+
+      pool.destroy()
+
+      expect(revokeObjectURLMock).toHaveBeenCalledWith('blob:mock-1')
+      expect(revokeObjectURLMock).toHaveBeenCalledWith('blob:mock-2')
+    })
   })
 
   describe('createAudioTrackPool() — 모드C 3라운드 지적(Medium, C-008): 생성 도중 일부만 만들고 실패하면 정리 후 재던짐', () => {
-    it('두 번째 트랙 생성이 실패하면 첫 번째 트랙을 정리하고 예외를 다시 던짐', () => {
+    it('두 번째 트랙 생성이 실패하면 첫 번째 트랙을 정리하고 예외를 다시 던짐', async () => {
       stubIOSUserAgent()
       let callCount = 0
       createMediaElementSourceMock.mockImplementation(() => {
@@ -512,40 +594,45 @@ describe('createTrackPlayer', () => {
         return node
       })
 
-      expect(() =>
+      await expect(
         createAudioTrackPool([
           { kind: 'stem_drums', url: 'http://x/drums.wav' },
           { kind: 'stem_bass', url: 'http://x/bass.wav' },
         ]),
-      ).toThrow('Web Audio 노드 생성 실패 시뮬레이션')
+      ).rejects.toThrow('Web Audio 노드 생성 실패 시뮬레이션')
 
       // 두 트랙 다 정리(일시정지)됐어야 함 — 첫 번째(stem_drums)는 이미
       // 완성돼 바깥 catch의 정리 루프가, 두 번째(stem_bass, 실패한 그
       // 트랙 자신)는 모드A 지적으로 추가한 안쪽 catch의 즉시 정리가 맡는다.
       expect(pauseMock).toHaveBeenCalledTimes(2)
+      // T3-16-feedback-7 — 두 트랙 다 fetch()까지는 성공해 blob URL을 만들었을
+      // 것이므로, 정리 과정에서 둘 다 revokeObjectURL로 해제돼야 함.
+      expect(revokeObjectURLMock).toHaveBeenCalledWith('blob:mock-1')
+      expect(revokeObjectURLMock).toHaveBeenCalledWith('blob:mock-2')
     })
 
-    it('모드A 지적(필수, 반영함) — createMediaElementSource()는 성공하고 createGain()이 실패해도(같은 트랙 안에서) 그 트랙의 엘리먼트·부분 생성된 노드가 샘 없이 정리됨', () => {
+    it('모드A 지적(필수, 반영함) — createMediaElementSource()는 성공하고 createGain()이 실패해도(같은 트랙 안에서) 그 트랙의 엘리먼트·부분 생성된 노드가 샘 없이 정리됨', async () => {
       stubIOSUserAgent()
       createGainMock.mockImplementation(() => {
         throw new Error('createGain 실패 시뮬레이션')
       })
 
-      expect(() =>
-        createAudioTrackPool([{ kind: 'stem_drums', url: 'http://x/drums.wav' }]),
-      ).toThrow('createGain 실패 시뮬레이션')
+      await expect(createAudioTrackPool([{ kind: 'stem_drums', url: 'http://x/drums.wav' }])).rejects.toThrow(
+        'createGain 실패 시뮬레이션',
+      )
 
       // 이 트랙은 tracks 배열에 push되기 전에 실패했지만(바깥 catch의 정리
       // 루프가 못 보는 범위), 실패 지점에서 즉시 자기 자신을 정리해야 한다 —
       // element.pause()와 이미 만들어진 sourceNode.disconnect() 둘 다.
       expect(pauseMock).toHaveBeenCalledTimes(1)
       expect(sourceNodes[0].disconnect).toHaveBeenCalledTimes(1)
+      expect(revokeObjectURLMock).toHaveBeenCalledWith('blob:mock-1')
     })
   })
 
   describe('seekTo() — T3-9(REQ-04): 위치만 옮기고 재생은 시작하지 않음', () => {
     it('repositions unlocked tracks (currentTime/playbackRate/preservesPitch) without calling play()', async () => {
-      const player = createPlayer([{ kind: 'stem_drums', url: 'http://x/drums.wav' }])
+      const player = await createPlayer([{ kind: 'stem_drums', url: 'http://x/drums.wav' }])
       await player.prime()
       playMock.mockClear()
       const setCurrentTime = vi.spyOn(HTMLMediaElement.prototype, 'currentTime', 'set')
@@ -558,7 +645,7 @@ describe('createTrackPlayer', () => {
     })
 
     it('clamps a negative position to 0', async () => {
-      const player = createPlayer([{ kind: 'stem_drums', url: 'http://x/drums.wav' }])
+      const player = await createPlayer([{ kind: 'stem_drums', url: 'http://x/drums.wav' }])
       await player.prime()
       const setCurrentTime = vi.spyOn(HTMLMediaElement.prototype, 'currentTime', 'set')
       setCurrentTime.mockClear()
@@ -575,7 +662,7 @@ describe('createTrackPlayer', () => {
         if (callCount === 2) return Promise.reject(new DOMException('', 'NotAllowedError'))
         return Promise.resolve(undefined)
       })
-      const player = createPlayer([
+      const player = await createPlayer([
         { kind: 'stem_drums', url: 'http://x/drums.wav' },
         { kind: 'stem_bass', url: 'http://x/bass.wav' },
       ])
@@ -591,7 +678,7 @@ describe('createTrackPlayer', () => {
     it('does not touch the started flag or muted/unlocked state (purely cosmetic position change)', async () => {
       // seekTo() 이후 resume()이 정상 작동하는지로 간접 확인 — started가
       // 변하지 않았다면(이미 true였던 트랙) resume()이 그대로 play()를 부름.
-      const player = createPlayer([{ kind: 'stem_drums', url: 'http://x/drums.wav' }])
+      const player = await createPlayer([{ kind: 'stem_drums', url: 'http://x/drums.wav' }])
       await player.prime()
       player.playFrom(0, 1) // started=true로 만듦
       playMock.mockClear()
@@ -611,7 +698,7 @@ describe('createTrackPlayer', () => {
         if (callCount === 2) return Promise.reject(new DOMException('', 'NotAllowedError'))
         return Promise.resolve(undefined)
       })
-      const player = createPlayer([
+      const player = await createPlayer([
         { kind: 'stem_drums', url: 'http://x/drums.wav' },
         { kind: 'stem_bass', url: 'http://x/bass.wav' },
       ])
@@ -625,7 +712,7 @@ describe('createTrackPlayer', () => {
     })
 
     it('resume() calls play() again only on tracks already started via playFrom()', async () => {
-      const player = createPlayer([
+      const player = await createPlayer([
         { kind: 'stem_drums', url: 'http://x/drums.wav' },
         { kind: 'stem_bass', url: 'http://x/bass.wav' },
       ])
@@ -643,7 +730,7 @@ describe('createTrackPlayer', () => {
       // 카운트인 중 일시정지→재개를 재현: prime()만 하고 playFrom()은 아직
       // 한 번도 안 부른 상태. resume()이 여기서 play()를 부르면 Transport가
       // 아직 카운트인 중인데도 원곡 오디오가 먼저 들리는 버그가 된다.
-      const player = createPlayer([{ kind: 'stem_drums', url: 'http://x/drums.wav' }])
+      const player = await createPlayer([{ kind: 'stem_drums', url: 'http://x/drums.wav' }])
       await player.prime()
       playMock.mockClear()
 
@@ -653,7 +740,7 @@ describe('createTrackPlayer', () => {
     })
 
     it('resume() pauses the element when play() rejects (T3-6 모드A 2라운드 지적)', async () => {
-      const player = createPlayer([{ kind: 'stem_drums', url: 'http://x/drums.wav' }])
+      const player = await createPlayer([{ kind: 'stem_drums', url: 'http://x/drums.wav' }])
       await player.prime()
       player.playFrom(0, 1) // started=true로 만든다
       playMock.mockClear()
@@ -673,7 +760,7 @@ describe('createTrackPlayer', () => {
         if (callCount === 2) return Promise.reject(new DOMException('', 'NotAllowedError'))
         return Promise.resolve(undefined)
       })
-      const player = createPlayer([
+      const player = await createPlayer([
         { kind: 'stem_drums', url: 'http://x/drums.wav' },
         { kind: 'stem_bass', url: 'http://x/bass.wav' },
       ])
@@ -693,7 +780,7 @@ describe('createTrackPlayer', () => {
   describe('setChannelGain() — iOS: T3-12 GainNode 사용(element.volume은 iOS에서 무시됨)', () => {
     it('sets gainNode.gain.value on the matching track only, clamped to [0,1]', async () => {
       stubIOSUserAgent()
-      const player = createPlayer([
+      const player = await createPlayer([
         { kind: 'stem_drums', url: 'http://x/drums.wav' },
         { kind: 'stem_bass', url: 'http://x/bass.wav' },
       ])
@@ -707,7 +794,7 @@ describe('createTrackPlayer', () => {
 
     it('clamps out-of-range gain to [0,1]', async () => {
       stubIOSUserAgent()
-      const player = createPlayer([{ kind: 'stem_drums', url: 'http://x/drums.wav' }])
+      const player = await createPlayer([{ kind: 'stem_drums', url: 'http://x/drums.wav' }])
       await player.prime()
 
       player.setChannelGain('stem_drums', 1.5)
@@ -719,7 +806,7 @@ describe('createTrackPlayer', () => {
 
     it('silently ignores an unknown kind', async () => {
       stubIOSUserAgent()
-      const player = createPlayer([{ kind: 'stem_drums', url: 'http://x/drums.wav' }])
+      const player = await createPlayer([{ kind: 'stem_drums', url: 'http://x/drums.wav' }])
       await player.prime()
 
       expect(() => player.setChannelGain('nonexistent', 0.5)).not.toThrow()
@@ -728,7 +815,7 @@ describe('createTrackPlayer', () => {
 
   describe('setChannelGain() — T3-16-feedback-3: 데스크톱에서는 element.volume 직접 제어', () => {
     it('sets element.volume on the matching track only, clamped to [0,1]', async () => {
-      const player = createPlayer([
+      const player = await createPlayer([
         { kind: 'stem_drums', url: 'http://x/drums.wav' },
         { kind: 'stem_bass', url: 'http://x/bass.wav' },
       ])
@@ -741,7 +828,7 @@ describe('createTrackPlayer', () => {
     })
 
     it('clamps out-of-range gain to [0,1]', async () => {
-      const player = createPlayer([{ kind: 'stem_drums', url: 'http://x/drums.wav' }])
+      const player = await createPlayer([{ kind: 'stem_drums', url: 'http://x/drums.wav' }])
       await player.prime()
 
       player.setChannelGain('stem_drums', 1.5)
