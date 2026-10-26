@@ -81,25 +81,36 @@ export function LibraryScreen({ onOpenSong, onEditSong, onLoggedOut }: LibrarySc
       const latest = await listSongs()
       if (generation !== songsFetchGenerationRef.current) return
       setSongs(latest)
+      setLoading(false)
     } catch (err) {
       if (generation !== songsFetchGenerationRef.current) return
       setError(err instanceof ApiError ? err.message : '목록을 불러오지 못했습니다')
-    } finally {
-      if (generation === songsFetchGenerationRef.current) setLoading(false)
+      setLoading(false)
     }
   }
 
   // 2026-10-26 의뢰인 요청 — "처리 중" 곡이 완료돼도 사용자가 직접 새로고침을
-  // 눌러야만 반영됐었다. loading을 안 건드리는 조용한 새로고침 — 배경 폴링과
-  // 업로드 직후(onSongCreated)에 쓴다. 실패해도 에러 화면을 띄우지 않고 다음
-  // 폴링에서 다시 시도(목록이 이미 떠 있는 상태에서 일시적 네트워크 오류로
-  // 화면 전체를 에러로 덮을 필요는 없음).
+  // 눌러야만 반영됐었다. loading을 스스로 true로 켜진 않는(= 떠 있던 스켈레톤을
+  // 다시 띄우진 않는) 조용한 새로고침 — 배경 폴링과 업로드 직후(onSongCreated)에
+  // 쓴다. 실패해도 에러 화면을 띄우지 않고 다음 폴링에서 다시 시도(목록이 이미
+  // 떠 있는 상태에서 일시적 네트워크 오류로 화면 전체를 에러로 덮을 필요는 없음).
+  //
+  // 모드A 재검토 지적(필수, 반영) — reload()가 아직 응답 전인데 이 함수가
+  // 먼저 최신 데이터를 들고 성공하는 경우(세대 번호가 더 최신이 됨), 그 뒤
+  // reload()의 원래 응답은 세대 불일치로 무시되는데, 거기서만 setLoading(false)를
+  // 걸어뒀더니 그 "무시"가 loading 해제까지 같이 건너뛰어 스켈레톤이 영원히
+  // 안 사라지는 버그였다 — "로딩 끝"은 reload()가 자기 응답을 처리할 때가
+  // 아니라 "songs에 실제로 최신 데이터가 반영되는 바로 그 순간"에 걸려야
+  // 맞는다. 그래서 silentReload() 쪽도 자기 세대가 여전히 최신일 때(=자기
+  // 응답을 실제로 반영할 때) loading을 꺼준다 — "안 켠다"는 원칙은 그대로
+  // 지키고 "꺼야 할 때 꺼준다"만 추가.
   async function silentReload() {
     const generation = ++songsFetchGenerationRef.current
     try {
       const latest = await listSongs()
       if (generation !== songsFetchGenerationRef.current) return
       setSongs(latest)
+      setLoading(false)
     } catch {
       // 조용히 무시 — 다음 폴링에서 재시도
     }
