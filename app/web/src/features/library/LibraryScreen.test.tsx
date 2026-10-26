@@ -603,4 +603,42 @@ describe('LibraryScreen — 목록 새로고침 경합(모드A 지적 반영)', 
     })
     expect(screen.queryByText('지울곡')).not.toBeInTheDocument()
   })
+
+  it('모드A 10차 재검토 지적(필수, 반영) — 같은 곡의 삭제가 진행 중일 때 끝난 이름변경이 삭제 성공을 가리지 않음', async () => {
+    const song = makeSong({ id: 31, title: '지우고바꿀곡' })
+    listSongsMock.mockResolvedValueOnce([song])
+    render(<LibraryScreen onOpenSong={() => {}} onEditSong={() => {}} onLoggedOut={() => {}} />)
+    await screen.findByText('지우고바꿀곡')
+
+    // 삭제를 먼저 시작하되 아직 응답 안 함.
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    let resolveDelete: (() => void) | undefined
+    deleteSongMock.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveDelete = resolve
+        }),
+    )
+    fireEvent.click(screen.getByRole('button', { name: '삭제' }))
+    confirmSpy.mockRestore()
+    expect(deleteSongMock).toHaveBeenCalledTimes(1)
+
+    // 삭제가 아직 안 끝난 사이, 같은 곡의 이름변경을 시작해 먼저 성공시킨다
+    // (삭제보다 "나중에 시작"됐으니 순번은 더 높음).
+    renameSongMock.mockResolvedValueOnce({ ...song, title: '바뀐이름' })
+    fireEvent.click(screen.getByRole('button', { name: '이름변경' }))
+    const input = screen.getByDisplayValue('지우고바꿀곡')
+    fireEvent.change(input, { target: { value: '바뀐이름' } })
+    fireEvent.keyDown(input, { key: 'Enter' })
+    await waitFor(() => expect(screen.getByText('바뀐이름')).toBeInTheDocument())
+
+    // 이제서야 먼저 시작된 삭제가 성공 — 더 늦게 "시작된" 이름변경이
+    // 성공했다는 이유로 삭제의 성공 처리가 무시되면 안 된다(고치기 전엔
+    // 실제로 삭제된 곡이 바뀐 제목으로 화면에 남아 있었음).
+    await act(async () => {
+      resolveDelete?.()
+    })
+    expect(screen.queryByText('바뀐이름')).not.toBeInTheDocument()
+    expect(screen.queryByText('지우고바꿀곡')).not.toBeInTheDocument()
+  })
 })
