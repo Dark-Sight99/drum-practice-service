@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   deleteSong,
   fetchSongDrumScore,
@@ -11,6 +11,7 @@ import { ApiError } from '../../api/client'
 import type { DrumScore } from '../../score/types'
 import { filterSongs } from './filterSongs'
 import { UploadScreen } from '../upload/UploadScreen'
+import { Toast } from '../../components/Toast'
 
 export interface LibraryScreenProps {
   onOpenSong: (song: SongSummary, drumScore: DrumScore) => void
@@ -46,6 +47,15 @@ export function LibraryScreen({ onOpenSong, onEditSong, onLoggedOut }: LibrarySc
   // 아니라 모달로 띄운다. 업로드 완료 시 목록을 다시 불러와 새 곡이 바로
   // 보이게 한다.
   const [uploadOpen, setUploadOpen] = useState(false)
+  // 2026-10-26 의뢰인 요청 — 업로드 완료 토스트. 모달은 완료 후 스스로 닫히므로
+  // (onUploaded) 토스트는 모달 바깥(라이브러리 화면)에서 띄운다.
+  // 모드A 재검토 지적(반영) — 메시지 문구가 매번 동일해서 토스트가 떠 있는
+  // 도중 또 업로드를 완료하면(연속 업로드) state는 바뀌지만 React가 같은
+  // Toast 인스턴스로 보고 다시 마운트하지 않아, 두 번째 완료의 타이머가
+  // 첫 번째 타이머를 그대로 이어받아 3초를 못 채우고 사라질 수 있었음 —
+  // 매 완료마다 증가하는 id를 key로 줘서 항상 새 인스턴스로 마운트시킨다.
+  const [toast, setToast] = useState<{ id: number; message: string } | null>(null)
+  const toastIdRef = useRef(0)
   const [songs, setSongs] = useState<SongSummary[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -164,9 +174,15 @@ export function LibraryScreen({ onOpenSong, onEditSong, onLoggedOut }: LibrarySc
         onCancel={() => setUploadOpen(false)}
         onUploaded={() => {
           setUploadOpen(false)
+          toastIdRef.current += 1
+          setToast({ id: toastIdRef.current, message: '✓ 업로드가 완료되었습니다' })
           void reload()
         }}
       />
+
+      {toast && (
+        <Toast key={toast.id} message={toast.message} onDismiss={() => setToast(null)} />
+      )}
 
       <input
         placeholder="제목·아티스트 검색"
