@@ -49,7 +49,7 @@
 | 음정 유지 속도 변경 | **HTMLMediaElement `preservesPitch`** 채택 확정(2026-10-23, 의뢰인 승인). SoundTouch AudioWorklet은 실기기(iPhone 13 Pro·iPad mini 5) 테스트에서 오디오 엔진이 간헐적으로 수 초씩 밀리는 현상 확인돼 제외 | | Q-04 해소됨, 상세는 `qa-evidence/T0-5/result.md` |
 | MIDI 입출력 | @tonejs/midi | | |
 | GP/MusicXML 가져오기 | alphaTab (MPL-2.0) | `ScoreLoader.loadScoreFromBytes` → `MidiFileGenerator`+`AlphaSynthMidiFileHandler` → `MidiFile.toBinary()`로 표준 MIDI 바이트를 뽑아 @tonejs/midi로 재파싱(퍼커션 채널9·GM 노트번호 전부 실제 MusicXML 파일로 실검증, `work/T2-1/plan.md`) | T0-3/T0-4의 실제 `.musicxml`/`.mxl` 샘플로 검증됨. GP(.gp/.gp3~5/.gpx)는 같은 API를 쓰지만 실제 GP 샘플로는 검증 못함 |
-| UI 아이콘 | Lucide (ISC ⚠확인) | 08-design.md 지정 | ⚠ 라이선스 확인 |
+| UI 아이콘 | lucide-react (ISC, 확인됨 2026-10-27) | 08-design.md 지정, npm 패키지로 설치(T3-25) | |
 | UI 폰트 | Pretendard (SIL OFL ⚠확인) | 08-design.md 지정, 자체 호스팅 | ⚠ 라이선스 확인 |
 | 백엔드 | Python 3.11+ / FastAPI / Uvicorn | ML 모델이 Python | |
 | 작업 큐 | SQLite 테이블 기반 자체 워커(별도 프로세스) | Redis 불필요, 윈도우·맥 동일 | |
@@ -86,7 +86,7 @@
 | @tonejs/midi | MIT(확인됨, 2026-10-23, npm 레지스트리 `license` 필드) | 가능 | 가능(고지) |
 | tone(Tone.js) | MIT(확인됨, 2026-10-23, npm 레지스트리 `license` 필드) — T2-2에서 빠뜨렸다가 T2-2b에서 기록 | 가능 | 가능(고지) |
 | Virtuosity Drums(드럼 샘플) | CC0(확인됨, 2026-10-23, 공식 페이지 "open source (Creative Commons 0)" 명시, https://versilian-studios.com/virtuosity-drums/) | 가능(고지·로열티 불필요) | 가능(고지·로열티 불필요) |
-| Lucide | ISC ⚠확인 | 가능 | 가능 |
+| lucide-react | ISC(확인됨, 2026-10-27, npm 레지스트리 `license` 필드, `npm info lucide-react license`) | 가능 | 가능 |
 | Pretendard | SIL OFL ⚠확인 | 가능 | 가능 |
 | pypdfium2 | Apache-2.0/BSD-3-Clause(확인됨, 2026-10-23) | 가능 | 가능 |
 | ADTOF-pytorch(대안 채보 모델) | **없음**(LICENSE 파일·GitHub 라이선스 필드 모두 미표시, Q-15) | Phase 0 내부 테스트만 | 불가(해소 전) — Phase 3 채택 전 재확인 필요 |

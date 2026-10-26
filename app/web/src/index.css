@@ -122,3 +122,115 @@ textarea:focus {
   border-radius: 50%;
   animation: spin 900ms linear infinite;
 }
+
+/* 2026-10-27 의뢰인 요청 — 연습 화면 재생 컨트롤을 딱딱한 사각 버튼 대신
+ * 둥근 도형(아이콘)으로. 전역 button 배경/테두리를 빼고 원형 호버 배경만
+ * 남긴다. --play 변형(재생/일시정지)은 포인트색으로 채워 중심을 잡는다. */
+.transport-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  border-radius: 50%;
+  padding: 0;
+  color: var(--text);
+  cursor: pointer;
+  transition:
+    background-color 200ms ease,
+    opacity 200ms ease;
+}
+
+.transport-btn:hover:not(:disabled) {
+  background: var(--surface-2);
+}
+
+.transport-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.transport-btn--play {
+  background: var(--accent);
+  color: var(--bg);
+}
+
+.transport-btn--play:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent) 82%, black 18%);
+}
+
+/* 2026-10-27 의뢰인 요청 — 믹서 슬라이더: 트랙은 얇게, 손잡이는 길쭉한
+ * 타원으로. 네이티브 range의 트랙·손잡이는 표준 CSS로 못 바꿔 브라우저별
+ * 의사 요소를 각각 스타일링해야 한다(webkit/moz). */
+input[type='range'].mixer-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 120px;
+  height: 20px;
+  background: transparent;
+  cursor: pointer;
+}
+
+input[type='range'].mixer-slider::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--border);
+}
+
+input[type='range'].mixer-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 10px;
+  height: 20px;
+  margin-top: -8px;
+  border-radius: 5px;
+  background: var(--accent);
+  cursor: pointer;
+}
+
+input[type='range'].mixer-slider::-moz-range-track {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--border);
+}
+
+input[type='range'].mixer-slider::-moz-range-thumb {
+  width: 10px;
+  height: 20px;
+  border: none;
+  border-radius: 5px;
+  background: var(--accent);
+  cursor: pointer;
+}
+
+/* 2026-10-27 의뢰인 요청 — 믹서 "M" 체크박스를 Mute 버튼으로. 꺼짐/켜짐을
+ * 색으로도 구분(음소거 중엔 danger색 채움). */
+.mute-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  padding: 2px 8px;
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  cursor: pointer;
+  transition:
+    background-color 200ms ease,
+    border-color 200ms ease,
+    color 200ms ease;
+}
+
+.mute-btn:hover {
+  border-color: var(--text-muted);
+}
+
+.mute-btn--active {
+  background: var(--danger);
+  border-color: var(--danger);
+  color: var(--bg);
+}
+
+.mute-btn--active:hover {
+  border-color: var(--danger);
+}
