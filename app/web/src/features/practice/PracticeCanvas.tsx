@@ -239,7 +239,14 @@ export function PracticeCanvas({
     if (songId === undefined) return
     const stemKinds = availableAudioKinds.filter((kind) => kind !== 'original')
     for (const kind of stemKinds) {
-      void fetch(songAudioUrl(songId, kind)).catch(() => {})
+      // 모드A 지적(Medium, C-001) — body를 안 읽으면 fetch()는 헤더만 받고도
+      // resolve되므로, 브라우저가 실제 전송을 끝까지 안 하고 중간에 끊어도
+      // 알 방법이 없다(캐시 예열이 안 보장됨). .arrayBuffer()로 본문을 끝까지
+      // 받아 버림으로써 전체 다운로드 완료를 강제한다(받은 내용 자체는
+      // 안 씀 — 목적이 캐시 예열이라 그걸로 충분).
+      void fetch(songAudioUrl(songId, kind))
+        .then((response) => response.arrayBuffer())
+        .catch(() => {})
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [songId, availableAudioKindsKey])
