@@ -433,10 +433,16 @@ def get_song_audio(
     # 끊길 여지가 생긴다. 이 song_id의 이 kind 파일은 **절대 안 바뀐다**는
     # 걸 코드로 확인함(`POST /songs/audio`가 새 Song 생성 시 JobType.SEPARATE를
     # 딱 한 번만 큐에 넣음 — 기존 곡을 재분리해 같은 경로를 덮어쓰는 엔드포인트
-    # 자체가 없음, grep으로 전체 API 확인). 그래서 `immutable`로 안전하게
-    # 장기 캐싱 가능 — 프런트의 재생 전 프리페치(PracticeCanvas.tsx)와 합쳐져
-    # 재생 시점엔 네트워크 왕복이 아예 없어짐.
-    headers = {"Cache-Control": "private, max-age=31536000, immutable"}
+    # 자체가 없음, grep으로 전체 API 확인).
+    # 모드A 지적(필수, 반영함) — 1년 `immutable`은 `private`라도 "로그인한
+    # 이 브라우저의 로컬 캐시"엔 그대로 남는다(RFC 9111 §5.2.2.7 — private는
+    # 공유 캐시 금지일 뿐 비공개를 보장 안 함). 관리자가 계정을 정지하면
+    # "다음 요청부터 바로" 막혀야 한다는 기존 요구(REQ-08, wiki/architecture.md)와
+    # 충돌 — 로그아웃·계정 정지 후에도 캐시된 오디오를 계속 재생할 수 있게
+    # 됨. `max-age`를 한 연습 세션(수십 분) 정도로 짧게 줄이고 `immutable`은
+    # 뺌 — 세션 내 재생 중 재요청은 여전히 막으면서, 정지 뒤 노출 창을 1시간
+    # 으로 제한.
+    headers = {"Cache-Control": "private, max-age=3600"}
     return FileResponse(path, media_type=media_type, headers=headers)
 
 
