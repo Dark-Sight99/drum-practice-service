@@ -12,6 +12,7 @@ import type { DrumScore } from '../../score/types'
 import { filterSongs } from './filterSongs'
 import { UploadScreen } from '../upload/UploadScreen'
 import { Toast } from '../../components/Toast'
+import { SongCardSkeleton } from '../../components/Skeleton'
 
 export interface LibraryScreenProps {
   onOpenSong: (song: SongSummary, drumScore: DrumScore) => void
@@ -192,7 +193,15 @@ export function LibraryScreen({ onOpenSong, onEditSong, onLoggedOut }: LibrarySc
       />
 
       {error && <p style={{ color: 'var(--danger)' }}>{error}</p>}
-      {loading && <p style={{ color: 'var(--text-muted)' }}>불러오는 중…</p>}
+      {loading && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
+          {/* 2026-10-26 의뢰인 요청 — "불러오는 중…" 문구 대신 스켈레톤. 몇 줄이
+           * 뜰지 미리 알 수 없어 적당한 개수(5)만 흉내낸다. */}
+          {Array.from({ length: 5 }, (_, i) => (
+            <SongCardSkeleton key={i} />
+          ))}
+        </div>
+      )}
       {!loading && visibleSongs.length === 0 && (
         <p style={{ color: 'var(--text-muted)' }}>
           {songs.length === 0 ? '아직 업로드한 곡이 없습니다.' : '검색 결과가 없습니다.'}
@@ -202,9 +211,27 @@ export function LibraryScreen({ onOpenSong, onEditSong, onLoggedOut }: LibrarySc
       <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
         {visibleSongs.map((song) => {
           const isReady = song.status === 'completed'
+          const isRenaming = renamingId === song.id
+          // 2026-10-26 의뢰인 요청 — 카드 빈 곳을 눌러도 연주 화면으로 이동(지금까지는
+          // 제목 글자만 버튼이었음). 처리가 안 끝났거나(열 게 없음) 이름을 바꾸는
+          // 중이거나(입력창 클릭이 이동으로 오인되면 안 됨) 이미 여는 중이면 비활성.
+          const clickable = isReady && !isRenaming && openingId !== song.id
           return (
             <div
               key={song.id}
+              className={clickable ? 'song-card song-card--clickable' : 'song-card'}
+              role={clickable ? 'button' : undefined}
+              tabIndex={clickable ? 0 : undefined}
+              onClick={clickable ? () => void handleOpen(song) : undefined}
+              onKeyDown={
+                clickable
+                  ? (e) => {
+                      if (e.key !== 'Enter' && e.key !== ' ') return
+                      e.preventDefault()
+                      void handleOpen(song)
+                    }
+                  : undefined
+              }
               style={{
                 display: 'flex',
                 alignItems: 'center',
@@ -216,40 +243,21 @@ export function LibraryScreen({ onOpenSong, onEditSong, onLoggedOut }: LibrarySc
               }}
             >
               <div style={{ flex: 1, minWidth: 0 }}>
-                {renamingId === song.id ? (
+                {isRenaming ? (
                   <input
                     value={renameValue}
                     onChange={(e) => setRenameValue(e.target.value)}
                     onBlur={() => void commitRename(song.id)}
+                    onClick={(e) => e.stopPropagation()}
                     onKeyDown={(e) => {
+                      e.stopPropagation()
                       if (e.key === 'Enter') void commitRename(song.id)
                       if (e.key === 'Escape') setRenamingId(null)
                     }}
                     // eslint-disable-next-line jsx-a11y/no-autofocus -- 인라인 이름변경 진입 시 바로 타이핑
                     autoFocus
                   />
-                ) : isReady ? (
-                  <button
-                    onClick={() => void handleOpen(song)}
-                    disabled={openingId === song.id}
-                    style={{
-                      background: 'none',
-                      border: 'none',
-                      color: 'var(--text)',
-                      textAlign: 'left',
-                      padding: 0,
-                      font: 'inherit',
-                      cursor: 'pointer',
-                    }}
-                  >
-                    <strong>{song.title}</strong>
-                    {song.artist && (
-                      <span style={{ color: 'var(--text-muted)' }}> — {song.artist}</span>
-                    )}
-                  </button>
                 ) : (
-                  // 처리가 아직 안 끝난 곡은 눌러도 열 게 없으므로(DrumScore가
-                  // 없음) 버튼이 아니라 그냥 글자로 — 실수로 눌러도 에러가 안 남.
                   <span>
                     <strong>{song.title}</strong>
                     {song.artist && (
@@ -265,7 +273,14 @@ export function LibraryScreen({ onOpenSong, onEditSong, onLoggedOut }: LibrarySc
                   </span>
                 </div>
               </div>
-              <div style={{ display: 'flex', gap: 'var(--space-1)' }}>
+              {/* 카드 전체가 클릭 영역이라, 여기 버튼들의 클릭·키 입력은 카드로
+               * 안 퍼지게(stopPropagation) 막아야 "편집" 등을 눌렀는데 동시에
+               * 연주 화면으로도 넘어가는 일이 없다. */}
+              <div
+                style={{ display: 'flex', gap: 'var(--space-1)' }}
+                onClick={(e) => e.stopPropagation()}
+                onKeyDown={(e) => e.stopPropagation()}
+              >
                 <button
                   onClick={() => void handleEdit(song)}
                   disabled={!isReady || openingId === song.id}

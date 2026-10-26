@@ -6,6 +6,7 @@ import { LoginScreen } from './features/auth/LoginScreen'
 import { LibraryScreen } from './features/library/LibraryScreen'
 import { PracticeCanvas } from './features/practice/PracticeCanvas'
 import { EditorScreen } from './features/editor/EditorScreen'
+import { Skeleton } from './components/Skeleton'
 import type { DrumScore } from './score/types'
 
 // 라우팅 라이브러리 없이 상태로 화면을 전환한다 — 화면 수가 적고 URL 딥링크
@@ -42,7 +43,26 @@ function App() {
   }, [])
 
   if (screen === 'checking') {
-    return <main style={{ background: 'var(--bg)', color: 'var(--text)', minHeight: '100vh' }} />
+    // 2026-10-26 의뢰인 요청 — 로그인 상태 확인 중 빈 화면 대신 스켈레톤.
+    // 로그인/라이브러리 어느 쪽이 될지 아직 모르므로 특정 레이아웃을 흉내내지
+    // 않고 가벼운 placeholder만 보여준다.
+    return (
+      <main
+        style={{
+          background: 'var(--bg)',
+          color: 'var(--text)',
+          minHeight: '100vh',
+          padding: 16,
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 'var(--space-3)',
+        }}
+      >
+        <Skeleton width={160} height={24} />
+        <Skeleton width="100%" height={48} />
+        <Skeleton width="100%" height={48} />
+      </main>
+    )
   }
 
   if (screen === 'login' || !user) {
