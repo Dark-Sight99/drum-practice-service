@@ -36,6 +36,17 @@
 // 떠 있는 동안"(`AudioTrackPool`)으로 옮겨, 같은 화면에서 재생을 몇 번
 // 반복해도 엘리먼트를 재사용(= 네트워크 재다운로드 없음)하게 한다.
 // `TrackPlayer`는 이제 풀을 받아 세션 범위 동작만 구현하는 얇은 래퍼.
+//
+// T3-16-feedback-7(2026-10-26, work/T3-16-feedback-7/plan.md, 모드C 검수
+// 완료) — T3-16-feedback-6 이후에도, 재생이 아직 버퍼링 안 된 지점을
+// 넘어서는 순간엔 여전히 네트워크를 타야 해서 그때 끊길 여지가 남아있었음
+// (의뢰인 맥 네트워크 탭 실측 — 재생할 때마다 "0부터 전체"는 아니고
+// "버퍼링된 지점부터 끝까지"만 다시 받는 패턴 확인). 엘리먼트를 서버 URL에
+// 직접 연결해 브라우저의 점진적 스트리밍에 맡기던 걸, `fetch()`로 파일
+// **전체**를 미리 다 받아 blob URL로 바꾼 뒤에야 엘리먼트를 만드는 방식으로
+// 바꿔 — 한 번 다 받힌 트랙은 재생 중 네트워크를 다시는 안 탄다. 그만큼
+// 풀 생성이 비동기(시간이 걸림)가 됐고, `PracticeCanvas.tsx`가 이 로딩 중엔
+// 재생 버튼을 막아둔다(`audioTracksLoading`).
 import * as Tone from 'tone'
 
 /** T3-16-feedback-3 — iPhone/iPod/iPad는 보통 UA에 그대로 찍히지만(일부
@@ -59,6 +70,12 @@ export interface TrackSource {
 interface TrackState {
   kind: string
   element: HTMLAudioElement
+  /** T3-16-feedback-7 — `element.src`로 쓴 blob URL(`URL.createObjectURL()`).
+   * 파일 전체를 `fetch()`로 받은 뒤 로컬 Blob으로 바꿔 만든 것이라, 브라우저
+   * 메모리에 참조가 남아있는 한 해제 안 되므로(알려진 blob URL 특성) 풀이
+   * 파괴될 때(`destroy()`/`destroyTrack()`) 반드시 `URL.revokeObjectURL()`로
+   * 해제해야 함. */
+  objectUrl: string
   /** T3-12 — `element`의 디코딩된 출력을 Web Audio 그래프로 연결하는 소스
    * 노드. 한 번 연결되면 그 뒤로 `element`의 소리는 이 노드를 거쳐야만
    * 들린다(스펙 동작) — `gainNode`가 항상 destination에 연결돼 있어야 함.
@@ -98,7 +115,9 @@ interface TrackState {
  * "연습 화면이 이 곡을 보여주는 동안" 단위로 소유한다. `createMediaElementSource()`는
  * 스펙상 엘리먼트당 평생 한 번만 부를 수 있어(두 번째 호출은 InvalidStateError),
  * 여러 재생 세션(`TrackPlayer`)에 걸쳐 엘리먼트를 재사용하려면 이 와이어링도
- * 세션이 아니라 풀이 한 번만 하고 계속 들고 있어야 한다. */
+ * 세션이 아니라 풀이 한 번만 하고 계속 들고 있어야 한다.
+ * T3-16-feedback-7 — 생성이 `fetch()`로 파일 전체를 받는 비동기 작업이라
+ * `createAudioTrackPool()`이 이제 `Promise<AudioTrackPool>`을 돌려준다. */
 export interface AudioTrackPool {
   /** 이 풀이 들고 있는 트랙들(읽기 전용 — 세션은 이 배열의 객체를 직접
    * 참조해서 읽고 쓴다, 복사하지 않음. `unlocked` 같은 풀 스코프 필드가
@@ -110,12 +129,46 @@ export interface AudioTrackPool {
    * 진행 중인 호출이 있으면 같은 Promise를 공유(중복 play()/pause() 방지). */
   prime(): Promise<{ kind: string; ok: boolean }[]>
   /** 풀 자체를 파괴 — 모든 엘리먼트를 멈추고 Web Audio 노드를 끊고
-   * `src`를 비운다. 연습 화면을 벗어나거나(언마운트) 곡이 바뀔 때만
-   * 호출(세션이 끝날 때마다가 아님 — 그건 `TrackPlayer.reset()`). */
+   * `src`를 비우고 blob URL을 해제한다. 연습 화면을 벗어나거나(언마운트)
+   * 곡이 바뀔 때만 호출(세션이 끝날 때마다가 아님 — 그건
+   * `TrackPlayer.reset()`). */
   destroy(): void
 }
 
-export function createAudioTrackPool(sources: TrackSource[]): AudioTrackPool {
+/** T3-16-feedback-7 — 트랙 하나를 완전히 정리(일시정지·Web Audio 노드
+ * disconnect·src 비움·blob URL 해제). `destroy()`(풀 전체 파괴)와 생성
+ * 도중 일부만 성공한 트랙의 즉시 정리 둘 다 이 함수를 쓴다 — 트랙 하나
+ * 정리가 실패해도(예: currentTime 대입이 미디어 준비 전이라 던짐) 나머지
+ * 단계는 계속 진행하도록 단계마다 독립적으로 감싼다(모드C 3라운드 C-008). */
+function destroyTrack(track: TrackState): void {
+  try {
+    track.element.pause()
+  } catch {
+    /* 무시 — 다음 정리 단계는 계속 진행 */
+  }
+  try {
+    track.gainNode?.disconnect()
+  } catch {
+    /* 무시 */
+  }
+  try {
+    track.sourceNode?.disconnect()
+  } catch {
+    /* 무시 */
+  }
+  try {
+    track.element.src = ''
+  } catch {
+    /* 무시 */
+  }
+  try {
+    URL.revokeObjectURL(track.objectUrl)
+  } catch {
+    /* 무시 */
+  }
+}
+
+export async function createAudioTrackPool(sources: TrackSource[]): Promise<AudioTrackPool> {
   // T3-12 — Tone.js가 synth_drums/metronome에 이미 쓰고 있는 것과 같은
   // AudioContext를 공유(실제 설치된 Tone.js 15.1.22 타입 선언으로
   // `Context.rawContext`가 네이티브 `AudioContext`를 돌려줌을 확인) — 이
@@ -132,63 +185,81 @@ export function createAudioTrackPool(sources: TrackSource[]): AudioTrackPool {
   // 바뀔 리 없으므로 세션마다 다시 판별할 필요 없음(모드C 1라운드 확인).
   const useWebAudioForVolume = isIOS()
 
-  // 모드C 3라운드 지적(Medium, C-008) — 트랙 생성 도중 하나라도 던지면(예:
-  // Web Audio 노드 생성 실패) 그때까지 만든 트랙만 정리(일시정지·노드
-  // disconnect·src 비움)하고 다시 던진다 — 호출자(PracticeCanvas.tsx)가
-  // 실패를 알아야 하고, 일부만 만들어진 채 새는 리소스가 없어야 한다.
-  const tracks: TrackState[] = []
-  try {
-    for (const source of sources) {
-      const element = new Audio(source.url)
-      element.preload = 'auto'
-      if (!useWebAudioForVolume) {
-        tracks.push({
-          kind: source.kind,
-          element,
-          sourceNode: null,
-          gainNode: null,
-          unlocked: false,
-          started: false,
-        })
-        continue
-      }
-      // 모드A 지적(필수, 반영함) — 이 트랙 자체(createMediaElementSource는
-      // 성공했는데 createGain()/connect()가 실패하는 경우 등)가 완성되기
-      // 전에 던지면, 아직 `tracks.push()` 전이라 바깥 catch의 정리 루프가
-      // 이 트랙을 못 본다 — element·부분적으로 만들어진 sourceNode가 그대로
-      // 샌다. 트랙 하나 단위로 즉시 정리하고 다시 던져서, 바깥 catch는
-      // "이전까지 이미 완성된 트랙들"만 정리하면 되게 한다.
-      let sourceNode: MediaElementAudioSourceNode | null = null
-      try {
-        sourceNode = context.createMediaElementSource(element)
-        const gainNode = context.createGain()
-        sourceNode.connect(gainNode)
-        gainNode.connect(context.destination)
-        tracks.push({ kind: source.kind, element, sourceNode, gainNode, unlocked: false, started: false })
-      } catch (err) {
-        try {
-          element.pause()
-        } catch {
-          /* 무시 */
-        }
-        try {
-          sourceNode?.disconnect()
-        } catch {
-          /* 무시 */
-        }
-        try {
-          element.src = ''
-        } catch {
-          /* 무시 */
-        }
-        throw err
+  // T3-16-feedback-7 — 트랙 하나를 "서버 URL에서 전체를 fetch() → blob URL로
+  // 바꿔 엘리먼트 생성"까지 만든다. T3-16-feedback-4 모드A 지적(C-001)에서
+  // 이미 확인한 교훈 재사용 — fetch()는 헤더만 받아도 resolve되므로
+  // `.blob()`으로 본문을 끝까지 소비해야 전체 다운로드가 보장된다. 같은
+  // 출처 요청이라 fetch()의 기본 credentials(same-origin)로 인증 쿠키가
+  // 자동 포함됨 — T3-16-feedback-4의 프리페치 fetch()도 같은 인증 필요
+  // 엔드포인트에서 이미 정상 동작(401 없이 디스크 캐시 적중까지 실측
+  // 확인)했던 전례가 있어 추측이 아님. 트랙 자신의 생성이 중간에 실패하면
+  // (Web Audio 노드 생성 실패 등) 그 자리에서 즉시 자기 정리(`destroyTrack`
+  // 재사용)하고 다시 던진다 — 모드A 지적 패턴 재사용.
+  async function buildTrack(source: TrackSource): Promise<TrackState> {
+    const response = await fetch(source.url)
+    if (!response.ok) {
+      throw new Error(`오디오 트랙을 받지 못함(${source.kind}): HTTP ${response.status}`)
+    }
+    const blob = await response.blob()
+    const objectUrl = URL.createObjectURL(blob)
+    const element = new Audio(objectUrl)
+    element.preload = 'auto'
+    if (!useWebAudioForVolume) {
+      return {
+        kind: source.kind,
+        element,
+        objectUrl,
+        sourceNode: null,
+        gainNode: null,
+        unlocked: false,
+        started: false,
       }
     }
-  } catch (err) {
+    // sourceNode는 try 블록 밖에서 선언 — createGain()이 createMediaElementSource()
+    // 성공 "이후"에 실패하는 경우, catch에서도 이미 만들어진 실제 sourceNode를
+    // 참조해 정리해야 한다(null을 넘기면 disconnect()가 안 불려 노드가 샘).
+    let sourceNode: MediaElementAudioSourceNode | null = null
+    try {
+      sourceNode = context.createMediaElementSource(element)
+      const gainNode = context.createGain()
+      sourceNode.connect(gainNode)
+      gainNode.connect(context.destination)
+      return { kind: source.kind, element, objectUrl, sourceNode, gainNode, unlocked: false, started: false }
+    } catch (err) {
+      destroyTrack({
+        kind: source.kind,
+        element,
+        objectUrl,
+        sourceNode,
+        gainNode: null,
+        unlocked: false,
+        started: false,
+      })
+      throw err
+    }
+  }
+
+  // 모드C 지적(C-001) — 트랙들을 병렬로 fetch()하되(순차면 대기 시간이
+  // 트랙 수만큼 늘어남), `Promise.allSettled`로 **전부** 끝날 때까지 기다린
+  // 뒤 판단한다(`Promise.all`로 첫 실패에서 바로 reject하면, 그 뒤에도 계속
+  // 진행 중이던 다른 트랙의 fetch가 나중에 끝나며 만든 blob URL을 아무도
+  // 추적·해제 못 해 샐 수 있음). 하나라도 실패하면 이미 성공한 트랙들을
+  // 전부 정리(blob URL 해제 포함)하고 다시 던진다.
+  const settled = await Promise.allSettled(sources.map(buildTrack))
+  const tracks: TrackState[] = []
+  let firstError: unknown
+  for (const result of settled) {
+    if (result.status === 'fulfilled') {
+      tracks.push(result.value)
+    } else if (firstError === undefined) {
+      firstError = result.reason
+    }
+  }
+  if (firstError !== undefined) {
     for (const track of tracks) {
       destroyTrack(track)
     }
-    throw err
+    throw firstError
   }
 
   let destroyed = false
@@ -220,32 +291,6 @@ export function createAudioTrackPool(sources: TrackSource[]): AudioTrackPool {
       return await primePromise
     } finally {
       primePromise = null
-    }
-  }
-
-  function destroyTrack(track: TrackState): void {
-    // 모드C 3라운드 지적(Medium, C-008 재사용) — 트랙 하나 정리가 실패해도
-    // (예: currentTime 대입이 미디어 준비 전이라 던짐) 나머지 트랙 정리가
-    // 막히지 않게 트랙마다 독립적으로 감싼다.
-    try {
-      track.element.pause()
-    } catch {
-      /* 무시 — 다음 정리 단계는 계속 진행 */
-    }
-    try {
-      track.gainNode?.disconnect()
-    } catch {
-      /* 무시 */
-    }
-    try {
-      track.sourceNode?.disconnect()
-    } catch {
-      /* 무시 */
-    }
-    try {
-      track.element.src = ''
-    } catch {
-      /* 무시 */
     }
   }
 

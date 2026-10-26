@@ -237,32 +237,59 @@ export function PracticeCanvas({
   // 엘리먼트를 계속 씀 — 모드C 3라운드 검수 완료(엘리먼트당
   // createMediaElementSource() 1회 제약, 비동기 prime() 경쟁 상태, 정리 중
   // 예외 격리 등 반영).
+  //
+  // T3-16-feedback-7(네트워크, 2026-10-26, work/T3-16-feedback-7/plan.md,
+  // 모드C 검수 완료) — T3-16-feedback-6 이후에도, 재생이 아직 버퍼링 안 된
+  // 지점을 넘어서는 순간엔 여전히 끊길 여지가 있었음(의뢰인 재측정) —
+  // `createAudioTrackPool()`이 이제 파일 전체를 미리 다 받은 뒤(비동기)에만
+  // 풀을 돌려준다. 그 로딩이 끝날 때까지 재생 버튼을 막는다
+  // (`audioTracksLoading`). 모드C 지적(C-002/C-004) 반영 — 곡을 빠르게 바꾸면
+  // (이펙트가 cleanup된 뒤 이전 곡의 fetch가 늦게 끝남) `cancelled` 플래그로
+  // 막되, 이 플래그는 이펙트 호출마다 새로 만드는 지역 변수라 "이전 곡"과
+  // "현재 곡"의 상태를 자동으로 분리한다(다른 곡의 로딩 상태를 잘못 false로
+  // 내리는 일이 없음) — ref 대입뿐 아니라 `setAudioTracksLoading` 호출도
+  // 전부 이 가드 뒤에서만 한다.
   const audioTrackPoolRef = useRef<AudioTrackPool | null>(null)
+  const [audioTracksLoading, setAudioTracksLoading] = useState(false)
   const availableAudioKindsKey = availableAudioKinds.join(',')
   useEffect(() => {
+    audioTrackPoolRef.current = null
+    // 직전 곡 이펙트가 로딩 중(true)으로 남겨뒀을 수 있어 매 호출마다 일단
+    // false로 리셋 — 아래에서 실제로 비동기 작업을 시작할 때만 다시 true로
+    // 올린다(이 리셋이 없으면 이전 곡 로딩 중 곡을 바꿨는데 새 곡이 바로
+    // 아래 early return에 걸리는 경우 로딩 표시가 영원히 안 꺼짐).
+    setAudioTracksLoading(false)
     if (songId === undefined) return
     const stemKinds = availableAudioKinds.filter((kind) => kind !== 'original')
     if (stemKinds.length === 0) return // MIDI-only 곡 등 — 만들 트랙 자체가 없음
-    // 모드C 3라운드 지적(Medium, C-008) — 풀 생성 도중 일부 트랙만 만들고
-    // 실패하면(이미 만든 건 createAudioTrackPool() 내부에서 정리하고 다시
-    // 던짐) 여기서 받아 조용히 포기 — 화면 자체는 안 깨지고, handlePlay()가
-    // 보는 "풀이 없음"은 기존에 이미 있던 canUseAudioTracks=false(MIDI-only
-    // 등) 경로와 같은 모양이라 자연스럽게 "오디오 트랙 없이 신스만 재생"으로
-    // 폴백된다.
-    let pool: AudioTrackPool
-    try {
-      pool = createAudioTrackPool(
-        stemKinds.map((kind) => ({ kind, url: songAudioUrl(songId, kind) })),
-      )
-    } catch (err) {
-      // eslint-disable-next-line no-console
-      console.error('오디오 트랙 풀 생성 실패 — 이 세션은 신스 드럼만 재생됩니다', err)
-      return
-    }
-    audioTrackPoolRef.current = pool
+    let cancelled = false
+    setAudioTracksLoading(true)
+    createAudioTrackPool(stemKinds.map((kind) => ({ kind, url: songAudioUrl(songId, kind) })))
+      .then((pool) => {
+        if (cancelled) {
+          // 이미 다른 곡으로 넘어갔거나 화면을 떠남 — 이 결과는 안 쓰고
+          // 바로 파괴(모드C 지적 C-002).
+          pool.destroy()
+          return
+        }
+        audioTrackPoolRef.current = pool
+        setAudioTracksLoading(false)
+      })
+      .catch((err) => {
+        if (cancelled) return
+        // 모드C 3라운드(T3-16-feedback-6) 지적 패턴 재사용 — 조용히 포기,
+        // handlePlay()가 보는 "풀이 없음"은 기존 canUseAudioTracks=false
+        // (MIDI-only 등) 경로와 같은 모양이라 신스만 재생되는 폴백으로
+        // 자연스럽게 이어짐. 다만 로딩 상태는 실패해도 반드시 풀어야
+        // 재생 버튼이 영원히 "불러오는 중"에 안 멈춘다(모드C 지적 C-003).
+        // eslint-disable-next-line no-console
+        console.error('오디오 트랙 풀 생성 실패 — 이 세션은 신스 드럼만 재생됩니다', err)
+        setAudioTracksLoading(false)
+      })
     return () => {
+      cancelled = true
+      audioTrackPoolRef.current?.destroy()
       audioTrackPoolRef.current = null
-      pool.destroy()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [songId, availableAudioKindsKey])
@@ -1082,7 +1109,10 @@ export function PracticeCanvas({
          * 분기로 재개), 재생 중이면 handlePause() — 기존 로직 무변경, 버튼
          * 묶음만 재구성. "▶ 재생" 쪽만 `isStarting`일 때 비활성화(모드A
          * 지적 — handlePlay()의 새 세션 경로가 비동기라 연타하면 세션
-         * 생성이 겹쳐 돈다, 위 isStartingRef 선언부 참고). */}
+         * 생성이 겹쳐 돈다, 위 isStartingRef 선언부 참고). T3-16-feedback-7 —
+         * `audioTracksLoading`도 같이 막음(오디오 스템 전체 다운로드가 아직
+         * 안 끝남). 일시정지→재개 경로는 이미 한 번 성공적으로 시작된
+         * 세션이라 그 시점엔 로딩이 이미 끝나 있었을 수밖에 없어 안전. */}
         <div style={{ display: 'flex', gap: 'var(--space-2)' }}>
           <button onClick={() => handleSeek(-10)} disabled={!isPlaying && !isPaused}>
             ◀◀ 10초
@@ -1090,8 +1120,8 @@ export function PracticeCanvas({
           {isPlaying ? (
             <button onClick={handlePause}>⏸ 일시정지</button>
           ) : (
-            <button onClick={handlePlay} disabled={isStarting}>
-              ▶ 재생
+            <button onClick={handlePlay} disabled={isStarting || audioTracksLoading}>
+              {audioTracksLoading ? '⏳ 음원 불러오는 중…' : '▶ 재생'}
             </button>
           )}
           <button onClick={() => handleSeek(10)} disabled={!isPlaying && !isPaused}>
