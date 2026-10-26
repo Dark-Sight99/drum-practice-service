@@ -57,9 +57,16 @@ export function LibraryScreen({ onOpenSong, onEditSong, onLoggedOut }: LibrarySc
   // 매 완료마다 증가하는 id를 key로 줘서 항상 새 인스턴스로 마운트시킨다.
   const [toast, setToast] = useState<{ id: number; message: string } | null>(null)
   const toastIdRef = useRef(0)
-  const [songs, setSongs] = useState<SongSummary[]>([])
-  const [loading, setLoading] = useState(true)
+  // 모드A 4차 재검토 지적(필수 1건 + 리스크 의견 1건, 반영) — "로딩 끝"을
+  // 별도의 loading state로 두고 reload()/silentReload() 양쪽이 각자 세대
+  // 번호·useEffect로 동기화한 ref까지 맞물려 토글하던 구조가, 네 라운드에
+  // 걸쳐 경계 사례(성공 경합·실패 경합·ref가 useEffect 타이밍차로 묵은 값을
+  // 읽는 경우)를 하나씩 놓치며 계속 구멍이 났다 — "아직 한 번도 못 불러왔다"는
+  // 사실 자체를 songs=null로 표현하면 loading은 그로부터 그냥 계산해낼 수
+  // 있어(파생값, 별도 state 불필요) 어긋날 여지가 원천적으로 없어진다.
+  const [songs, setSongs] = useState<SongSummary[] | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const loading = songs === null && error === null
   const [query, setQuery] = useState('')
   const [renamingId, setRenamingId] = useState<number | null>(null)
   const [renameValue, setRenameValue] = useState('')
@@ -69,71 +76,46 @@ export function LibraryScreen({ onOpenSong, onEditSong, onLoggedOut }: LibrarySc
   // 폴링 2초 간격 도중 다른 reload()가 또 불리는 경우 등). 응답이 요청 순서와
   // 다르게 도착하면(네트워크 지연) 더 오래된 응답이 나중에 와서 이미 최신으로
   // 갱신된 songs를 옛 상태로 덮어쓸 수 있었음(예: 완료된 곡이 다시 "처리 중"으로
-  // 보임) — 두 함수가 세대 번호를 공유해, 자기 호출 이후 더 최신 호출이
-  // 있었으면 응답을 무시한다(UploadScreen의 submitGenerationRef와 같은 패턴).
+  // 보임) — 세대 번호를 공유해, 자기 호출 이후 더 최신 호출이 있었으면
+  // 응답을 무시한다(UploadScreen의 submitGenerationRef와 같은 패턴).
   const songsFetchGenerationRef = useRef(0)
-  // 모드A 재검토 지적(필수, 반영) — silentReload()가 "최초 로딩이 아직 안
-  // 끝난(loading===true) 바로 그 요청"으로서 실패하는 경우를 구분하려고
-  // loading의 최신 값을 ref로도 들고 있는다(PracticeCanvas의 mixerStateRef와
-  // 같은 패턴 — 클로저 안에서 state의 최신 값을 읽기 위함).
-  const loadingRef = useRef(loading)
-  useEffect(() => {
-    loadingRef.current = loading
-  }, [loading])
+  // songs state의 "지금 당장" 값을 미러 — 과거엔 이걸 useEffect로 동기화
+  // 했는데(모드A 4차 재검토 지적), setState 호출과 effect 실행 사이에 생기는
+  // 비동기 틈 사이로 다른 응답의 catch가 끼어들면 묵은 값을 읽을 수 있었다.
+  // 여기선 setSongs를 부르는 바로 그 자리에서 함께 갱신해 그 틈 자체가
+  // 없다.
+  const songsRef = useRef<SongSummary[] | null>(null)
 
-  async function reload() {
+  // 2026-10-26/27 의뢰인 요청 — 목록을 (다시) 불러온다. silent=false(reload,
+  // 마운트·업로드 직후)는 실패를 에러 배너로 보여준다. silent=true(배경
+  // 폴링)는 "이미 목록이 떠 있는 상태"의 일시적 실패를 조용히 무시하고 다음
+  // 폴링에서 재시도한다 — 단, 아직 한 번도 못 불러온 상태(songsRef.current
+  // ===null)에서 실패하면 silent 여부와 무관하게 에러를 보여준다(그렇지
+  // 않으면 아무도 안 꺼내주는 스켈레톤만 영원히 남는다 — 배경 폴링 자체도
+  // songs가 비어 있는 한 시작을 안 해 재시도 기회조차 없음, 모드A 4차
+  // 재검토 지적).
+  async function fetchSongs({ silent }: { silent: boolean }) {
     const generation = ++songsFetchGenerationRef.current
-    setLoading(true)
-    setError(null)
     try {
       const latest = await listSongs()
       if (generation !== songsFetchGenerationRef.current) return
+      songsRef.current = latest
       setSongs(latest)
-      setLoading(false)
+      setError(null)
     } catch (err) {
       if (generation !== songsFetchGenerationRef.current) return
-      setError(err instanceof ApiError ? err.message : '목록을 불러오지 못했습니다')
-      setLoading(false)
+      if (!silent || songsRef.current === null) {
+        setError(err instanceof ApiError ? err.message : '목록을 불러오지 못했습니다')
+      }
     }
   }
 
-  // 2026-10-26 의뢰인 요청 — "처리 중" 곡이 완료돼도 사용자가 직접 새로고침을
-  // 눌러야만 반영됐었다. loading을 스스로 true로 켜진 않는(= 떠 있던 스켈레톤을
-  // 다시 띄우진 않는) 조용한 새로고침 — 배경 폴링과 업로드 직후(onSongCreated)에
-  // 쓴다. 실패해도 에러 화면을 띄우지 않고 다음 폴링에서 다시 시도(목록이 이미
-  // 떠 있는 상태에서 일시적 네트워크 오류로 화면 전체를 에러로 덮을 필요는 없음).
-  //
-  // 모드A 재검토 지적(필수, 반영) — reload()가 아직 응답 전인데 이 함수가
-  // 먼저 최신 데이터를 들고 성공하는 경우(세대 번호가 더 최신이 됨), 그 뒤
-  // reload()의 원래 응답은 세대 불일치로 무시되는데, 거기서만 setLoading(false)를
-  // 걸어뒀더니 그 "무시"가 loading 해제까지 같이 건너뛰어 스켈레톤이 영원히
-  // 안 사라지는 버그였다 — "로딩 끝"은 reload()가 자기 응답을 처리할 때가
-  // 아니라 "songs에 실제로 최신 데이터가 반영되는 바로 그 순간"에 걸려야
-  // 맞는다. 그래서 silentReload() 쪽도 자기 세대가 여전히 최신일 때(=자기
-  // 응답을 실제로 반영할 때) loading을 꺼준다 — "안 켠다"는 원칙은 그대로
-  // 지키고 "꺼야 할 때 꺼준다"만 추가.
-  async function silentReload() {
-    const generation = ++songsFetchGenerationRef.current
-    try {
-      const latest = await listSongs()
-      if (generation !== songsFetchGenerationRef.current) return
-      setSongs(latest)
-      setLoading(false)
-    } catch {
-      // 모드A 재검토 지적(필수, 반영) — 배경 폴링은 songs가 비어 있는 한
-      // 시작도 안 하므로(아래 폴링 effect의 hasPending 조건), 이 catch가
-      // "최초 로딩이 아직 안 끝난" 상태로 불릴 수 있는 유일한 경로는
-      // onSongCreated처럼 reload()가 아직 응답 전인데 먼저 실패하는
-      // 좁은 창뿐이다 — 그땐 reload()와 똑같이 에러로 전환해야 스켈레톤이
-      // 영원히 안 걷히는 걸 막는다. 이미 목록이 떠 있는 상태(loading이
-      // 이미 false)의 배경 폴링 실패는 기존 원칙대로 조용히 무시 — 다음
-      // 폴링에서 재시도(일시적 오류로 이미 보여주던 목록 위에 에러를 덮지
-      // 않음).
-      if (generation === songsFetchGenerationRef.current && loadingRef.current) {
-        setError('목록을 불러오지 못했습니다')
-        setLoading(false)
-      }
-    }
+  function reload() {
+    return fetchSongs({ silent: false })
+  }
+
+  function silentReload() {
+    return fetchSongs({ silent: true })
   }
 
   useEffect(() => {
@@ -153,7 +135,9 @@ export function LibraryScreen({ onOpenSong, onEditSong, onLoggedOut }: LibrarySc
   // 자연히 멈춘다 — 업로드 모달을 닫고 나가도(모달과 무관하게 이 화면이 계속
   // 떠 있는 한) 계속 돈다.
   useEffect(() => {
-    const hasPending = songs.some((s) => s.status === 'pending' || s.status === 'processing')
+    const hasPending = (songs ?? []).some(
+      (s) => s.status === 'pending' || s.status === 'processing',
+    )
     if (!hasPending) return
     const timer = setInterval(() => {
       void silentReload()
@@ -200,7 +184,11 @@ export function LibraryScreen({ onOpenSong, onEditSong, onLoggedOut }: LibrarySc
     }
     try {
       const updated = await renameSong(id, { title })
-      setSongs((prev) => prev.map((s) => (s.id === id ? updated : s)))
+      // songsRef도 setSongs와 같은 자리에서 같이 갱신(위 fetchSongs 코멘트의
+      // 불변식 — 미러가 항상 최신이어야 함).
+      const next = (songsRef.current ?? []).map((s) => (s.id === id ? updated : s))
+      songsRef.current = next
+      setSongs(next)
     } catch (err) {
       setError(err instanceof ApiError ? err.message : '이름 변경에 실패했습니다')
     } finally {
@@ -212,7 +200,9 @@ export function LibraryScreen({ onOpenSong, onEditSong, onLoggedOut }: LibrarySc
     if (!window.confirm(`"${song.title}"을(를) 삭제할까요?`)) return
     try {
       await deleteSong(song.id)
-      setSongs((prev) => prev.filter((s) => s.id !== song.id))
+      const next = (songsRef.current ?? []).filter((s) => s.id !== song.id)
+      songsRef.current = next
+      setSongs(next)
     } catch (err) {
       setError(err instanceof ApiError ? err.message : '삭제에 실패했습니다')
     }
@@ -223,7 +213,7 @@ export function LibraryScreen({ onOpenSong, onEditSong, onLoggedOut }: LibrarySc
     onLoggedOut()
   }
 
-  const visibleSongs = filterSongs(songs, query)
+  const visibleSongs = filterSongs(songs ?? [], query)
 
   return (
     <main
@@ -280,7 +270,7 @@ export function LibraryScreen({ onOpenSong, onEditSong, onLoggedOut }: LibrarySc
       )}
       {!loading && visibleSongs.length === 0 && (
         <p style={{ color: 'var(--text-muted)' }}>
-          {songs.length === 0 ? '아직 업로드한 곡이 없습니다.' : '검색 결과가 없습니다.'}
+          {(songs ?? []).length === 0 ? '아직 업로드한 곡이 없습니다.' : '검색 결과가 없습니다.'}
         </p>
       )}
 
