@@ -131,11 +131,33 @@ def _sync_song_status_with_job(db: Session, job: Job) -> None:
     경우를 놓친다. 그래서 "아직 종료 상태(COMPLETED/FAILED)가 아닌 모든 경우"를
     대상으로 넓혔다 — 정상 흐름에서 Job이 끝나는 시점엔 Song이 이미 PROCESSING
     이어야 하므로(해당 핸들러가 가장 먼저 하는 일), PENDING까지 포함해도 정상
-    흐름에서 잘못 발동할 일은 없다."""
+    흐름에서 잘못 발동할 일은 없다.
+
+    T3-19(2026-10-26, Codex 모드A 지적 Medium 반영) — `separate_handler`가
+    분리 성공 시 TRANSCRIBE 작업을 자동으로 이어 큐에 넣게 되면서, "핸들러가
+    끝났는데 Song이 아직 종료 상태가 아니면 버그"라는 이 함수의 원래 전제가
+    더는 항상 참이 아니다 — 체인의 중간 단계(분리는 끝났지만 채보가 아직
+    안 끝난 상태)도 의도적으로 비종료 상태일 수 있다. 그래서 강제로 FAILED
+    처리하기 전에, 이 곡에 대해 아직 대기 중인(QUEUED/PROCESSING) **다른**
+    작업이 있는지 먼저 확인한다 — 있으면 체인이 정상 진행 중이라는 뜻이라
+    그대로 둔다(다음에 그 작업이 끝날 때 이 함수가 다시 호출돼 그때 가서
+    같은 판단을 반복함). 없으면 기존 가정(핸들러가 종료 상태를 못 맞춘
+    버그)이 맞으므로 그대로 FAILED 처리."""
     if job.status not in (JobStatus.COMPLETED, JobStatus.FAILED):
         return
     song = db.get(Song, job.song_id)
     if song is None or song.status in (SongStatus.COMPLETED, SongStatus.FAILED):
+        return
+    pending_job = (
+        db.query(Job)
+        .filter(
+            Job.song_id == song.id,
+            Job.id != job.id,
+            Job.status.in_((JobStatus.QUEUED, JobStatus.PROCESSING)),
+        )
+        .first()
+    )
+    if pending_job is not None:
         return
     song.status = SongStatus.FAILED
     db.commit()

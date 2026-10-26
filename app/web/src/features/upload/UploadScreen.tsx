@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { uploadAudioSong, uploadSong } from '../../api/songs'
 import { ApiError } from '../../api/client'
 import { importScoreFile, validateDrumScore, type DrumScore } from '../../score'
@@ -46,6 +46,17 @@ export function UploadScreen({ open, onUploaded, onCancel }: UploadScreenProps) 
   const [submitError, setSubmitError] = useState<string | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [justUploaded, setJustUploaded] = useState(false)
+  // T3-19 모드A 지적(Low, 반영) — 업로드 성공 직후(마이크로 인터랙션 지연 중)
+  // 사용자가 취소/배경 클릭/Esc로 모달을 닫으면, 안 지워진 타이머가 나중에
+  // 그대로 발동해 resetState()·onUploaded()를 또 부르는 버그가 있었음 — 타이머
+  // id를 들고 있다가 취소 시 확실히 지운다.
+  const successTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  useEffect(() => {
+    return () => {
+      if (successTimerRef.current !== null) clearTimeout(successTimerRef.current)
+    }
+  }, [])
 
   function resetState() {
     setFile(null)
@@ -61,6 +72,10 @@ export function UploadScreen({ open, onUploaded, onCancel }: UploadScreenProps) 
   }
 
   function handleCancel() {
+    if (successTimerRef.current !== null) {
+      clearTimeout(successTimerRef.current)
+      successTimerRef.current = null
+    }
     resetState()
     onCancel()
   }
@@ -102,7 +117,8 @@ export function UploadScreen({ open, onUploaded, onCancel }: UploadScreenProps) 
     // 모달이 스스로 닫히고 라이브러리로 돌아간다.
     setIsSubmitting(false)
     setJustUploaded(true)
-    setTimeout(() => {
+    successTimerRef.current = setTimeout(() => {
+      successTimerRef.current = null
       resetState()
       onUploaded()
     }, 900)

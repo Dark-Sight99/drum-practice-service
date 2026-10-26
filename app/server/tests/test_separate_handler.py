@@ -82,7 +82,10 @@ def test_separate_handler_success_creates_four_stem_assets(db, monkeypatch, tmp_
     handler_module.separate_handler(job)
 
     db.refresh(song)
-    assert song.status == SongStatus.COMPLETED
+    # T3-19 — 분리 성공만으로는 COMPLETED가 되지 않음(채보까지 자동으로 이어지므로
+    # PROCESSING에 머무름) — 별도 테스트(test_separate_handler_success_queues_transcribe_job)
+    # 참고.
+    assert song.status == SongStatus.PROCESSING
     stems = db.query(Asset).filter(Asset.song_id == song.id, Asset.kind != AssetKind.ORIGINAL).all()
     assert {a.kind for a in stems} == {
         AssetKind.STEM_DRUMS,
@@ -178,7 +181,8 @@ def test_separate_handler_succeeds_even_if_drums_mp3_sidecar_encode_fails(
     handler_module.separate_handler(job)
 
     db.refresh(song)
-    assert song.status == SongStatus.COMPLETED
+    # T3-19 — 분리 성공만으로는 COMPLETED가 되지 않음(위 테스트와 같은 사유).
+    assert song.status == SongStatus.PROCESSING
     drums_asset = (
         db.query(Asset)
         .filter(Asset.song_id == song.id, Asset.kind == AssetKind.STEM_DRUMS)

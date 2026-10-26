@@ -228,6 +228,31 @@ def test_sync_song_status_with_job_rescues_song_stuck_processing_after_job_compl
     assert song.status == SongStatus.FAILED
 
 
+def test_sync_song_status_with_job_leaves_song_alone_when_another_job_is_pending(db) -> None:
+    """T3-19(2026-10-26, Codex 모드A 지적 Medium 반영) — 분리 성공 후 채보 작업을
+    자동으로 이어 큐에 넣는 체인에서는, 분리 Job이 COMPLETED로 끝난 시점에
+    Song이 아직 PROCESSING(의도된 상태)이어도 안전망이 FAILED로 강제하면 안
+    된다 — 같은 곡에 대기 중인(QUEUED) 다른 Job이 있으면 체인이 정상 진행
+    중이라는 뜻이라 그대로 둬야 한다."""
+    user, song = _make_user_and_song(db)
+    song.status = SongStatus.PROCESSING
+    db.commit()
+
+    register_handler(JobType.SEPARATE, lambda job: None)  # Song을 PROCESSING에 그대로 둠
+    job = Job(user_id=user.id, song_id=song.id, job_type=JobType.SEPARATE)
+    db.add(job)
+    # 분리 Job과 별개로, 같은 곡에 대한 TRANSCRIBE Job이 이미 큐에 있다고 가정
+    # (실제로는 separate_handler가 스스로 넣음 — 여기선 안전망만 단독으로 검증).
+    db.add(Job(user_id=user.id, song_id=song.id, job_type=JobType.TRANSCRIBE))
+    db.commit()
+
+    result = process_next_job(db)
+
+    assert result.status == JobStatus.COMPLETED
+    db.refresh(song)
+    assert song.status == SongStatus.PROCESSING  # 강제로 FAILED 되지 않음
+
+
 def test_sync_song_status_with_job_rescues_song_stuck_pending(db) -> None:
     """T3-2 모드A 지적(C-003) — 핸들러의 맨 처음 "Song.PROCESSING" 커밋 자체가
     실패하면 Song은 PENDING에 머문 채 Job만 끝날 수 있다. 안전망이

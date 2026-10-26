@@ -93,6 +93,24 @@ describe('UploadScreen (모달)', () => {
     expect(onUploaded).toHaveBeenCalledTimes(1)
   })
 
+  it('모드A 지적(Low, 반영) — 업로드완료 표시 중 배경을 클릭해 취소하면, 지연된 타이머가 나중에 onUploaded를 또 부르지 않음', async () => {
+    const onUploaded = vi.fn()
+    const onCancel = vi.fn()
+    render(<UploadScreen open onUploaded={onUploaded} onCancel={onCancel} />)
+    const input = screen.getByLabelText('파일 선택') as HTMLInputElement
+    selectFile(input, new File(['x'], 'song.mp3', { type: 'audio/mpeg' }))
+
+    fireEvent.click(screen.getByRole('button', { name: '업로드' }))
+    await waitFor(() => expect(uploadAudioSongMock).toHaveBeenCalledTimes(1))
+    await screen.findByRole('button', { name: '업로드완료 ✓' }) // 지연 타이머가 걸린 상태
+
+    fireEvent.click(screen.getByRole('presentation')) // 배경 클릭으로 취소
+    expect(onCancel).toHaveBeenCalledTimes(1)
+
+    vi.advanceTimersByTime(1000) // 원래 타이머가 발동했을 시점
+    expect(onUploaded).not.toHaveBeenCalled() // 취소 후엔 절대 안 불려야 함
+  })
+
   it('디지털 악보 파일을 고르면 클라이언트에서 바로 파싱해 미리보기를 보여줌', async () => {
     importScoreFileMock.mockReturnValue({
       ok: true,
