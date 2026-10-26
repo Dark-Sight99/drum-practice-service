@@ -205,14 +205,12 @@ export function UploadScreen({ open, onUploaded, onCancel }: UploadScreenProps) 
             gap: 'var(--space-1)',
           }}
         >
+          {/* 2026-10-26 — 버튼 호버·트랜지션이 전역 .btn 클래스(index.css)로
+           * 옮겨가서 여기선 포커스 링(상태 기반이라 JS로 유지)만 따로 그린다. */}
           <label
             htmlFor="upload-file-input"
+            className="btn"
             style={{
-              display: 'inline-block',
-              padding: 'var(--space-2) var(--space-3)',
-              border: '1px solid var(--border)',
-              borderRadius: 'var(--radius-control)',
-              cursor: 'pointer',
               outline: fileInputFocused ? '2px solid var(--accent)' : 'none',
               outlineOffset: 2,
             }}

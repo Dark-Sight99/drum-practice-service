@@ -6,4 +6,63 @@
 body {
   margin: 0;
   font-family: -apple-system, system-ui, 'Segoe UI', Roboto, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+}
+
+/* 2026-10-26 의뢰인 요청 — 지금까지 버튼·입력창이 브라우저 기본 스타일 그대로라
+ * 화면마다 따로 손볼 게 아니라 한 번에 전역으로. intent/08-design.md §6
+ * "노트 낙하 외 애니메이션은 200ms 이하" 기준에 맞춰 호버 전환도 200ms.
+ * .btn은 <button>이 아닌 요소(업로드 모달의 파일선택 라벨 등)를 버튼처럼
+ * 보이게 할 때 같이 쓴다. */
+button,
+.btn {
+  font: inherit;
+  color: var(--text);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  padding: var(--space-2) var(--space-3);
+  cursor: pointer;
+  transition:
+    background-color 200ms ease,
+    border-color 200ms ease,
+    color 200ms ease;
+}
+
+button:hover:not(:disabled),
+.btn:hover {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--bg);
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+/* 체크박스·라디오·range 슬라이더·file은 네이티브 모양을 그대로 둔다(둘러싼
+ * 라벨/트랙 쪽에서 이미 따로 간격을 잡고 있어 텍스트 입력창처럼 박스를
+ * 씌우면 오히려 깨져 보임). */
+input:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='file']),
+select,
+textarea {
+  font: inherit;
+  color: var(--text);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  padding: var(--space-2);
+  transition:
+    border-color 200ms ease,
+    box-shadow 200ms ease;
+}
+
+input:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='file']):focus,
+select:focus,
+textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 35%, transparent);
 }

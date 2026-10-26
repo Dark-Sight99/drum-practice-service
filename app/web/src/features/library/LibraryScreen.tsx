@@ -11,6 +11,7 @@ import { ApiError } from '../../api/client'
 import type { DrumScore } from '../../score/types'
 import { filterSongs } from './filterSongs'
 import { UploadScreen } from '../upload/UploadScreen'
+import { Toast } from '../../components/Toast'
 
 export interface LibraryScreenProps {
   onOpenSong: (song: SongSummary, drumScore: DrumScore) => void
@@ -46,6 +47,9 @@ export function LibraryScreen({ onOpenSong, onEditSong, onLoggedOut }: LibrarySc
   // 아니라 모달로 띄운다. 업로드 완료 시 목록을 다시 불러와 새 곡이 바로
   // 보이게 한다.
   const [uploadOpen, setUploadOpen] = useState(false)
+  // 2026-10-26 의뢰인 요청 — 업로드 완료 토스트. 모달은 완료 후 스스로 닫히므로
+  // (onUploaded) 토스트는 모달 바깥(라이브러리 화면)에서 띄운다.
+  const [toastMessage, setToastMessage] = useState<string | null>(null)
   const [songs, setSongs] = useState<SongSummary[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -164,9 +168,14 @@ export function LibraryScreen({ onOpenSong, onEditSong, onLoggedOut }: LibrarySc
         onCancel={() => setUploadOpen(false)}
         onUploaded={() => {
           setUploadOpen(false)
+          setToastMessage('✓ 업로드가 완료되었습니다')
           void reload()
         }}
       />
+
+      {toastMessage && (
+        <Toast message={toastMessage} onDismiss={() => setToastMessage(null)} />
+      )}
 
       <input
         placeholder="제목·아티스트 검색"
