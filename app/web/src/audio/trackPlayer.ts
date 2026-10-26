@@ -8,13 +8,38 @@
 // 않는다(Apple 공식 문서: "The volume property is not settable in JavaScript.
 // Reading the volume property always returns 1." — WebKit 소스에도 이를
 // 강제하는 코드가 있었음, 2022년에야 플랫폼별 플래그로 정리됨). 그래서 이
-// 모듈도 Web Audio API로 옮겨 `GainNode.gain`으로 음량을 조절한다(Tone.js가
-// synth_drums/metronome에 이미 쓰는 것과 같은 방식 — `createDrumVoices()`가
-// 호출하는 `Tone.start()`와 같은 AudioContext를 공유해 이중 unlock이 필요
-// 없음). "순수 HTMLAudioElement 래퍼"였던 전제는 이걸로 깨짐 — play/pause/seek/
-// rate 제어는 여전히 엘리먼트 자신이 맡고(MediaElementAudioSourceNode는 출력
-// *경로*만 바꿀 뿐 재생 제어 API는 그대로), 음량만 GainNode로 이전.
+// 모듈도 Web Audio API로 옮겨 `GainNode.gain`으로 음량을 조절했음(Tone.js가
+// synth_drums/metronome에 이미 쓰는 것과 같은 방식).
+//
+// T3-16-feedback-3(2026-10-26, 의뢰인 피드백 "맥에서 음악이 0.5초마다 끊김") —
+// 그런데 T3-12 당시엔 **아이폰에서만** 이 버그를 확인했지, 맥(데스크톱
+// 사파리)까지 같은 버그가 있는지는 확인한 적이 없었다. 실측해보니(resync()의
+// drift 로그 + 맥에서 직접 청취) 맥에서는 반대로 **Web Audio로 우회한 트랙만
+// 실시간보다 느리게 재생**돼 0.5초 안팎으로 소리가 끊기는 걸 확인 — 격리
+// 테스트(Web Audio만 뺀 트랙은 드리프트가 사라짐, preservesPitch는 무관함을
+// 확인)로 원인이 Web Audio 우회 자체임을 좁혔다. 이건 우리만의 특이 현상이
+// 아니라 같은 구조(스템 여러 개를 MediaElementAudioSourceNode로 재생)의 다른
+// 오픈소스 프로젝트(stemdeckapp/stemdeck)도 겪고 결국 Web Audio를 걷어내고
+// `element.volume`으로 되돌려 고친 사례가 있음(stemdeckapp/stemdeck#38,
+// "createMediaElementSource()가 Safari 네이티브 출력 경로를 깨뜨린다").
+//
+// 그래서 **iOS에서만** Web Audio(GainNode) 경로를 쓰고, 그 외(맥·윈도우 등
+// 데스크톱)는 원래의 `element.volume` 직접 제어로 되돌린다 — 아이폰 볼륨
+// 버그도 여전히 고쳐진 채로, 맥의 재생 지연 문제도 없앤다.
 import * as Tone from 'tone'
+
+/** T3-16-feedback-3 — iPhone/iPod/iPad는 보통 UA에 그대로 찍히지만(일부
+ * 설정·구버전 iPadOS는 "iPad"가 그대로 남음), iPadOS 13+ 기본값은 데스크톱
+ * Safari와 똑같은 UA("Macintosh")를 보내 UA만으론 못 가른다 — 모드A 지적
+ * (2026-10-26, C-001): 처음엔 "iPad" 리터럴 자체를 안 보고 "Macintosh+터치"
+ * 폴백에만 의존해서, UA에 "iPad"가 남아있는 기기를 놓치고 있었음. 두
+ * 가지를 OR로 합쳐 둘 다 잡는다(iPadOS 13+ 위장은 멀티터치로 구분 — Mac은
+ * `maxTouchPoints` 0~1). */
+function isIOS(): boolean {
+  const ua = navigator.userAgent
+  if (/iPhone|iPad|iPod/.test(ua)) return true
+  return ua.includes('Macintosh') && navigator.maxTouchPoints > 1
+}
 
 export interface TrackSource {
   kind: string
@@ -26,10 +51,14 @@ interface TrackState {
   element: HTMLAudioElement
   /** T3-12 — `element`의 디코딩된 출력을 Web Audio 그래프로 연결하는 소스
    * 노드. 한 번 연결되면 그 뒤로 `element`의 소리는 이 노드를 거쳐야만
-   * 들린다(스펙 동작) — `gainNode`가 항상 destination에 연결돼 있어야 함. */
-  sourceNode: MediaElementAudioSourceNode
-  /** T3-12 — 음량 제어 지점(이전엔 `element.volume`이었음, iOS에서 무시됨). */
-  gainNode: GainNode
+   * 들린다(스펙 동작) — `gainNode`가 항상 destination에 연결돼 있어야 함.
+   * T3-16-feedback-3 — iOS가 아니면 애초에 안 만듦(null, 아래
+   * `useWebAudioForVolume` 참고). */
+  sourceNode: MediaElementAudioSourceNode | null
+  /** T3-12 — 음량 제어 지점(이전엔 `element.volume`이었음, iOS에서 무시됨).
+   * T3-16-feedback-3 — null이면(데스크톱) Web Audio를 거치지 않고
+   * element.volume으로 직접 제어(`setChannelGain()` 참고). */
+  gainNode: GainNode | null
   unlocked: boolean
   // T3-6(REQ-04, 모드A 지적 반영) — playFrom()이 이 트랙을 실제로 재생
   // 시작했는지. unlocked는 prime() 성공 여부만 나타내 "카운트인 중 일시정지
@@ -98,9 +127,23 @@ export function createTrackPlayer(sources: TrackSource[]): TrackPlayer {
   // 구성 자체는 바로 되고, 실제로 소리가 나는 시점(훨씬 뒤, Transport가
   // playFrom()을 트리거할 때)엔 이미 resume된 뒤다.
   const context = Tone.getContext().rawContext as unknown as AudioContext
+  // T3-16-feedback-3 — iOS에서만 Web Audio(GainNode) 경로를 쓴다(위 모듈
+  // 상단 주석 참고). 데스크톱은 sourceNode/gainNode가 null이고
+  // setChannelGain()/dispose()가 이를 감지해 element.volume으로 대신 제어.
+  const useWebAudioForVolume = isIOS()
   const tracks: TrackState[] = sources.map((source) => {
     const element = new Audio(source.url)
     element.preload = 'auto'
+    if (!useWebAudioForVolume) {
+      return {
+        kind: source.kind,
+        element,
+        sourceNode: null,
+        gainNode: null,
+        unlocked: false,
+        started: false,
+      }
+    }
     const sourceNode = context.createMediaElementSource(element)
     const gainNode = context.createGain()
     sourceNode.connect(gainNode)
@@ -172,7 +215,14 @@ export function createTrackPlayer(sources: TrackSource[]): TrackPlayer {
     if (!track) return
     // T3-12 — 이전엔 `track.element.volume`(iOS에서 무시됨)이었음. GainNode는
     // Tone.js의 synth_drums/metronome 게인과 같은 선형(0~1) 단위라 변환 불필요.
-    track.gainNode.gain.value = Math.min(1, Math.max(0, gain))
+    // T3-16-feedback-3(진단용, 임시) — gainNode가 null인 트랙(위
+    // DIAG_SKIP_WEBAUDIO_FOR)은 element.volume으로 대신 적용(이 맥 진단
+    // 테스트 중엔 음량이 정확하지 않아도 무방 — 드리프트 로그만 본다).
+    if (track.gainNode) {
+      track.gainNode.gain.value = Math.min(1, Math.max(0, gain))
+    } else {
+      track.element.volume = Math.min(1, Math.max(0, gain))
+    }
   }
 
   function pause(): void {
@@ -212,8 +262,10 @@ export function createTrackPlayer(sources: TrackSource[]): TrackPlayer {
       track.element.src = ''
       // T3-12 — Web Audio 그래프 연결 해제(메모리 누수 방지, Tone 노드가
       // 아닌 네이티브 노드라 `.dispose()`가 아니라 `.disconnect()`).
-      track.gainNode.disconnect()
-      track.sourceNode.disconnect()
+      // T3-16-feedback-3(진단용, 임시) — DIAG_SKIP_WEBAUDIO_FOR 트랙은 애초에
+      // 두 노드가 없음(null).
+      track.gainNode?.disconnect()
+      track.sourceNode?.disconnect()
     }
   }
 
