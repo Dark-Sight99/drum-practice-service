@@ -31,10 +31,23 @@ vi.mock('../../api/auth', () => ({ logout: logoutMock }))
 // UploadScreen.test.tsx에서 이미 검증하므로, 여기선 LibraryScreen이
 // onUploaded를 받았을 때 토스트를 띄우는지만 확인 — UploadScreen을 "완료
 // 버튼"만 있는 자리표시자로 대체.
+// 2026-10-27 — onSongCreated(silentReload 트리거)도 테스트에서 직접 눌러
+// 유발할 수 있게 자리표시자에 버튼을 하나 더 둠(요청 경합 회귀 테스트용).
 vi.mock('../upload/UploadScreen', () => ({
-  UploadScreen: ({ open, onUploaded }: { open: boolean; onUploaded: () => void }) =>
+  UploadScreen: ({
+    open,
+    onUploaded,
+    onSongCreated,
+  }: {
+    open: boolean
+    onUploaded: () => void
+    onSongCreated: () => void
+  }) =>
     open ? (
-      <button onClick={onUploaded}>mock-upload-complete</button>
+      <>
+        <button onClick={onUploaded}>mock-upload-complete</button>
+        <button onClick={onSongCreated}>mock-song-created</button>
+      </>
     ) : null,
 }))
 
@@ -278,5 +291,354 @@ describe('LibraryScreen — 카드 전체 클릭(2026-10-26 의뢰인 요청)', 
     await screen.findByText('테스트곡')
     fireEvent.click(screen.getByText(/BPM 120/))
     expect(onOpenSong).not.toHaveBeenCalled()
+  })
+})
+
+describe('LibraryScreen — 목록 새로고침 경합(모드A 지적 반영)', () => {
+  beforeEach(() => {
+    listSongsMock.mockReset()
+  })
+
+  it('먼저 보낸 요청이 더 늦게 응답해도, 그 사이 들어온 최신 목록을 덮어쓰지 않고 로딩 스켈레톤도 안 남음', async () => {
+    let resolveFirst: ((songs: SongSummary[]) => void) | undefined
+    listSongsMock.mockImplementationOnce(
+      () =>
+        new Promise<SongSummary[]>((resolve) => {
+          resolveFirst = resolve
+        }),
+    )
+    const { container } = render(
+      <LibraryScreen onOpenSong={() => {}} onEditSong={() => {}} onLoggedOut={() => {}} />,
+    )
+    // 마운트 시 reload()가 1차 요청을 보냄 — 아직 응답 안 함(로딩 스켈레톤 상태).
+    expect(container.querySelectorAll('.skeleton').length).toBeGreaterThan(0)
+
+    // onSongCreated(silentReload)로 2차(최신) 요청을 보내고, 1차보다 먼저 응답하게 함.
+    fireEvent.click(screen.getByRole('button', { name: '+ 업로드' }))
+    listSongsMock.mockResolvedValueOnce([makeSong({ status: 'completed' })])
+    fireEvent.click(screen.getByRole('button', { name: 'mock-song-created' }))
+    await waitFor(() => expect(screen.getByText('완료')).toBeInTheDocument())
+
+    // 모드A 재검토 지적(필수, 반영) — 1차(reload)가 아직 응답 전인 상태에서
+    // silentReload가 먼저 최신 데이터를 반영했으므로, 세대 불일치로 1차
+    // 응답 처리가 통째로 무시돼도 로딩 스켈레톤은 걷혀 있어야 한다(전엔
+    // setLoading(false)가 1차 응답 처리 쪽에만 있어서 영원히 안 걷혔음).
+    expect(container.querySelectorAll('.skeleton')).toHaveLength(0)
+
+    // 이제서야 1차(더 오래된) 요청이 "대기 중"으로 뒤늦게 응답 — 반영되면 안 됨.
+    await act(async () => {
+      resolveFirst?.([makeSong({ status: 'pending' })])
+    })
+    expect(screen.getByText('완료')).toBeInTheDocument() // 최신 상태 그대로 유지
+    expect(screen.queryByText('대기 중')).not.toBeInTheDocument()
+    expect(container.querySelectorAll('.skeleton')).toHaveLength(0)
+  })
+
+  it('모드A 재검토 2차 지적(필수, 반영) — 최초 로딩이 아직 안 끝난 상태에서 silentReload가 실패해도 스켈레톤이 안 남고 에러로 전환됨', async () => {
+    // 1차(reload)는 응답 안 함(마운트 시 보낸 채로 계속 대기) — 배경 폴링은
+    // songs가 비어 있는 한 시작도 안 해서, onSongCreated만이 이 상황을
+    // 재현할 수 있는 유일한 경로다.
+    listSongsMock.mockImplementationOnce(() => new Promise<SongSummary[]>(() => {}))
+    const { container } = render(
+      <LibraryScreen onOpenSong={() => {}} onEditSong={() => {}} onLoggedOut={() => {}} />,
+    )
+    expect(container.querySelectorAll('.skeleton').length).toBeGreaterThan(0)
+
+    fireEvent.click(screen.getByRole('button', { name: '+ 업로드' }))
+    listSongsMock.mockRejectedValueOnce(new Error('network down'))
+    fireEvent.click(screen.getByRole('button', { name: 'mock-song-created' }))
+
+    await waitFor(() => expect(container.querySelectorAll('.skeleton')).toHaveLength(0))
+    expect(screen.getByText('목록을 불러오지 못했습니다')).toBeInTheDocument()
+  })
+
+  // 모드A 재검토 지적(권장, 반영) — 이 테스트는 실제 2초 배경 폴링 타이머가
+  // 아니라 onSongCreated 버튼으로 silentReload()를 직접 유발한다(배경 폴링도
+  // 내부적으로 같은 silentReload()를 부르므로 실패 처리 로직 자체는 동일하게
+  // 검증됨) — 제목을 그 경로에 맞게 명확히 함.
+  it('silentReload(배경 폴링·onSongCreated 공용)가 이미 목록이 떠 있는 상태에서 실패하면 조용히 무시됨(에러 배너 안 뜸)', async () => {
+    listSongsMock.mockResolvedValueOnce([makeSong({ status: 'pending' })])
+    render(<LibraryScreen onOpenSong={() => {}} onEditSong={() => {}} onLoggedOut={() => {}} />)
+    await screen.findByText('테스트곡') // 최초 로딩 완료(loading===false)
+
+    listSongsMock.mockRejectedValueOnce(new Error('transient'))
+    fireEvent.click(screen.getByRole('button', { name: '+ 업로드' }))
+    fireEvent.click(screen.getByRole('button', { name: 'mock-song-created' })) // silentReload() 트리거
+
+    await waitFor(() => expect(listSongsMock).toHaveBeenCalled())
+    expect(screen.queryByText('목록을 불러오지 못했습니다')).not.toBeInTheDocument()
+    expect(screen.getByText('테스트곡')).toBeInTheDocument() // 기존 목록 그대로 유지
+  })
+
+  it('모드A 5차 재검토 지적(필수, 반영) — 최초 로딩 실패 후 reload()로 재시도하면 옛 에러 문구 대신 스켈레톤이 다시 뜸', async () => {
+    listSongsMock.mockRejectedValueOnce(new Error('최초 실패'))
+    const { container } = render(
+      <LibraryScreen onOpenSong={() => {}} onEditSong={() => {}} onLoggedOut={() => {}} />,
+    )
+    await waitFor(() =>
+      expect(screen.getByText('목록을 불러오지 못했습니다')).toBeInTheDocument(),
+    )
+    expect(container.querySelectorAll('.skeleton')).toHaveLength(0)
+
+    // reload()를 다시 트리거 — 디지털 악보 업로드 완료 시 불리는 onUploaded 경로를
+    // 재사용(= reload()를 부름). 응답을 바로 안 주고 대기시켜 "재시도 진행 중" 화면을
+    // 관찰한다.
+    let resolveRetry: ((songs: SongSummary[]) => void) | undefined
+    listSongsMock.mockImplementationOnce(
+      () =>
+        new Promise<SongSummary[]>((resolve) => {
+          resolveRetry = resolve
+        }),
+    )
+    fireEvent.click(screen.getByRole('button', { name: '+ 업로드' }))
+    fireEvent.click(screen.getByRole('button', { name: 'mock-upload-complete' }))
+
+    await waitFor(() =>
+      expect(screen.queryByText('목록을 불러오지 못했습니다')).not.toBeInTheDocument(),
+    )
+    expect(container.querySelectorAll('.skeleton').length).toBeGreaterThan(0)
+
+    await act(async () => {
+      resolveRetry?.([makeSong({ status: 'completed' })])
+    })
+    expect(screen.getByText('완료')).toBeInTheDocument()
+    expect(container.querySelectorAll('.skeleton')).toHaveLength(0)
+  })
+
+  it('모드A 6차 재검토 지적(필수, 반영) — 목록 재조회가 떠 있는 동안 이름을 바꾸면, 뒤늦게 온(이름 변경 전) 재조회 응답이 바뀐 이름을 덮어쓰지 않음', async () => {
+    const song = makeSong({ id: 7, title: '원래이름' })
+    listSongsMock.mockResolvedValueOnce([song])
+    render(<LibraryScreen onOpenSong={() => {}} onEditSong={() => {}} onLoggedOut={() => {}} />)
+    await screen.findByText('원래이름')
+
+    // 배경 폴링을 흉내내는 재조회(silentReload, onSongCreated로 직접 트리거)를
+    // 하나 띄워두되 아직 응답 안 함 — 이 요청은 "이름 변경 전" 시점에 나간 것.
+    let resolveStaleReload: ((songs: SongSummary[]) => void) | undefined
+    listSongsMock.mockImplementationOnce(
+      () =>
+        new Promise<SongSummary[]>((resolve) => {
+          resolveStaleReload = resolve
+        }),
+    )
+    fireEvent.click(screen.getByRole('button', { name: '+ 업로드' }))
+    fireEvent.click(screen.getByRole('button', { name: 'mock-song-created' }))
+
+    // 그 사이 이름을 바꾸고 커밋(완료)시킨다.
+    renameSongMock.mockResolvedValue({ ...song, title: '바뀐이름' })
+    fireEvent.click(screen.getByRole('button', { name: '이름변경' }))
+    const input = screen.getByDisplayValue('원래이름')
+    fireEvent.change(input, { target: { value: '바뀐이름' } })
+    fireEvent.blur(input)
+    await waitFor(() => expect(screen.getByText('바뀐이름')).toBeInTheDocument())
+
+    // 이제서야 이름 변경보다 먼저 나갔던(낡은) 재조회가 옛 이름으로 응답.
+    await act(async () => {
+      resolveStaleReload?.([{ ...song, title: '원래이름' }])
+    })
+    expect(screen.getByText('바뀐이름')).toBeInTheDocument() // 덮어쓰이면 안 됨
+    expect(screen.queryByText('원래이름')).not.toBeInTheDocument()
+  })
+
+  it('모드A 7차 재검토 지적(필수, 반영) — 같은 곡을 연달아 두 번 이름변경하면, 먼저 보낸 요청이 나중에 응답해도 나중에 보낸(최신) 이름이 남음', async () => {
+    const song = makeSong({ id: 9, title: '원래이름' })
+    listSongsMock.mockResolvedValueOnce([song])
+    render(<LibraryScreen onOpenSong={() => {}} onEditSong={() => {}} onLoggedOut={() => {}} />)
+    await screen.findByText('원래이름')
+
+    let resolveFirst: ((song: SongSummary) => void) | undefined
+    let resolveSecond: ((song: SongSummary) => void) | undefined
+    renameSongMock
+      .mockImplementationOnce(
+        () =>
+          new Promise<SongSummary>((resolve) => {
+            resolveFirst = resolve
+          }),
+      )
+      .mockImplementationOnce(
+        () =>
+          new Promise<SongSummary>((resolve) => {
+            resolveSecond = resolve
+          }),
+      )
+
+    fireEvent.click(screen.getByRole('button', { name: '이름변경' }))
+    const input = screen.getByDisplayValue('원래이름')
+    // 1차 커밋(Enter) — 아직 응답 안 함. renamingId는 finally에서만 풀리므로
+    // 입력창이 그대로 열려 있어(공란이 아닌 한) 바로 이어서 또 바꿀 수 있다.
+    fireEvent.change(input, { target: { value: '첫번째이름' } })
+    fireEvent.keyDown(input, { key: 'Enter' })
+    expect(renameSongMock).toHaveBeenCalledTimes(1)
+
+    // 2차 커밋(blur) — 1차가 아직 응답하기 전에 또 바꿔서 커밋.
+    fireEvent.change(input, { target: { value: '두번째이름' } })
+    fireEvent.blur(input)
+    expect(renameSongMock).toHaveBeenCalledTimes(2)
+
+    // 1차(먼저 보낸, 낡은) 요청이 2차보다 늦게 응답 — 반영되면 안 됨.
+    await act(async () => {
+      resolveFirst?.({ ...song, title: '첫번째이름' })
+    })
+    await act(async () => {
+      resolveSecond?.({ ...song, title: '두번째이름' })
+    })
+    expect(screen.getByText('두번째이름')).toBeInTheDocument()
+    expect(screen.queryByText('첫번째이름')).not.toBeInTheDocument()
+  })
+
+  it('모드A 8차 재검토 지적(필수, 반영) — 서로 다른 곡의 이름변경과 삭제가 겹쳐도 서로 방해하지 않음', async () => {
+    const songA = makeSong({ id: 11, title: 'A곡' })
+    const songB = makeSong({ id: 12, title: 'B곡' })
+    listSongsMock.mockResolvedValueOnce([songA, songB])
+    render(<LibraryScreen onOpenSong={() => {}} onEditSong={() => {}} onLoggedOut={() => {}} />)
+    await screen.findByText('A곡')
+    await screen.findByText('B곡')
+
+    // A 이름변경 시작 — 아직 응답 안 함.
+    let resolveRename: ((song: SongSummary) => void) | undefined
+    renameSongMock.mockImplementationOnce(
+      () =>
+        new Promise<SongSummary>((resolve) => {
+          resolveRename = resolve
+        }),
+    )
+    const renameButtons = screen.getAllByRole('button', { name: '이름변경' })
+    fireEvent.click(renameButtons[0]) // A
+    const input = screen.getByDisplayValue('A곡')
+    fireEvent.change(input, { target: { value: 'A곡-바뀜' } })
+    fireEvent.blur(input)
+    expect(renameSongMock).toHaveBeenCalledTimes(1)
+
+    // B 삭제 — A의 이름변경보다 먼저 응답(완료)됨. 전역 세대 번호 하나를
+    // 공유하던 이전 구현(모드A 7차)이었다면 이 시점에 A의 이름변경이
+    // "낡음"으로 취급돼 버려졌을 것.
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    deleteSongMock.mockResolvedValueOnce(undefined)
+    const deleteButtons = screen.getAllByRole('button', { name: '삭제' })
+    fireEvent.click(deleteButtons[1]) // B
+    await waitFor(() => expect(screen.queryByText('B곡')).not.toBeInTheDocument())
+    confirmSpy.mockRestore()
+
+    // 이제서야 A의 이름변경이 응답 — 무관한 곡(B) 삭제가 먼저 끝났다고
+    // 버려지면 안 된다.
+    await act(async () => {
+      resolveRename?.({ ...songA, title: 'A곡-바뀜' })
+    })
+    expect(screen.getByText('A곡-바뀜')).toBeInTheDocument()
+  })
+
+  it('모드A 9차 재검토 지적(필수, 반영) — 백그라운드 조회 응답에 곡이 통째로 없어도 방금 끝난 이름변경은 사라지지 않음', async () => {
+    const song = makeSong({ id: 21, title: '원래이름' })
+    listSongsMock.mockResolvedValueOnce([song])
+    render(<LibraryScreen onOpenSong={() => {}} onEditSong={() => {}} onLoggedOut={() => {}} />)
+    await screen.findByText('원래이름')
+
+    // 배경 조회(silentReload)를 하나 띄워두되 아직 응답 안 함.
+    let resolveStaleReload: ((songs: SongSummary[]) => void) | undefined
+    listSongsMock.mockImplementationOnce(
+      () =>
+        new Promise<SongSummary[]>((resolve) => {
+          resolveStaleReload = resolve
+        }),
+    )
+    fireEvent.click(screen.getByRole('button', { name: '+ 업로드' }))
+    fireEvent.click(screen.getByRole('button', { name: 'mock-song-created' }))
+
+    // 그 사이 이름변경을 끝낸다.
+    renameSongMock.mockResolvedValue({ ...song, title: '바뀐이름' })
+    fireEvent.click(screen.getByRole('button', { name: '이름변경' }))
+    const input = screen.getByDisplayValue('원래이름')
+    fireEvent.change(input, { target: { value: '바뀐이름' } })
+    fireEvent.blur(input)
+    await waitFor(() => expect(screen.getByText('바뀐이름')).toBeInTheDocument())
+
+    // 이제서야 배경 조회가 응답하는데, 이 특정 응답엔 그 곡이 통째로 없다
+    // (삭제된 게 아니라 응답 자체에 곡이 빠진 경우를 흉내냄) — latest만
+    // 순회하던 9차 이전 병합이면 여기서 곡 자체가 사라졌을 것.
+    await act(async () => {
+      resolveStaleReload?.([])
+    })
+    expect(screen.getByText('바뀐이름')).toBeInTheDocument()
+    expect(screen.queryByText('원래이름')).not.toBeInTheDocument()
+  })
+
+  it('모드A 9차 재검토 지적 — 삭제가 서버엔 이미 반영됐지만 클라이언트 응답이 아직 안 온 곡은, 응답에 없는 배경 조회로도 되살아나지 않음', async () => {
+    const song = makeSong({ id: 22, title: '지울곡' })
+    listSongsMock.mockResolvedValueOnce([song])
+    render(<LibraryScreen onOpenSong={() => {}} onEditSong={() => {}} onLoggedOut={() => {}} />)
+    await screen.findByText('지울곡')
+
+    let resolveBackgroundReload: ((songs: SongSummary[]) => void) | undefined
+    listSongsMock.mockImplementationOnce(
+      () =>
+        new Promise<SongSummary[]>((resolve) => {
+          resolveBackgroundReload = resolve
+        }),
+    )
+    fireEvent.click(screen.getByRole('button', { name: '+ 업로드' }))
+    fireEvent.click(screen.getByRole('button', { name: 'mock-song-created' }))
+
+    // 삭제를 시작하되(deleteSong은 아직 응답 안 함) 확인창은 통과시킨다.
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    let resolveDelete: (() => void) | undefined
+    deleteSongMock.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveDelete = resolve
+        }),
+    )
+    fireEvent.click(screen.getByRole('button', { name: '삭제' }))
+    confirmSpy.mockRestore()
+
+    // 배경 조회가 응답 — 삭제가 서버엔 이미 반영돼 그 곡이 없는 목록이
+    // 왔다고 가정(클라이언트의 deleteSong 응답은 아직 안 옴). 마지막 수정이
+    // 'delete'인 곡은 되살리면 안 된다(되살리면 멀쩩히 지워진 곡이 다시
+    // 나타나는 반대 버그가 됨).
+    await act(async () => {
+      resolveBackgroundReload?.([])
+    })
+    expect(screen.queryByText('지울곡')).not.toBeInTheDocument()
+
+    await act(async () => {
+      resolveDelete?.()
+    })
+    expect(screen.queryByText('지울곡')).not.toBeInTheDocument()
+  })
+
+  it('모드A 10차 재검토 지적(필수, 반영) — 같은 곡의 삭제가 진행 중일 때 끝난 이름변경이 삭제 성공을 가리지 않음', async () => {
+    const song = makeSong({ id: 31, title: '지우고바꿀곡' })
+    listSongsMock.mockResolvedValueOnce([song])
+    render(<LibraryScreen onOpenSong={() => {}} onEditSong={() => {}} onLoggedOut={() => {}} />)
+    await screen.findByText('지우고바꿀곡')
+
+    // 삭제를 먼저 시작하되 아직 응답 안 함.
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    let resolveDelete: (() => void) | undefined
+    deleteSongMock.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveDelete = resolve
+        }),
+    )
+    fireEvent.click(screen.getByRole('button', { name: '삭제' }))
+    confirmSpy.mockRestore()
+    expect(deleteSongMock).toHaveBeenCalledTimes(1)
+
+    // 삭제가 아직 안 끝난 사이, 같은 곡의 이름변경을 시작해 먼저 성공시킨다
+    // (삭제보다 "나중에 시작"됐으니 순번은 더 높음).
+    renameSongMock.mockResolvedValueOnce({ ...song, title: '바뀐이름' })
+    fireEvent.click(screen.getByRole('button', { name: '이름변경' }))
+    const input = screen.getByDisplayValue('지우고바꿀곡')
+    fireEvent.change(input, { target: { value: '바뀐이름' } })
+    fireEvent.keyDown(input, { key: 'Enter' })
+    await waitFor(() => expect(screen.getByText('바뀐이름')).toBeInTheDocument())
+
+    // 이제서야 먼저 시작된 삭제가 성공 — 더 늦게 "시작된" 이름변경이
+    // 성공했다는 이유로 삭제의 성공 처리가 무시되면 안 된다(고치기 전엔
+    // 실제로 삭제된 곡이 바뀐 제목으로 화면에 남아 있었음).
+    await act(async () => {
+      resolveDelete?.()
+    })
+    expect(screen.queryByText('바뀐이름')).not.toBeInTheDocument()
+    expect(screen.queryByText('지우고바꿀곡')).not.toBeInTheDocument()
   })
 })

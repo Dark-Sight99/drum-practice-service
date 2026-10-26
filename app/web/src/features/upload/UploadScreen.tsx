@@ -1,14 +1,31 @@
 import { useEffect, useRef, useState } from 'react'
-import { uploadAudioSong, uploadSong } from '../../api/songs'
+import {
+  fetchSong,
+  fetchSongDrumScore,
+  uploadAudioSong,
+  uploadSong,
+  type SongSummary,
+} from '../../api/songs'
 import { ApiError } from '../../api/client'
 import { importScoreFile, validateDrumScore, type DrumScore } from '../../score'
 import { Modal } from '../../components/Modal'
+import { Spinner } from '../../components/Spinner'
 
 export interface UploadScreenProps {
   open: boolean
   onUploaded: () => void
   onCancel: () => void
+  /** 2026-10-26 의뢰인 요청 — 음원 업로드 직후(분리·채보가 아직 안 끝난
+   * 상태) 라이브러리 목록에 "처리 중" 카드가 바로 보이게 — 모달은 안 닫고
+   * 목록만 조용히 새로고침한다(onUploaded와 달리 모달을 닫지 않음). */
+  onSongCreated: () => void
+  /** 2026-10-26 의뢰인 요청 — 노트 생성이 끝나면 "연주하기" 버튼으로 바로
+   * 그 곡의 연주 화면으로 이동. */
+  onPlaySong: (song: SongSummary, drumScore: DrumScore) => void
 }
+
+const POLL_INTERVAL_MS = 2000
+const TERMINAL_STATUSES = new Set(['completed', 'failed'])
 
 const DIGITAL_EXTENSIONS = ['.mid', '.midi', '.musicxml', '.mxl', '.gp', '.gp3', '.gp4', '.gp5', '.gpx']
 const AUDIO_EXTENSIONS = ['.mp3', '.wav', '.m4a', '.flac', '.mp4']
@@ -35,7 +52,13 @@ function detectKind(filename: string): FileKind | null {
 // 하면 끝 — 업로드 자체가 끝나는 대로 "업로드완료" 표시 후 모달이 닫힘(의뢰인
 // 요청 — 분리·채보는 몇 분 걸릴 수 있어 그걸 기다리게 하지 않음, 진행 상태는
 // 라이브러리의 상태 표시로 확인).
-export function UploadScreen({ open, onUploaded, onCancel }: UploadScreenProps) {
+export function UploadScreen({
+  open,
+  onUploaded,
+  onCancel,
+  onSongCreated,
+  onPlaySong,
+}: UploadScreenProps) {
   const [file, setFile] = useState<File | null>(null)
   const [fileKind, setFileKind] = useState<FileKind | null>(null)
   const [parsedScore, setParsedScore] = useState<DrumScore | null>(null)
@@ -67,12 +90,48 @@ export function UploadScreen({ open, onUploaded, onCancel }: UploadScreenProps) 
   // 유효한 바로 그 제출**의 것인지(세대 번호 일치)까지 확인한다. 취소와 새
   // 제출 둘 다 번호를 올려 이전 세대를 무효화.
   const submitGenerationRef = useRef(0)
+  // 2026-10-26 의뢰인 요청 — 음원 업로드가 끝나면(파일만 올라간 상태) 모달을
+  // 바로 닫는 대신, 분리·채보가 끝날 때까지 이 안에서 상태를 보여준다("이제
+  // 뭘 해야 하는지 모르겠다"는 신규 사용자 지적 — 처리중 카드만 보여주고
+  // 모달이 사라지면 안내가 끊김). generatingSong이 있으면 그 상태(pending/
+  // processing/completed/failed)에 맞춰 스피너→연주하기 버튼/실패 안내로
+  // 전환.
+  const [generatingSong, setGeneratingSong] = useState<SongSummary | null>(null)
+  // 폴링 실패 시(네트워크 일시 오류 등) 재시도를 예약하기 위한 더미 트리거 —
+  // generatingSong 객체 자체는 안 바뀌어도 이 값을 올리면 아래 effect가 다시
+  // 돈다.
+  const [pollTick, setPollTick] = useState(0)
+  const [isFetchingScore, setIsFetchingScore] = useState(false)
+  const [playError, setPlayError] = useState<string | null>(null)
 
   useEffect(() => {
     return () => {
       if (successTimerRef.current !== null) clearTimeout(successTimerRef.current)
     }
   }, [])
+
+  // 노트 생성 진행 상태 폴링 — 완료/실패(terminal) 상태가 되면 더 이상 예약하지
+  // 않아 자연히 멈춘다. 모달을 닫아도(generatingSong이 null로 리셋) 아래
+  // cleanup이 타이머를 지운다 — "닫아도 처리는 계속된다"는 안내와 모순되지
+  // 않음(서버 쪽 작업 자체는 모달과 무관하게 계속 진행, 여기서 멈추는 건
+  // 화면 쪽 폴링뿐).
+  useEffect(() => {
+    if (!generatingSong || TERMINAL_STATUSES.has(generatingSong.status)) return
+    let cancelled = false
+    const timer = setTimeout(() => {
+      fetchSong(generatingSong.id)
+        .then((latest) => {
+          if (!cancelled) setGeneratingSong(latest)
+        })
+        .catch(() => {
+          if (!cancelled) setPollTick((t) => t + 1) // 실패해도 다음 폴링을 다시 예약
+        })
+    }, POLL_INTERVAL_MS)
+    return () => {
+      cancelled = true
+      clearTimeout(timer)
+    }
+  }, [generatingSong, pollTick])
 
   function resetState() {
     setFile(null)
@@ -85,6 +144,10 @@ export function UploadScreen({ open, onUploaded, onCancel }: UploadScreenProps) 
     setSubmitError(null)
     setIsSubmitting(false)
     setJustUploaded(false)
+    setGeneratingSong(null)
+    setPollTick(0)
+    setIsFetchingScore(false)
+    setPlayError(null)
   }
 
   function handleCancel() {
@@ -160,19 +223,51 @@ export function UploadScreen({ open, onUploaded, onCancel }: UploadScreenProps) 
           return
         }
         await uploadSong(file, title.trim(), artist.trim(), parsedScore)
+        // 모드A 재검토 지적(Low, 반영) — 요청이 서버에 가 있는 동안 사용자가
+        // 이미 취소했다면(또는 그 사이 새로 다른 파일을 제출했다면), 뒤늦게
+        // 돌아온 이 응답으로 모달을 "완료" 상태로 되살리면 안 된다 — 세대
+        // 번호가 그 사이 바뀌었으면(취소·재제출 둘 다 번호를 올림) 조용히 무시.
+        if (mySubmitGeneration !== submitGenerationRef.current) return
+        finishWithSuccessFeedback()
       } else {
-        await uploadAudioSong(file, title.trim(), artist.trim())
+        // 2026-10-26 의뢰인 요청 — 음원은 업로드만으론 안 끝남(분리·채보가
+        // 이어서 돈다) — digital 경로처럼 바로 "완료"로 넘기지 않고, 목록만
+        // 조용히 새로고침(onSongCreated — "처리 중" 카드가 바로 보이게)한 뒤
+        // 모달 안에서 진행 상태를 보여주는 화면으로 전환한다.
+        const { song } = await uploadAudioSong(file, title.trim(), artist.trim())
+        if (mySubmitGeneration !== submitGenerationRef.current) return
+        setIsSubmitting(false)
+        onSongCreated()
+        setGeneratingSong(song)
       }
-      // 모드A 재검토 지적(Low, 반영) — 요청이 서버에 가 있는 동안 사용자가
-      // 이미 취소했다면(또는 그 사이 새로 다른 파일을 제출했다면), 뒤늦게
-      // 돌아온 이 응답으로 모달을 "완료" 상태로 되살리면 안 된다 — 세대
-      // 번호가 그 사이 바뀌었으면(취소·재제출 둘 다 번호를 올림) 조용히 무시.
-      if (mySubmitGeneration !== submitGenerationRef.current) return
-      finishWithSuccessFeedback()
     } catch (err) {
       if (mySubmitGeneration !== submitGenerationRef.current) return
       setSubmitError(err instanceof ApiError ? err.message : '업로드에 실패했습니다')
       setIsSubmitting(false)
+    }
+  }
+
+  async function handlePlayGenerated() {
+    if (!generatingSong) return
+    // 모드A 지적(필수, 반영) — DrumScore를 가져오는 도중 사용자가 배경
+    // 클릭·Esc·닫기로 모달을 먼저 닫으면(handleCancel이 submitGenerationRef를
+    // 올림), 뒤늦게 도착한 응답으로 onPlaySong이 불려 이미 닫은 모달에서
+    // 느닷없이 연주 화면으로 넘어가 버릴 수 있었다 — 업로드 제출과 같은
+    // 세대 번호 가드를 재사용(이 ref는 "이 모달 세션에서 지금 유효한 비동기
+    // 작업이 맞는지"를 범용으로 추적).
+    const myGeneration = ++submitGenerationRef.current
+    setPlayError(null)
+    setIsFetchingScore(true)
+    try {
+      const drumScore = await fetchSongDrumScore(generatingSong.id)
+      if (myGeneration !== submitGenerationRef.current) return // 그 사이 닫혔으면 무시
+      onPlaySong(generatingSong, drumScore)
+      resetState()
+      onCancel() // 모달 닫기만 — 완료 토스트는 필요 없음(바로 연주 화면으로 이동)
+    } catch (err) {
+      if (myGeneration !== submitGenerationRef.current) return
+      setPlayError(err instanceof ApiError ? err.message : '곡을 여는 데 실패했습니다')
+      setIsFetchingScore(false)
     }
   }
 
@@ -192,104 +287,180 @@ export function UploadScreen({ open, onUploaded, onCancel }: UploadScreenProps) 
        * 재지적) — input 자체는 시각적으로 숨기고 라벨을 버튼처럼 꾸며 가운데
        * 정렬하고, 고른 파일명은 그 아래 별도 줄로 보여준다. */}
       <div style={{ width: 360 }}>
-        <p style={{ color: 'var(--text-muted)', textAlign: 'center' }}>
-          음원(mp3, wav, m4a, flac, mp4) 또는 디지털 악보(MIDI, MusicXML, Guitar Pro)를 올릴 수
-          있습니다.
-        </p>
-
-        <div
-          style={{
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            gap: 'var(--space-1)',
-          }}
-        >
-          {/* 2026-10-26 — 버튼 호버·트랜지션이 전역 .btn 클래스(index.css)로
-           * 옮겨가서 여기선 포커스 링(상태 기반이라 JS로 유지)만 따로 그린다. */}
-          <label
-            htmlFor="upload-file-input"
-            className="btn"
-            style={{
-              outline: fileInputFocused ? '2px solid var(--accent)' : 'none',
-              outlineOffset: 2,
-            }}
-          >
-            파일 선택
-          </label>
-          <input
-            id="upload-file-input"
-            type="file"
-            accept={ACCEPT}
-            onChange={(e) => void handleFileChange(e)}
-            // 모드A 재검토 지적(Low, 반영) — 그냥 :focus면 마우스로 라벨을
-            // 클릭해 포커스가 가도 링이 뜸(의도한 "키보드 포커스 표시"가
-            // 아님) — :focus-visible로 키보드 등 실제 필요한 경우에만.
-            onFocus={(e) => setFileInputFocused(e.target.matches(':focus-visible'))}
-            onBlur={() => setFileInputFocused(false)}
-            style={{
-              position: 'absolute',
-              width: 1,
-              height: 1,
-              padding: 0,
-              margin: -1,
-              overflow: 'hidden',
-              clip: 'rect(0, 0, 0, 0)',
-              whiteSpace: 'nowrap',
-              border: 0,
-            }}
-          />
-          {file && (
-            <span style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>{file.name}</span>
-          )}
-        </div>
-
-        {parseError && (
-          <p style={{ color: 'var(--danger)', textAlign: 'center' }}>{parseError}</p>
-        )}
-
-        {fileKind === 'digital' && parsedScore && (
-          <p style={{ color: 'var(--success)', textAlign: 'center' }}>
-            인식됨 — 노트 {noteCount}개, BPM {parsedScore.meta.bpm}
-          </p>
-        )}
-
-        {canSubmit && (
-          <form
-            onSubmit={(e) => void handleSubmit(e)}
+        {generatingSong ? (
+          // 2026-10-26 의뢰인 요청 — "업로드완료 ✓" 후 모달이 사라지고 카드의
+          // "처리 중…" 문구만 남으면 신규 사용자가 다음에 뭘 해야 할지 모른다는
+          // 지적 — 분리·채보가 끝날 때까지 모달 안에서 진행 상태를 보여주고,
+          // 끝나면 "연주하기" 버튼으로 바로 연주 화면까지 이어준다.
+          <div
+            role="status"
+            aria-live="polite"
             style={{
               display: 'flex',
               flexDirection: 'column',
+              alignItems: 'center',
               gap: 'var(--space-3)',
-              marginTop: 'var(--space-4)',
+              padding: 'var(--space-4) 0',
             }}
           >
-            <label style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-1)' }}>
-              제목
-              <input value={title} onChange={(e) => setTitle(e.target.value)} required />
-            </label>
-            <label style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-1)' }}>
-              아티스트(선택)
-              <input value={artist} onChange={(e) => setArtist(e.target.value)} />
-            </label>
-            {submitError && <p style={{ color: 'var(--danger)' }}>{submitError}</p>}
-            <div style={{ display: 'flex', gap: 'var(--space-2)', justifyContent: 'center' }}>
-              <button type="submit" disabled={isSubmitting || justUploaded}>
-                {justUploaded ? '업로드완료 ✓' : isSubmitting ? '업로드 중…' : '업로드'}
-              </button>
-              <button type="button" onClick={handleCancel}>
-                취소
-              </button>
-            </div>
-          </form>
-        )}
-
-        {!canSubmit && (
-          <div style={{ marginTop: 'var(--space-4)', display: 'flex', justifyContent: 'center' }}>
-            <button type="button" onClick={handleCancel}>
-              취소
-            </button>
+            {generatingSong.status === 'completed' ? (
+              <>
+                <span style={{ fontSize: '2rem', color: 'var(--success)' }}>✓</span>
+                <p style={{ textAlign: 'center', margin: 0 }}>노트 생성이 완료됐어요!</p>
+                {playError && (
+                  <p style={{ color: 'var(--danger)', textAlign: 'center', margin: 0 }}>
+                    {playError}
+                  </p>
+                )}
+                <div style={{ display: 'flex', gap: 'var(--space-2)' }}>
+                  <button
+                    type="button"
+                    onClick={() => void handlePlayGenerated()}
+                    disabled={isFetchingScore}
+                  >
+                    {isFetchingScore ? '여는 중…' : '연주하기'}
+                  </button>
+                  <button type="button" onClick={handleCancel}>
+                    닫기
+                  </button>
+                </div>
+              </>
+            ) : generatingSong.status === 'failed' ? (
+              <>
+                <span style={{ fontSize: '2rem', color: 'var(--danger)' }}>✕</span>
+                <p style={{ color: 'var(--danger)', textAlign: 'center', margin: 0 }}>
+                  노트 생성에 실패했습니다. 라이브러리에서 다시 시도해주세요.
+                </p>
+                <button type="button" onClick={handleCancel}>
+                  닫기
+                </button>
+              </>
+            ) : (
+              <>
+                <Spinner />
+                <p style={{ textAlign: 'center', margin: 0 }}>노트를 생성하는 중…</p>
+                <p
+                  style={{
+                    color: 'var(--text-muted)',
+                    fontSize: '0.85rem',
+                    textAlign: 'center',
+                    margin: 0,
+                  }}
+                >
+                  곡 길이에 따라 몇 분 걸릴 수 있어요. 창을 닫아도 처리는 계속돼요.
+                </p>
+                <button type="button" onClick={handleCancel}>
+                  닫기
+                </button>
+              </>
+            )}
           </div>
+        ) : (
+          <>
+            <p style={{ color: 'var(--text-muted)', textAlign: 'center' }}>
+              음원(mp3, wav, m4a, flac, mp4) 또는 디지털 악보(MIDI, MusicXML, Guitar Pro)를 올릴
+              수 있습니다.
+            </p>
+
+            <div
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                gap: 'var(--space-1)',
+              }}
+            >
+              {/* 2026-10-26 — 버튼 호버·트랜지션이 전역 .btn 클래스(index.css)로
+               * 옮겨가서 여기선 포커스 링(상태 기반이라 JS로 유지)만 따로 그린다. */}
+              <label
+                htmlFor="upload-file-input"
+                className="btn"
+                style={{
+                  outline: fileInputFocused ? '2px solid var(--accent)' : 'none',
+                  outlineOffset: 2,
+                }}
+              >
+                파일 선택
+              </label>
+              <input
+                id="upload-file-input"
+                type="file"
+                accept={ACCEPT}
+                onChange={(e) => void handleFileChange(e)}
+                // 모드A 재검토 지적(Low, 반영) — 그냥 :focus면 마우스로 라벨을
+                // 클릭해 포커스가 가도 링이 뜸(의도한 "키보드 포커스 표시"가
+                // 아님) — :focus-visible로 키보드 등 실제 필요한 경우에만.
+                onFocus={(e) => setFileInputFocused(e.target.matches(':focus-visible'))}
+                onBlur={() => setFileInputFocused(false)}
+                style={{
+                  position: 'absolute',
+                  width: 1,
+                  height: 1,
+                  padding: 0,
+                  margin: -1,
+                  overflow: 'hidden',
+                  clip: 'rect(0, 0, 0, 0)',
+                  whiteSpace: 'nowrap',
+                  border: 0,
+                }}
+              />
+              {file && (
+                <span style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>
+                  {file.name}
+                </span>
+              )}
+            </div>
+
+            {parseError && (
+              <p style={{ color: 'var(--danger)', textAlign: 'center' }}>{parseError}</p>
+            )}
+
+            {fileKind === 'digital' && parsedScore && (
+              <p style={{ color: 'var(--success)', textAlign: 'center' }}>
+                인식됨 — 노트 {noteCount}개, BPM {parsedScore.meta.bpm}
+              </p>
+            )}
+
+            {canSubmit && (
+              <form
+                onSubmit={(e) => void handleSubmit(e)}
+                style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 'var(--space-3)',
+                  marginTop: 'var(--space-4)',
+                }}
+              >
+                <label style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-1)' }}>
+                  제목
+                  <input value={title} onChange={(e) => setTitle(e.target.value)} required />
+                </label>
+                <label style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-1)' }}>
+                  아티스트(선택)
+                  <input value={artist} onChange={(e) => setArtist(e.target.value)} />
+                </label>
+                {submitError && <p style={{ color: 'var(--danger)' }}>{submitError}</p>}
+                <div style={{ display: 'flex', gap: 'var(--space-2)', justifyContent: 'center' }}>
+                  <button type="submit" disabled={isSubmitting || justUploaded}>
+                    {justUploaded ? '업로드완료 ✓' : isSubmitting ? '업로드 중…' : '업로드'}
+                  </button>
+                  <button type="button" onClick={handleCancel}>
+                    취소
+                  </button>
+                </div>
+              </form>
+            )}
+
+            {!canSubmit && (
+              <div
+                style={{ marginTop: 'var(--space-4)', display: 'flex', justifyContent: 'center' }}
+              >
+                <button type="button" onClick={handleCancel}>
+                  취소
+                </button>
+              </div>
+            )}
+          </>
         )}
       </div>
     </Modal>

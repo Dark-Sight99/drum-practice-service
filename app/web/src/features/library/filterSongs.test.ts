@@ -57,4 +57,23 @@ describe('filterSongs', () => {
     filterSongs(songs, 'rock')
     expect(songs).toEqual(copy)
   })
+
+  // 2026-10-26 의뢰인 지적 — Mac에서 올린 파일명 기반 제목은 유니코드 NFD(자모
+  // 분해형)로 저장되는데, 사용자가 치는 검색어는 보통 NFC(완성형)라 눈엔 같은
+  // 글자라도 정규화를 안 맞추면 String.includes()가 매칭을 못 했다.
+  it('matches Korean text even when stored title is NFD and query is NFC(모드A 회귀)', () => {
+    const nfdTitle = "희비교차".normalize('NFD')
+    expect(nfdTitle).not.toEqual('희비교차') // 전제 확인 — 실제로 다른 코드포인트 시퀀스
+    const nfdSongs: SongSummary[] = [
+      {
+        id: 4,
+        title: `[Audio] 음율 - '${nfdTitle} (CROXX)'`,
+        artist: null,
+        status: 'completed',
+        original_bpm: null,
+        source_type: 'audio',
+      },
+    ]
+    expect(filterSongs(nfdSongs, '희비')).toEqual(nfdSongs) // 검색어는 일반적인 NFC
+  })
 })
