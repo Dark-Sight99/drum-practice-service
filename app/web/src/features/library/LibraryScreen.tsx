@@ -193,6 +193,14 @@ export function LibraryScreen({ onOpenSong, onEditSong, onLoggedOut }: LibrarySc
     }
     try {
       const updated = await renameSong(id, { title })
+      // 모드A 6차 재검토 지적(필수, 반영) — 이름변경·삭제는 reload()/
+      // silentReload()와 같은 songsFetchGenerationRef를 안 건드려서, 이
+      // 응답이 오기 "전"에 이미 날아가 있던 목록 재조회(fetchSongs)가 이
+      // 이후에 응답하면 "낡은 응답이 아니다"로 통과해 방금 바꾼 제목을
+      // 그대로 덮어쓸 수 있었다(삭제도 같은 이유로 삭제한 곡이 되살아날
+      // 수 있었음) — 여기서도 세대 번호를 올려, 이 시점보다 먼저 시작된
+      // 목록 재조회는 전부 "낡은 응답"으로 무시되게 한다.
+      songsFetchGenerationRef.current += 1
       // songsRef도 setSongs와 같은 자리에서 같이 갱신(위 fetchSongs 코멘트의
       // 불변식 — 미러가 항상 최신이어야 함).
       const next = (songsRef.current ?? []).map((s) => (s.id === id ? updated : s))
@@ -209,6 +217,8 @@ export function LibraryScreen({ onOpenSong, onEditSong, onLoggedOut }: LibrarySc
     if (!window.confirm(`"${song.title}"을(를) 삭제할까요?`)) return
     try {
       await deleteSong(song.id)
+      // 모드A 6차 재검토 지적(필수, 반영) — commitRename과 같은 이유.
+      songsFetchGenerationRef.current += 1
       const next = (songsRef.current ?? []).filter((s) => s.id !== song.id)
       songsRef.current = next
       setSongs(next)
