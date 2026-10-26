@@ -224,7 +224,10 @@ export function UploadScreen({ open, onUploaded, onCancel }: UploadScreenProps) 
             type="file"
             accept={ACCEPT}
             onChange={(e) => void handleFileChange(e)}
-            onFocus={() => setFileInputFocused(true)}
+            // 모드A 재검토 지적(Low, 반영) — 그냥 :focus면 마우스로 라벨을
+            // 클릭해 포커스가 가도 링이 뜸(의도한 "키보드 포커스 표시"가
+            // 아님) — :focus-visible로 키보드 등 실제 필요한 경우에만.
+            onFocus={(e) => setFileInputFocused(e.target.matches(':focus-visible'))}
             onBlur={() => setFileInputFocused(false)}
             style={{
               position: 'absolute',
