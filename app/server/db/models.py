@@ -36,10 +36,12 @@ def str_enum_column(enum_cls: type[enum.Enum]) -> Enum:
 
 
 class SongSourceType(enum.StrEnum):
-    """DrumScore meta.source와 맞춤 (intent/03-architecture-stack.md §2)."""
+    """DrumScore meta.source와 맞춤 (intent/03-architecture-stack.md §2).
+
+    2026-10-26 — 종이 악보(OMR) 경로 드롭(의뢰인 결정, intent/01-vision.md
+    "2026-10-26 갱신" 참고)으로 OMR 멤버 제거."""
 
     AUDIO = "audio"
-    OMR = "omr"
     MIDI = "midi"
     MUSICXML = "musicxml"
     GP = "gp"
@@ -78,9 +80,10 @@ AUDIO_ASSET_KINDS = (
 
 
 class JobType(enum.StrEnum):
+    # 2026-10-26 — 종이 악보(OMR) 경로 드롭으로 OMR 멤버 제거(SongSourceType과 동일
+    # 사유, 위 참고).
     SEPARATE = "separate"
     TRANSCRIBE = "transcribe"
-    OMR = "omr"
     IMPORT = "import"
 
 

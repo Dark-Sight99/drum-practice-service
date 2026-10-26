@@ -104,8 +104,8 @@ def test_handler_exception_marks_job_failed_with_message(db) -> None:
     def _boom(job: Job) -> None:
         raise ValueError("데모 중 터진 에러")
 
-    register_handler(JobType.OMR, _boom)
-    job = Job(user_id=user.id, song_id=song.id, job_type=JobType.OMR)
+    register_handler(JobType.IMPORT, _boom)
+    job = Job(user_id=user.id, song_id=song.id, job_type=JobType.IMPORT)
     db.add(job)
     db.commit()
 
