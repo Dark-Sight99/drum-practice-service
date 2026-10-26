@@ -99,9 +99,12 @@ def encode_mp3(wav_path: Path, bitrate_kbps: int = 192) -> bytes:
 
     ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
     fd, tmp_path_str = tempfile.mkstemp(suffix=".mp3")
-    os.close(fd)
     tmp_path = Path(tmp_path_str)
     try:
+        # 모드A 지적(Low) — os.close(fd)가 여기(try 안)에 있어야, 이 호출
+        # 자체가 실패하는 드문 경우에도 finally의 unlink가 임시 파일을 치운다
+        # (close 전에 두면 close가 실패할 때 정리 없이 새어나갈 수 있었음).
+        os.close(fd)
         cmd = [
             ffmpeg_exe,
             "-y",
