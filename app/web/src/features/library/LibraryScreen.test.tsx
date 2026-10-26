@@ -484,4 +484,45 @@ describe('LibraryScreen — 목록 새로고침 경합(모드A 지적 반영)', 
     expect(screen.getByText('두번째이름')).toBeInTheDocument()
     expect(screen.queryByText('첫번째이름')).not.toBeInTheDocument()
   })
+
+  it('모드A 8차 재검토 지적(필수, 반영) — 서로 다른 곡의 이름변경과 삭제가 겹쳐도 서로 방해하지 않음', async () => {
+    const songA = makeSong({ id: 11, title: 'A곡' })
+    const songB = makeSong({ id: 12, title: 'B곡' })
+    listSongsMock.mockResolvedValueOnce([songA, songB])
+    render(<LibraryScreen onOpenSong={() => {}} onEditSong={() => {}} onLoggedOut={() => {}} />)
+    await screen.findByText('A곡')
+    await screen.findByText('B곡')
+
+    // A 이름변경 시작 — 아직 응답 안 함.
+    let resolveRename: ((song: SongSummary) => void) | undefined
+    renameSongMock.mockImplementationOnce(
+      () =>
+        new Promise<SongSummary>((resolve) => {
+          resolveRename = resolve
+        }),
+    )
+    const renameButtons = screen.getAllByRole('button', { name: '이름변경' })
+    fireEvent.click(renameButtons[0]) // A
+    const input = screen.getByDisplayValue('A곡')
+    fireEvent.change(input, { target: { value: 'A곡-바뀜' } })
+    fireEvent.blur(input)
+    expect(renameSongMock).toHaveBeenCalledTimes(1)
+
+    // B 삭제 — A의 이름변경보다 먼저 응답(완료)됨. 전역 세대 번호 하나를
+    // 공유하던 이전 구현(모드A 7차)이었다면 이 시점에 A의 이름변경이
+    // "낡음"으로 취급돼 버려졌을 것.
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    deleteSongMock.mockResolvedValueOnce(undefined)
+    const deleteButtons = screen.getAllByRole('button', { name: '삭제' })
+    fireEvent.click(deleteButtons[1]) // B
+    await waitFor(() => expect(screen.queryByText('B곡')).not.toBeInTheDocument())
+    confirmSpy.mockRestore()
+
+    // 이제서야 A의 이름변경이 응답 — 무관한 곡(B) 삭제가 먼저 끝났다고
+    // 버려지면 안 된다.
+    await act(async () => {
+      resolveRename?.({ ...songA, title: 'A곡-바뀜' })
+    })
+    expect(screen.getByText('A곡-바뀜')).toBeInTheDocument()
+  })
 })
