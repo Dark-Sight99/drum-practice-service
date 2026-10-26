@@ -6,6 +6,7 @@ import {
   barIndexForSeconds,
   barIndexForTick,
   CHANNEL_KEYS,
+  createAudioTrackPool,
   createDrumVoices,
   createMetronome,
   createTrackPlayer,
@@ -20,6 +21,7 @@ import {
   setMusicMuted,
   setMusicVolume,
   toggleDrumlessPreset,
+  type AudioTrackPool,
   type ChannelKey,
   type ChannelState,
   type DrumVoiceMap,
@@ -222,31 +224,45 @@ export function PracticeCanvas({
   }, [playbackBpm])
   const bpmPercent = Math.round((playbackBpm / score.meta.bpm) * 100)
 
-  // T3-16-feedback-3(네트워크, 2026-10-26) — ▶재생을 누르기 전까진
-  // createTrackPlayer()가 아예 안 만들어져 오디오 파일 다운로드도 그때야
-  // 시작한다. 맥 원격 접속 실측에서 4개 스템을 동시에 받다 한 번씩 연결이
-  // 순간 끊기는 걸 확인(서버 로그엔 에러 없음 — 클라이언트/네트워크 쪽에서
-  // 끊긴 것, qa-evidence/T3-16-feedback-3-prefetch/ 참고). 화면 진입 시점에
-  // 미리 백그라운드로 한 번 받아두면, 그 순간 끊김이 "재생 중"이 아니라
-  // "아직 재생 안 한 조용한 시점"에 나서 브라우저가 알아서 재시도해도 안
-  // 들린다. 실제 TrackPlayer/Web Audio 그래프·handlePlay()의 복잡한 세션
-  // 상태 관리는 전혀 안 건드리고 순수 fetch()로 브라우저 캐시만 데운다 —
-  // 실패해도 무시(재생 시점에 TrackPlayer가 다시 받으면 그만이라 별도 에러
-  // 처리 불필요). `join(',')`을 의존성으로 써서, 부모가 매 렌더마다 새
-  // 배열을 넘겨도(내용이 같으면) 불필요하게 다시 fetch하지 않는다.
+  // T3-16-feedback-6(네트워크, 2026-10-26, work/T3-16-feedback-6/plan.md) —
+  // T3-16-feedback-3(단순 fetch() 프리페치)을 적용한 뒤에도 맥 네트워크
+  // 탭으로 재확인해보니, 그 fetch() 캐시를 실제 `<audio>` 재생 엘리먼트가
+  // 전혀 재사용하지 않고 재생할 때마다 처음부터 다시 받고 있었음(Q-35) —
+  // 미디어 엘리먼트가 일반 fetch() 캐시와 별도 경로를 쓰는 것으로 추정.
+  // 그래서 fetch() 프리페치 대신 **재생에 실제로 쓰일 그 `<audio>` 엘리먼트
+  // 자체**를 화면 진입 시점에 미리 만들어(`preload="auto"`) 연습 화면이
+  // 떠 있는 동안 재사용한다 — `handlePlay()`가 매번 새로 만들고
+  // `stopPlayback()`이 매번 버리던 걸(이전엔 `createTrackPlayer()`/`dispose()`)
+  // 풀(`AudioTrackPool`)로 소유권을 옮겨, 재생→리셋→재생을 반복해도 같은
+  // 엘리먼트를 계속 씀 — 모드C 3라운드 검수 완료(엘리먼트당
+  // createMediaElementSource() 1회 제약, 비동기 prime() 경쟁 상태, 정리 중
+  // 예외 격리 등 반영).
+  const audioTrackPoolRef = useRef<AudioTrackPool | null>(null)
   const availableAudioKindsKey = availableAudioKinds.join(',')
   useEffect(() => {
     if (songId === undefined) return
     const stemKinds = availableAudioKinds.filter((kind) => kind !== 'original')
-    for (const kind of stemKinds) {
-      // 모드A 지적(Medium, C-001) — body를 안 읽으면 fetch()는 헤더만 받고도
-      // resolve되므로, 브라우저가 실제 전송을 끝까지 안 하고 중간에 끊어도
-      // 알 방법이 없다(캐시 예열이 안 보장됨). .arrayBuffer()로 본문을 끝까지
-      // 받아 버림으로써 전체 다운로드 완료를 강제한다(받은 내용 자체는
-      // 안 씀 — 목적이 캐시 예열이라 그걸로 충분).
-      void fetch(songAudioUrl(songId, kind))
-        .then((response) => response.arrayBuffer())
-        .catch(() => {})
+    if (stemKinds.length === 0) return // MIDI-only 곡 등 — 만들 트랙 자체가 없음
+    // 모드C 3라운드 지적(Medium, C-008) — 풀 생성 도중 일부 트랙만 만들고
+    // 실패하면(이미 만든 건 createAudioTrackPool() 내부에서 정리하고 다시
+    // 던짐) 여기서 받아 조용히 포기 — 화면 자체는 안 깨지고, handlePlay()가
+    // 보는 "풀이 없음"은 기존에 이미 있던 canUseAudioTracks=false(MIDI-only
+    // 등) 경로와 같은 모양이라 자연스럽게 "오디오 트랙 없이 신스만 재생"으로
+    // 폴백된다.
+    let pool: AudioTrackPool
+    try {
+      pool = createAudioTrackPool(
+        stemKinds.map((kind) => ({ kind, url: songAudioUrl(songId, kind) })),
+      )
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error('오디오 트랙 풀 생성 실패 — 이 세션은 신스 드럼만 재생됩니다', err)
+      return
+    }
+    audioTrackPoolRef.current = pool
+    return () => {
+      audioTrackPoolRef.current = null
+      pool.destroy()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [songId, availableAudioKindsKey])
@@ -737,10 +753,12 @@ export function PracticeCanvas({
     // 지운다(이미 끊긴 뒤라 안전).
     playbackRef.current.limiter.dispose()
     playbackRef.current.metronome.dispose()
-    // T3-3(REQ-04) — TrackPlayer는 재생 1회당 1개 수명(work/T3-3/plan.md §4
-    // 생명주기) — DrumVoiceMap과 똑같이 여기서 버려야 다음 handlePlay()가 새
-    // 인스턴스를 만들 때 이전 <audio> 엘리먼트가 남아 겹치지 않는다.
-    playbackRef.current.tracks?.dispose()
+    // T3-16-feedback-6 — 예전엔 TrackPlayer가 재생 1회당 1개 수명이라 여기서
+    // dispose()로 <audio> 엘리먼트까지 버렸음(work/T3-3/plan.md §4). 이제
+    // 엘리먼트는 풀(AudioTrackPool)이 화면 수명 동안 들고 있으므로, 여기선
+    // 이번 세션만 정리(일시정지+위치 0으로)하고 엘리먼트는 그대로 둬 다음
+    // 재생이 재사용하게 한다 — work/T3-16-feedback-6/plan.md.
+    playbackRef.current.tracks?.reset()
     playbackRef.current = null
     isPlayingRef.current = false
     lastActiveMapRef.current = new Map()
@@ -810,8 +828,15 @@ export function PracticeCanvas({
     // available_audio_kinds는 범용 목록(이후 T3-4가 "원본"도 쓸 수 있게)이라
     // 프런트 쪽에서 걸러낸다.
     const stemKinds = availableAudioKinds.filter((kind) => kind !== 'original')
+    // T3-16-feedback-6 — 풀이 준비돼 있어야(위 useEffect가 비동기로 만들지
+    // 않으므로 보통 화면 진입 직후 바로 준비됨) 실제로 트랙을 쓸 수 있다.
+    // 풀이 아직 없으면(드물게: 생성 실패, 또는 렌더 직후 effect가 아직
+    // 안 돈 경우) 기존처럼 신스만 재생되는 경로로 자연 폴백.
     const canUseAudioTracks =
-      songId !== undefined && score.audioOffsetMs === 0 && stemKinds.length > 0
+      songId !== undefined &&
+      score.audioOffsetMs === 0 &&
+      stemKinds.length > 0 &&
+      audioTrackPoolRef.current !== null
 
     // T3-4 모드A 1라운드 지적(High/Medium) — 아래 셋업 구간에서 (a) stop()/
     // 다른 handlePlay()가 끼어들거나(세션 id가 바뀜) (b) 생성 자체가 실패하면,
@@ -840,7 +865,7 @@ export function PracticeCanvas({
     // `tsc -b`)으로 타입체크한다.
     let handle: PlaybackHandle | undefined
     function cleanupAbortedSetup(): void {
-      tracks?.dispose()
+      tracks?.reset()
       synthGain?.dispose()
       limiter?.dispose()
       if (voices) disposeDrumVoices(voices)
@@ -856,9 +881,10 @@ export function PracticeCanvas({
       // T3-13 모드A 2라운드 지적 — 이 호출이 try 밖에 있으면 여기서 던질 때
       // isStarting 플래그가 영영 안 풀려 재생 버튼이 계속 비활성 상태로
       // 멈춘다(원래 버그보다 더 나쁜 회귀) — try 안으로 이동.
-      tracks = canUseAudioTracks
-        ? createTrackPlayer(stemKinds.map((kind) => ({ kind, url: songAudioUrl(songId, kind) })))
-        : null
+      tracks =
+        canUseAudioTracks && audioTrackPoolRef.current
+          ? createTrackPlayer(audioTrackPoolRef.current)
+          : null
       const primePromise = tracks?.prime()
       // T3-4(REQ-05, work/T3-4/plan.md §3) — 신스 드럼 9종이 공용으로 거치는
       // Gain(linear 게인, Tone.Gain 기본 단위가 "gain" — 실제 설치된 Tone.js

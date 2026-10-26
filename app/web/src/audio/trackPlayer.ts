@@ -26,6 +26,16 @@
 // 그래서 **iOS에서만** Web Audio(GainNode) 경로를 쓰고, 그 외(맥·윈도우 등
 // 데스크톱)는 원래의 `element.volume` 직접 제어로 되돌린다 — 아이폰 볼륨
 // 버그도 여전히 고쳐진 채로, 맥의 재생 지연 문제도 없앤다.
+//
+// T3-16-feedback-6(2026-10-26, work/T3-16-feedback-6/plan.md, 모드C 3라운드
+// 검수 완료) — 재생 버튼을 누를 때마다 `createTrackPlayer()`가 `<audio>`
+// 엘리먼트를 새로 만들고 `stopPlayback()`이 매번 버려서(`element.src=''`),
+// 맥 네트워크 탭 실측 결과 재생 세션마다 4개 스템 전체를 처음부터 다시
+// 받고 있었음(프리페치 캐시가 재생 엘리먼트에 공유 안 됨, Q-35). 엘리먼트
+// (+iOS 전용 Web Audio 와이어링)의 소유권을 "재생 세션"에서 "연습 화면이
+// 떠 있는 동안"(`AudioTrackPool`)으로 옮겨, 같은 화면에서 재생을 몇 번
+// 반복해도 엘리먼트를 재사용(= 네트워크 재다운로드 없음)하게 한다.
+// `TrackPlayer`는 이제 풀을 받아 세션 범위 동작만 구현하는 얇은 래퍼.
 import * as Tone from 'tone'
 
 /** T3-16-feedback-3 — iPhone/iPod/iPad는 보통 UA에 그대로 찍히지만(일부
@@ -59,23 +69,176 @@ interface TrackState {
    * T3-16-feedback-3 — null이면(데스크톱) Web Audio를 거치지 않고
    * element.volume으로 직접 제어(`setChannelGain()` 참고). */
   gainNode: GainNode | null
+  /** T3-16-feedback-6 — **풀(`AudioTrackPool`) 스코프 상태**: 이 엘리먼트가
+   * 프로그램적 `play()`를 허락받았는지. 한 번 `true`가 되면 풀이 살아있는
+   * 동안(여러 재생 세션에 걸쳐) 계속 `true` — "한 번 사용자 제스처 안에서
+   * 성공한 play()는 그 엘리먼트 수명 동안 계속 블레스된 상태로 유지된다"는
+   * 표준 동작을 근거로, 세션마다 다시 prime()하지 않는다(`pool.prime()`
+   * 참고). 다만 이 가정이 깨져 나중 세션에서 `play()`가 실제로 거부되면
+   * `playFrom()`/`resume()`의 catch가 이 값을 다시 `false`로 내리고, 그러면
+   * 다음 `pool.prime()`이 "이미 unlocked면 생략" 조건이 더 이상 성립하지
+   * 않아 자동으로 재언락을 시도한다(별도 동기화 코드 불필요 — 이 트랙 객체
+   * 자체를 풀과 세션이 참조로 공유하기 때문, `createAudioTrackPool()` 참고).
+   * 트랙마다 독립 — 스템 중 하나만 언락 실패해도 나머지는 영향 없음. */
   unlocked: boolean
-  // T3-6(REQ-04, 모드A 지적 반영) — playFrom()이 이 트랙을 실제로 재생
-  // 시작했는지. unlocked는 prime() 성공 여부만 나타내 "카운트인 중 일시정지
-  // →재개"처럼 playFrom()이 아직 한 번도 안 불린 트랙까지 resume()이 조기
-  // 재생시키는 버그가 있었음(원곡 오디오가 카운트인이 끝나기 전에 먼저
-  // 들림) — started로 "이번 세션에서 실제로 시작된 적 있는지"를 따로 추적.
+  /** T3-16-feedback-6 — **세션 스코프 상태**(위 `unlocked`와 레벨이 다름):
+   * 이번 재생 세션에서 `playFrom()`이 실제로 이 트랙을 시작시켰는지.
+   * `unlocked`는 prime() 성공 여부(풀 수명 전체)만 나타내 "카운트인 중
+   * 일시정지→재개"처럼 playFrom()이 아직 한 번도 안 불린 트랙까지
+   * resume()이 조기 재생시키는 버그가 있었음(T3-6 모드A 지적) — started로
+   * "이번 세션에서 실제로 시작된 적 있는지"를 따로 추적. 엘리먼트 객체는
+   * 세션을 넘어 재사용되지만, 이 필드는 **세션이 새로 시작할 때마다
+   * `reset()`으로 명시적으로 `false`로 되돌아가야 한다**(아래 `reset()`
+   * 참고 — 안 그러면 이전 세션의 "시작됨" 기록이 다음 세션에 새서 resume()
+   * 조기 재생 버그가 재발함). */
   started: boolean
+}
+
+/** T3-16-feedback-6 — `<audio>` 엘리먼트(+iOS 전용 Web Audio 와이어링)를
+ * "연습 화면이 이 곡을 보여주는 동안" 단위로 소유한다. `createMediaElementSource()`는
+ * 스펙상 엘리먼트당 평생 한 번만 부를 수 있어(두 번째 호출은 InvalidStateError),
+ * 여러 재생 세션(`TrackPlayer`)에 걸쳐 엘리먼트를 재사용하려면 이 와이어링도
+ * 세션이 아니라 풀이 한 번만 하고 계속 들고 있어야 한다. */
+export interface AudioTrackPool {
+  /** 이 풀이 들고 있는 트랙들(읽기 전용 — 세션은 이 배열의 객체를 직접
+   * 참조해서 읽고 쓴다, 복사하지 않음. `unlocked` 같은 풀 스코프 필드가
+   * 세션의 쓰기로 바로 갱신되게 하는 핵심 — "트랙별 독립, 객체 참조 공유로
+   * 자동 동기화", work/T3-16-feedback-6/plan.md 모드C 3라운드 C-007). */
+  readonly tracks: readonly TrackState[]
+  /** 모든 트랙을 언락 시도(성공한 트랙은 캐시돼 재시도 없이 즉시 반환 —
+   * 세션마다 다시 불러도 안전·저렴하다는 게 핵심 설계, 아래 구현 참고).
+   * 진행 중인 호출이 있으면 같은 Promise를 공유(중복 play()/pause() 방지). */
+  prime(): Promise<{ kind: string; ok: boolean }[]>
+  /** 풀 자체를 파괴 — 모든 엘리먼트를 멈추고 Web Audio 노드를 끊고
+   * `src`를 비운다. 연습 화면을 벗어나거나(언마운트) 곡이 바뀔 때만
+   * 호출(세션이 끝날 때마다가 아님 — 그건 `TrackPlayer.reset()`). */
+  destroy(): void
+}
+
+export function createAudioTrackPool(sources: TrackSource[]): AudioTrackPool {
+  // T3-12 — Tone.js가 synth_drums/metronome에 이미 쓰고 있는 것과 같은
+  // AudioContext를 공유(실제 설치된 Tone.js 15.1.22 타입 선언으로
+  // `Context.rawContext`가 네이티브 `AudioContext`를 돌려줌을 확인) — 이
+  // context는 `createDrumVoices()`의 `Tone.start()`가 같은 사용자 제스처
+  // 흐름(handlePlay()) 안에서 이미 resume시키므로 별도 unlock 로직이 필요
+  // 없다. `createMediaElementSource()`는 context가 suspended 상태여도 그래프
+  // 구성 자체는 바로 되고, 실제로 소리가 나는 시점(훨씬 뒤, Transport가
+  // playFrom()을 트리거할 때)엔 이미 resume된 뒤다.
+  const context = Tone.getContext().rawContext as unknown as AudioContext
+  // T3-16-feedback-3 — iOS에서만 Web Audio(GainNode) 경로를 쓴다(위 모듈
+  // 상단 주석 참고). 데스크톱은 sourceNode/gainNode가 null이고
+  // setChannelGain()/destroy()가 이를 감지해 element.volume으로 대신 제어.
+  // 풀 생성(화면 진입) 시점에 한 번만 판별 — 화면을 보는 도중 플랫폼이
+  // 바뀔 리 없으므로 세션마다 다시 판별할 필요 없음(모드C 1라운드 확인).
+  const useWebAudioForVolume = isIOS()
+
+  // 모드C 3라운드 지적(Medium, C-008) — 트랙 생성 도중 하나라도 던지면(예:
+  // Web Audio 노드 생성 실패) 그때까지 만든 트랙만 정리(일시정지·노드
+  // disconnect·src 비움)하고 다시 던진다 — 호출자(PracticeCanvas.tsx)가
+  // 실패를 알아야 하고, 일부만 만들어진 채 새는 리소스가 없어야 한다.
+  const tracks: TrackState[] = []
+  try {
+    for (const source of sources) {
+      const element = new Audio(source.url)
+      element.preload = 'auto'
+      if (!useWebAudioForVolume) {
+        tracks.push({
+          kind: source.kind,
+          element,
+          sourceNode: null,
+          gainNode: null,
+          unlocked: false,
+          started: false,
+        })
+        continue
+      }
+      const sourceNode = context.createMediaElementSource(element)
+      const gainNode = context.createGain()
+      sourceNode.connect(gainNode)
+      gainNode.connect(context.destination)
+      tracks.push({ kind: source.kind, element, sourceNode, gainNode, unlocked: false, started: false })
+    }
+  } catch (err) {
+    for (const track of tracks) {
+      destroyTrack(track)
+    }
+    throw err
+  }
+
+  let destroyed = false
+  // T3-16-feedback-6(모드C 1라운드 C-001 반영) — 진행 중인 prime() 호출을
+  // 공유해 중복 play()/pause()를 막는다(예: 재생 버튼을 빠르게 두 번 누름).
+  let primePromise: Promise<{ kind: string; ok: boolean }[]> | null = null
+
+  async function prime(): Promise<{ kind: string; ok: boolean }[]> {
+    if (primePromise) return primePromise
+    primePromise = Promise.all(
+      tracks.map(async (track) => {
+        // 이미 언락된 트랙은 재시도 없이 즉시 반환 — "한 번 블레스되면 그
+        // 엘리먼트 수명 동안 유지"가 핵심 설계(모드C 1라운드 C-001, 2라운드
+        // C-006). 실패로 되돌아간(unlocked=false) 트랙만 다시 play()+pause()
+        // 트릭을 시도.
+        if (track.unlocked) return { kind: track.kind, ok: true }
+        try {
+          await track.element.play()
+          track.element.pause()
+          track.element.currentTime = 0
+          if (!destroyed) track.unlocked = true
+        } catch {
+          if (!destroyed) track.unlocked = false
+        }
+        return { kind: track.kind, ok: track.unlocked }
+      }),
+    )
+    try {
+      return await primePromise
+    } finally {
+      primePromise = null
+    }
+  }
+
+  function destroyTrack(track: TrackState): void {
+    // 모드C 3라운드 지적(Medium, C-008 재사용) — 트랙 하나 정리가 실패해도
+    // (예: currentTime 대입이 미디어 준비 전이라 던짐) 나머지 트랙 정리가
+    // 막히지 않게 트랙마다 독립적으로 감싼다.
+    try {
+      track.element.pause()
+    } catch {
+      /* 무시 — 다음 정리 단계는 계속 진행 */
+    }
+    try {
+      track.gainNode?.disconnect()
+    } catch {
+      /* 무시 */
+    }
+    try {
+      track.sourceNode?.disconnect()
+    } catch {
+      /* 무시 */
+    }
+    try {
+      track.element.src = ''
+    } catch {
+      /* 무시 */
+    }
+  }
+
+  function destroy(): void {
+    destroyed = true
+    for (const track of tracks) {
+      destroyTrack(track)
+    }
+  }
+
+  return { tracks, prime, destroy }
 }
 
 export interface TrackPlayer {
   /** 사용자 제스처(클릭) 핸들러 안에서 호출 — 각 엘리먼트를 play()했다가 즉시
    * pause()해 모바일 자동재생 정책의 "제스처로 인정" 상태를 만들어둔다(이후
-   * Transport 콜백에서의 비동기 play()가 거부되지 않도록). 성공/실패는
-   * `unlocked` 상태로 트랙 수명(이 TrackPlayer 인스턴스) 동안 고정 보관 —
-   * `playFrom`이 매번(루프 재진입 포함) 이 상태를 다시 확인해 실패한 트랙은
-   * 재시도 없이 계속 건너뛴다(work/T3-3/plan.md §3 — 제스처 밖 재시도는 같은
-   * 이유로 다시 거부될 뿐). */
+   * Transport 콜백에서의 비동기 play()가 거부되지 않도록). `AudioTrackPool.prime()`에
+   * 위임하는 얇은 래퍼 — 이미 언락된 트랙은 즉시 반환되므로 두 번째 세션부터는
+   * 사실상 공짜(work/T3-16-feedback-6/plan.md). */
   prime(): Promise<{ kind: string; ok: boolean }[]>
   /** 곡 내 위치(초, 원곡 기준)로 각 트랙(언락 성공한 것만)을 이동시키고 재생
    * 시작. preservesPitch=true + playbackRate 설정. */
@@ -114,57 +277,19 @@ export interface TrackPlayer {
    * "블레스"된 상태로 유지되는 게 표준 동작이라 추가 제스처 없이 재생 가능. */
   resume(): void
   stop(): void
-  dispose(): void
+  /** T3-16-feedback-6(T3-12의 `dispose()`를 대체) — 엘리먼트를 파괴하지
+   * **않는다**(그건 `AudioTrackPool.destroy()`의 몫). 이번 세션만 정리:
+   * 일시정지 + `currentTime=0` + `started`만 `false`로 되돌림. `unlocked`는
+   * 풀 스코프라 안 건드림(모드C 2라운드 C-005 지적 반영 — 세션 정리와
+   * "언락 상태 유지"가 섞이면 안 됨). */
+  reset(): void
 }
 
-export function createTrackPlayer(sources: TrackSource[]): TrackPlayer {
-  // T3-12 — Tone.js가 synth_drums/metronome에 이미 쓰고 있는 것과 같은
-  // AudioContext를 공유(실제 설치된 Tone.js 15.1.22 타입 선언으로
-  // `Context.rawContext`가 네이티브 `AudioContext`를 돌려줌을 확인) — 이
-  // context는 `createDrumVoices()`의 `Tone.start()`가 같은 사용자 제스처
-  // 흐름(handlePlay()) 안에서 이미 resume시키므로 별도 unlock 로직이 필요
-  // 없다. `createMediaElementSource()`는 context가 suspended 상태여도 그래프
-  // 구성 자체는 바로 되고, 실제로 소리가 나는 시점(훨씬 뒤, Transport가
-  // playFrom()을 트리거할 때)엔 이미 resume된 뒤다.
-  const context = Tone.getContext().rawContext as unknown as AudioContext
-  // T3-16-feedback-3 — iOS에서만 Web Audio(GainNode) 경로를 쓴다(위 모듈
-  // 상단 주석 참고). 데스크톱은 sourceNode/gainNode가 null이고
-  // setChannelGain()/dispose()가 이를 감지해 element.volume으로 대신 제어.
-  const useWebAudioForVolume = isIOS()
-  const tracks: TrackState[] = sources.map((source) => {
-    const element = new Audio(source.url)
-    element.preload = 'auto'
-    if (!useWebAudioForVolume) {
-      return {
-        kind: source.kind,
-        element,
-        sourceNode: null,
-        gainNode: null,
-        unlocked: false,
-        started: false,
-      }
-    }
-    const sourceNode = context.createMediaElementSource(element)
-    const gainNode = context.createGain()
-    sourceNode.connect(gainNode)
-    gainNode.connect(context.destination)
-    return { kind: source.kind, element, sourceNode, gainNode, unlocked: false, started: false }
-  })
+export function createTrackPlayer(pool: AudioTrackPool): TrackPlayer {
+  const tracks = pool.tracks
 
-  async function prime(): Promise<{ kind: string; ok: boolean }[]> {
-    return Promise.all(
-      tracks.map(async (track) => {
-        try {
-          await track.element.play()
-          track.element.pause()
-          track.element.currentTime = 0
-          track.unlocked = true
-        } catch {
-          track.unlocked = false
-        }
-        return { kind: track.kind, ok: track.unlocked }
-      }),
-    )
+  function prime(): Promise<{ kind: string; ok: boolean }[]> {
+    return pool.prime()
   }
 
   function playFrom(songPositionSeconds: number, playbackRate: number): void {
@@ -182,7 +307,10 @@ export function createTrackPlayer(sources: TrackSource[]): TrackPlayer {
         // 소리), 거부돼도 재생이 그대로 이어질 수 있다. unlocked=false가 된
         // 트랙은 이후 pause()/resume()이 전부 건너뛰므로, 여기서 명시적으로
         // pause()해 "unlocked=false ⇒ 소리 안 남"을 보장해야 pause()로 끌 수
-        // 없는 트랙이 생기지 않는다.
+        // 없는 트랙이 생기지 않는다. T3-16-feedback-6 — unlocked가 풀
+        // 스코프로 바뀌었어도 이 재설정은 그대로 유효: 다음 세션의
+        // pool.prime()이 "이미 unlocked면 생략" 조건이 깨져 자동 재언락을
+        // 시도하게 된다(모드C 2라운드 C-006).
         track.unlocked = false
         track.element.pause()
       })
@@ -215,9 +343,8 @@ export function createTrackPlayer(sources: TrackSource[]): TrackPlayer {
     if (!track) return
     // T3-12 — 이전엔 `track.element.volume`(iOS에서 무시됨)이었음. GainNode는
     // Tone.js의 synth_drums/metronome 게인과 같은 선형(0~1) 단위라 변환 불필요.
-    // T3-16-feedback-3(진단용, 임시) — gainNode가 null인 트랙(위
-    // DIAG_SKIP_WEBAUDIO_FOR)은 element.volume으로 대신 적용(이 맥 진단
-    // 테스트 중엔 음량이 정확하지 않아도 무방 — 드리프트 로그만 본다).
+    // T3-16-feedback-3 — gainNode가 null인 트랙(데스크톱)은 element.volume으로
+    // 대신 적용.
     if (track.gainNode) {
       track.gainNode.gain.value = Math.min(1, Math.max(0, gain))
     } else {
@@ -256,18 +383,20 @@ export function createTrackPlayer(sources: TrackSource[]): TrackPlayer {
     }
   }
 
-  function dispose(): void {
+  function reset(): void {
     for (const track of tracks) {
-      track.element.pause()
-      track.element.src = ''
-      // T3-12 — Web Audio 그래프 연결 해제(메모리 누수 방지, Tone 노드가
-      // 아닌 네이티브 노드라 `.dispose()`가 아니라 `.disconnect()`).
-      // T3-16-feedback-3(진단용, 임시) — DIAG_SKIP_WEBAUDIO_FOR 트랙은 애초에
-      // 두 노드가 없음(null).
-      track.gainNode?.disconnect()
-      track.sourceNode?.disconnect()
+      // 모드C 3라운드 패턴 재사용(C-008) — 트랙 하나가 실패해도 나머지는
+      // 계속 정리.
+      try {
+        track.element.pause()
+        track.element.currentTime = 0
+      } catch {
+        /* 무시 — 다음 트랙 계속 */
+      }
+      track.started = false
+      // unlocked는 의도적으로 안 건드림 — 풀 스코프(모드C 2라운드 C-005).
     }
   }
 
-  return { prime, playFrom, seekTo, resync, setChannelGain, pause, resume, stop, dispose }
+  return { prime, playFrom, seekTo, resync, setChannelGain, pause, resume, stop, reset }
 }
