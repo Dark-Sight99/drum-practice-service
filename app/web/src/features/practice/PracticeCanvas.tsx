@@ -222,6 +222,35 @@ export function PracticeCanvas({
   }, [playbackBpm])
   const bpmPercent = Math.round((playbackBpm / score.meta.bpm) * 100)
 
+  // T3-16-feedback-3(네트워크, 2026-10-26) — ▶재생을 누르기 전까진
+  // createTrackPlayer()가 아예 안 만들어져 오디오 파일 다운로드도 그때야
+  // 시작한다. 맥 원격 접속 실측에서 4개 스템을 동시에 받다 한 번씩 연결이
+  // 순간 끊기는 걸 확인(서버 로그엔 에러 없음 — 클라이언트/네트워크 쪽에서
+  // 끊긴 것, qa-evidence/T3-16-feedback-3-prefetch/ 참고). 화면 진입 시점에
+  // 미리 백그라운드로 한 번 받아두면, 그 순간 끊김이 "재생 중"이 아니라
+  // "아직 재생 안 한 조용한 시점"에 나서 브라우저가 알아서 재시도해도 안
+  // 들린다. 실제 TrackPlayer/Web Audio 그래프·handlePlay()의 복잡한 세션
+  // 상태 관리는 전혀 안 건드리고 순수 fetch()로 브라우저 캐시만 데운다 —
+  // 실패해도 무시(재생 시점에 TrackPlayer가 다시 받으면 그만이라 별도 에러
+  // 처리 불필요). `join(',')`을 의존성으로 써서, 부모가 매 렌더마다 새
+  // 배열을 넘겨도(내용이 같으면) 불필요하게 다시 fetch하지 않는다.
+  const availableAudioKindsKey = availableAudioKinds.join(',')
+  useEffect(() => {
+    if (songId === undefined) return
+    const stemKinds = availableAudioKinds.filter((kind) => kind !== 'original')
+    for (const kind of stemKinds) {
+      // 모드A 지적(Medium, C-001) — body를 안 읽으면 fetch()는 헤더만 받고도
+      // resolve되므로, 브라우저가 실제 전송을 끝까지 안 하고 중간에 끊어도
+      // 알 방법이 없다(캐시 예열이 안 보장됨). .arrayBuffer()로 본문을 끝까지
+      // 받아 버림으로써 전체 다운로드 완료를 강제한다(받은 내용 자체는
+      // 안 씀 — 목적이 캐시 예열이라 그걸로 충분).
+      void fetch(songAudioUrl(songId, kind))
+        .then((response) => response.arrayBuffer())
+        .catch(() => {})
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [songId, availableAudioKindsKey])
+
   function clampBpm(value: number): number {
     if (Number.isNaN(value)) return playbackBpm
     return Math.min(maxBpm, Math.max(minBpm, Math.round(value)))
