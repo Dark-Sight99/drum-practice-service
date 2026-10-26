@@ -35,8 +35,8 @@ button,
  * 유지하되 더 어두운 색"으로. 검정을 섞어 같은 색상의 어두운 단계만 만든다. */
 button:hover:not(:disabled),
 .btn:hover {
-  background: color-mix(in srgb, var(--surface-2) 100%, black 18%);
-  border-color: color-mix(in srgb, var(--border) 100%, black 18%);
+  background: color-mix(in srgb, var(--surface-2) 82%, black 18%);
+  border-color: color-mix(in srgb, var(--border) 82%, black 18%);
 }
 
 button:disabled {
@@ -82,15 +82,9 @@ textarea:focus {
   cursor: pointer;
 }
 
-.song-card--clickable:hover,
-.song-card--clickable:focus-visible {
+.song-card--clickable:hover {
   transform: translateY(-2px);
   box-shadow: 0 8px 20px rgba(0, 0, 0, 0.45);
-}
-
-.song-card--clickable:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
 }
 
 /* 2026-10-26 의뢰인 요청 — 각 화면 로딩 중 스켈레톤. 로딩 스피너 같은 상시

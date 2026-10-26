@@ -215,11 +215,28 @@ describe('LibraryScreen — 카드 전체 클릭(2026-10-26 의뢰인 요청)', 
       notes: [],
     })
     render(<LibraryScreen onOpenSong={onOpenSong} onEditSong={() => {}} onLoggedOut={() => {}} />)
+    await screen.findByText('테스트곡')
 
-    const card = (await screen.findByText('테스트곡')).closest('[role="button"]')
-    expect(card).not.toBeNull()
-    // 제목 글자가 아니라 카드의 "빈 부분"(메타 정보 줄)을 클릭.
+    // 제목 글자(버튼)가 아니라 카드의 "빈 부분"(메타 정보 줄)을 클릭.
     fireEvent.click(screen.getByText(/BPM 120/))
+    await waitFor(() => expect(onOpenSong).toHaveBeenCalledTimes(1))
+  })
+
+  it('모드A 지적(필수, 반영) — 제목(버튼)을 클릭해도 한 번만 이동함(카드로 중복 전파 안 됨)', async () => {
+    const onOpenSong = vi.fn()
+    const song = makeSong({ status: 'completed' })
+    listSongsMock.mockResolvedValue([song])
+    fetchSongDrumScoreMock.mockResolvedValue({
+      version: 1,
+      meta: { title: '테스트곡', bpm: 120, timeSignature: [4, 4], source: 'audio' },
+      ppq: 480,
+      audioOffsetMs: 0,
+      notes: [],
+    })
+    render(<LibraryScreen onOpenSong={onOpenSong} onEditSong={() => {}} onLoggedOut={() => {}} />)
+
+    const titleButton = await screen.findByRole('button', { name: /테스트곡/ })
+    fireEvent.click(titleButton)
     await waitFor(() => expect(onOpenSong).toHaveBeenCalledTimes(1))
   })
 
