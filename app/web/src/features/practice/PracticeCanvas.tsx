@@ -1032,6 +1032,11 @@ export function PracticeCanvas({
         playbackBpm,
         loop,
         tracks: tracks ?? undefined,
+        // 2026-10-27(의뢰인 요청) — 카운트인 클릭이 믹서 "메트로놈" 채널 설정과
+        // 무관하게 항상 고정 음량으로 울려 "음악은 작은데 그 소리만 크다"는
+        // 불편의 원인이었다 — 재생 시작 시점의 메트로놈 게인을 그대로 넘겨
+        // 아래(재생 중 본체 메트로놈에 적용하는 것)와 같은 기준을 쓰게 한다.
+        countInVolumeDb: linearGainToDb(effectiveGain(mixerStateRef.current.metronome)),
       })
       playbackRef.current = { handle, voices, tracks, synthGain, limiter, metronome }
       isStartingRef.current = false

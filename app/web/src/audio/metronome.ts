@@ -23,12 +23,61 @@ export interface Metronome {
 
 const CLICK_INTERVAL: Record<4 | 8, string> = { 4: '4n', 8: '8n' }
 
+export interface ClickVoice {
+  trigger(isAccent: boolean, time: number): void
+  setVolume(volumeDb: number): void
+  stopRinging(): void
+  dispose(): void
+}
+
+/** 2026-10-27(의뢰인 요청) — "더 대중적인 메트로놈 소리로". 기존엔
+ * MembraneSynth(톰 비슷한 타격음)를 다른 음높이(C3/C2)로 쳐서 강박/약박을
+ * 구분했는데, 그 소리 자체가 흔히 아는 "메트로놈 틱" 소리가 아니라는
+ * 지적 — 대부분의 디지털 메트로놈·DAW 클릭 트랙은 짧게 필터링한 노이즈
+ * 한 번("딱" 소리)으로 클릭을 만든다. 강박은 더 밝은(고역) 대역통과
+ * 필터, 약박은 더 어두운(저역) 대역통과 필터로 구분 — 같은 구분 방식
+ * (강박만 다르게)은 유지. 재생 중 메트로놈(createMetronome)과 카운트인
+ * (scorePlayer.ts)이 똑같은 소리를 쓰도록 공유 팩토리로 뺌. */
+export function createClickVoice(volumeDb = -6): ClickVoice {
+  const output = new Tone.Volume(volumeDb).toDestination()
+  const accentFilter = new Tone.Filter({ type: 'bandpass', frequency: 3000, Q: 1 }).connect(output)
+  const normalFilter = new Tone.Filter({ type: 'bandpass', frequency: 1200, Q: 1 }).connect(output)
+  const accentSynth = new Tone.NoiseSynth({
+    noise: { type: 'white' },
+    envelope: { attack: 0.001, decay: 0.03, sustain: 0, release: 0.03 },
+  }).connect(accentFilter)
+  const normalSynth = new Tone.NoiseSynth({
+    noise: { type: 'white' },
+    envelope: { attack: 0.001, decay: 0.022, sustain: 0, release: 0.022 },
+  }).connect(normalFilter)
+
+  return {
+    trigger(isAccent, time) {
+      ;(isAccent ? accentSynth : normalSynth).triggerAttackRelease('16n', time)
+    },
+    setVolume(nextVolumeDb) {
+      output.volume.value = nextVolumeDb
+    },
+    stopRinging() {
+      accentSynth.triggerRelease()
+      normalSynth.triggerRelease()
+    },
+    dispose() {
+      accentSynth.dispose()
+      normalSynth.dispose()
+      accentFilter.dispose()
+      normalFilter.dispose()
+      output.dispose()
+    },
+  }
+}
+
 /** Transport.scheduleRepeat로 매 박마다 클릭을 울린다. 강박(마디 첫 박)은
  * 다른 음높이로 구분(REQ-04 "강박 강조"). jsdom에서는 Tone 신스를 만들 수
  * 없어 실제 브라우저에서만 검증 가능(work/T2-2/plan.md). */
 export function createMetronome(options: MetronomeOptions): Metronome {
   const subdivision = options.subdivisionDenominator ?? 4
-  const synth = new Tone.MembraneSynth({ volume: options.volumeDb ?? -6 }).toDestination()
+  const click = createClickVoice(options.volumeDb ?? -6)
   const transport = Tone.getTransport()
 
   const clicksPerBar = Math.round(
@@ -46,7 +95,7 @@ export function createMetronome(options: MetronomeOptions): Metronome {
     if (!enabled) return
     const clickIndex = Math.round(transport.getTicksAtTime(time) / ticksPerClick)
     const isAccent = clickIndex % clicksPerBar === 0
-    synth.triggerAttackRelease(isAccent ? 'C3' : 'C2', '16n', time)
+    click.trigger(isAccent, time)
   }, CLICK_INTERVAL[subdivision])
 
   return {
@@ -54,14 +103,14 @@ export function createMetronome(options: MetronomeOptions): Metronome {
       enabled = next
     },
     setVolume(volumeDb: number) {
-      synth.volume.value = volumeDb
+      click.setVolume(volumeDb)
     },
     stopRinging() {
-      synth.triggerRelease()
+      click.stopRinging()
     },
     dispose() {
       transport.clear(eventId)
-      synth.dispose()
+      click.dispose()
     },
   }
 }
