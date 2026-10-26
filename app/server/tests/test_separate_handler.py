@@ -60,6 +60,10 @@ def _make_user_song_job(db) -> tuple[User, Song, Job]:
     return user, song, job
 
 
+def _fake_encode_mp3(wav_path: Path) -> bytes:
+    return f"mp3-{wav_path.name}".encode()
+
+
 def test_separate_handler_success_creates_four_stem_assets(db, monkeypatch, tmp_path) -> None:
     _, song, job = _make_user_song_job(db)
 
@@ -72,6 +76,7 @@ def test_separate_handler_success_creates_four_stem_assets(db, monkeypatch, tmp_
         return stems
 
     monkeypatch.setattr(handler_module, "separate", fake_separate)
+    monkeypatch.setattr(handler_module, "encode_mp3", _fake_encode_mp3)
 
     handler_module.separate_handler(job)
 
@@ -87,6 +92,12 @@ def test_separate_handler_success_creates_four_stem_assets(db, monkeypatch, tmp_
     for asset in stems:
         path = file_storage.resolve_asset_path(asset.file_path)
         assert path is not None and path.exists()
+        # T3-16-feedback — drums만 WAV 그대로, 나머지 셋은 MP3로 저장돼야 함
+        # (채보 파이프라인이 drums WAV를 직접 읽으므로 손대지 않음).
+        if asset.kind == AssetKind.STEM_DRUMS:
+            assert path.suffix == ".wav"
+        else:
+            assert path.suffix == ".mp3"
 
 
 def test_separate_handler_demucs_failure_marks_song_failed_and_reraises(db, monkeypatch) -> None:
@@ -120,6 +131,7 @@ def test_separate_handler_cleans_up_only_stems_written_this_attempt_on_partial_f
         return stems
 
     monkeypatch.setattr(handler_module, "separate", fake_separate)
+    monkeypatch.setattr(handler_module, "encode_mp3", _fake_encode_mp3)
 
     real_write = file_storage.write_song_file
     call_count = {"n": 0}
@@ -148,9 +160,11 @@ def test_separate_handler_cleans_up_only_stems_written_this_attempt_on_partial_f
         db.query(Asset).filter(Asset.song_id == song.id, Asset.kind != AssetKind.ORIGINAL).all()
     )
     assert stem_assets == []
-    # 이번 시도에서 먼저 쓴 2개(drums, bass)도 디스크에 안 남아있어야 함
-    for name in ("drums", "bass"):
-        p = file_storage.resolve_asset_path(f"{song.id}/stem_{name}.wav")
+    # 이번 시도에서 먼저 쓴 2개(drums.wav, bass.mp3)도 디스크에 안 남아있어야 함
+    # — stems.items() 순서(drums,bass,other,vocals)대로 write_song_file이
+    # 호출되고 3번째(other) 호출에서 실패하므로, 성공한 건 drums·bass뿐.
+    for rel_path in (f"{song.id}/stem_drums.wav", f"{song.id}/stem_bass.mp3"):
+        p = file_storage.resolve_asset_path(rel_path)
         assert p is None or not p.exists()
 
 

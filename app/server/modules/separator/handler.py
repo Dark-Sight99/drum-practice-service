@@ -12,7 +12,7 @@ from pathlib import Path
 from db import session as db_session
 from db.models import Asset, AssetKind, Job, Song, SongStatus
 from file_storage import resolve_asset_path, write_song_file
-from modules.separator.demucs_separator import separate
+from modules.separator.demucs_separator import encode_mp3, separate
 
 logger = logging.getLogger("worker.separate")
 
@@ -70,8 +70,17 @@ def separate_handler(job: Job) -> None:
             elapsed = time.monotonic() - start
             logger.info("separate song=%s elapsed=%.1fs device_auto=yes", song.id, elapsed)
 
+            # T3-16-feedback(네트워크 스트리밍) — drums는 T3-2 채보 파이프라인이
+            # 그대로 읽으므로(librosa, WAV 입력 전제로 검증됨) 손대지 않고 WAV
+            # 그대로 저장한다. bass/other/vocals는 "음악" 묶음으로 항상 셋이
+            # 동시에 재생되는데(PracticeCanvas.tsx MUSIC_STEM_KEYS) 비압축 WAV
+            # 3개(각 38.7MB, huibigyocha 기준 실측)를 동시 스트리밍하면 원격
+            # 네트워크(Tailscale)에서 끊김 — MP3로 압축해 저장한다.
             for name, stem_path in stems.items():
-                rel_path = write_song_file(song.id, f"stem_{name}.wav", stem_path.read_bytes())
+                if name == "drums":
+                    rel_path = write_song_file(song.id, "stem_drums.wav", stem_path.read_bytes())
+                else:
+                    rel_path = write_song_file(song.id, f"stem_{name}.mp3", encode_mp3(stem_path))
                 written.append((name, rel_path))
             for name, rel_path in written:
                 db.add(

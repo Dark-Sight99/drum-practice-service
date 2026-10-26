@@ -6,10 +6,11 @@
 """
 
 import subprocess
+from pathlib import Path
 
 import pytest
 
-from modules.separator.demucs_separator import SeparationError, separate
+from modules.separator.demucs_separator import SeparationError, encode_mp3, separate
 
 
 class _FakeCompletedProcess:
@@ -94,3 +95,45 @@ def test_separate_device_auto_uses_pick_device(tmp_path, monkeypatch):
 
     d_index = captured_cmd["cmd"].index("-d")
     assert captured_cmd["cmd"][d_index + 1] == "mps"
+
+
+def test_encode_mp3_builds_expected_command_and_returns_bytes(tmp_path, monkeypatch):
+    import imageio_ffmpeg
+
+    monkeypatch.setattr(imageio_ffmpeg, "get_ffmpeg_exe", lambda: "FAKE_FFMPEG")
+    captured_cmd = {}
+
+    def fake_run(cmd, capture_output, text, encoding=None, errors=None):
+        captured_cmd["cmd"] = cmd
+        # 실제 ffmpeg가 출력 경로(cmd 마지막 인자)에 쓰는 걸 흉내낸다.
+        Path(cmd[-1]).write_bytes(b"fake-mp3-bytes")
+        return _FakeCompletedProcess(returncode=0)
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    wav_path = tmp_path / "stem_bass.wav"
+    wav_path.write_bytes(b"x")
+    result = encode_mp3(wav_path, bitrate_kbps=192)
+
+    assert result == b"fake-mp3-bytes"
+    assert captured_cmd["cmd"][0] == "FAKE_FFMPEG"
+    assert captured_cmd["cmd"][1:4] == ["-y", "-i", str(wav_path)]
+    assert "-codec:a" in captured_cmd["cmd"]
+    assert "libmp3lame" in captured_cmd["cmd"]
+    assert "192k" in captured_cmd["cmd"]
+
+
+def test_encode_mp3_raises_on_nonzero_returncode(tmp_path, monkeypatch):
+    import imageio_ffmpeg
+
+    monkeypatch.setattr(imageio_ffmpeg, "get_ffmpeg_exe", lambda: "FAKE_FFMPEG")
+
+    def fake_run(cmd, capture_output, text, encoding=None, errors=None):
+        return _FakeCompletedProcess(returncode=1, stderr="인코딩 실패")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    wav_path = tmp_path / "stem_bass.wav"
+    wav_path.write_bytes(b"x")
+    with pytest.raises(SeparationError, match="인코딩 실패"):
+        encode_mp3(wav_path)

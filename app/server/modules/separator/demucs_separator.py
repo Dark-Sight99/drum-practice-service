@@ -5,8 +5,10 @@
 자체가 그 인터페이스 역할을 한다(과한 설계 방지).
 """
 
+import os
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 
@@ -79,3 +81,45 @@ def separate(
             raise SeparationError(f"Demucs가 {name}.wav를 만들지 않음(예상 경로: {stem_path})")
         stems[name] = stem_path
     return stems
+
+
+def encode_mp3(wav_path: Path, bitrate_kbps: int = 192) -> bytes:
+    """T3-16-feedback(REQ-06 아님, 네트워크 스트리밍) — WAV를 MP3로 인코딩해
+    바이트로 돌려준다. `imageio-ffmpeg`가 pip 패키지에 번들로 넣어 배포하는
+    ffmpeg 바이너리(`libmp3lame` 인코더 포함 — `imageio_ffmpeg.get_ffmpeg_exe()`로
+    받은 실행파일을 `-encoders`로 실제 실행해 확인함, 2026-10-26)를 쓴다 —
+    시스템에 ffmpeg가 PATH로 설치돼 있는지에 의존하지 않는다(이 PC에서
+    `Get-Command ffmpeg`가 못 찾는 것으로 실측 확인).
+
+    ⚠ 번들 ffmpeg 바이너리 자체는 `--enable-gpl --enable-version3` 빌드라
+    GPLv3 — `imageio-ffmpeg` 패키지 자체(BSD-2-Clause)와는 별개. 의뢰인
+    승인 받음(2026-10-26), 라이선스는 `intent/03-architecture-stack.md`
+    라이선스 표에 기록."""
+    import imageio_ffmpeg
+
+    ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
+    fd, tmp_path_str = tempfile.mkstemp(suffix=".mp3")
+    os.close(fd)
+    tmp_path = Path(tmp_path_str)
+    try:
+        cmd = [
+            ffmpeg_exe,
+            "-y",
+            "-i",
+            str(wav_path),
+            "-codec:a",
+            "libmp3lame",
+            "-b:a",
+            f"{bitrate_kbps}k",
+            str(tmp_path),
+        ]
+        proc = subprocess.run(
+            cmd, capture_output=True, text=True, encoding="utf-8", errors="replace"
+        )
+        if proc.returncode != 0:
+            raise SeparationError(
+                f"MP3 인코딩 실패(returncode={proc.returncode}): {proc.stderr[-2000:]}"
+            )
+        return tmp_path.read_bytes()
+    finally:
+        tmp_path.unlink(missing_ok=True)
