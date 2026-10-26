@@ -51,6 +51,14 @@ export function UploadScreen({ open, onUploaded, onCancel }: UploadScreenProps) 
   // 그대로 발동해 resetState()·onUploaded()를 또 부르는 버그가 있었음 — 타이머
   // id를 들고 있다가 취소 시 확실히 지운다.
   const successTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // 모드A 재검토 지적(Low, 반영) — 위 타이머 정리만으론 "요청이 아직 진행
+  // 중일 때(서버 응답 대기 중) 취소"하는 경로를 못 막았다 — 그 요청이 나중에
+  // 응답하면 이미 취소된 뒤인데도 finishWithSuccessFeedback()/setSubmitError가
+  // 그대로 불려 모달이 멋대로 "완료"로 바뀌거나 에러가 뜰 수 있었음.
+  // trackPlayer.ts 등 이 프로젝트의 비동기 레이스 처리와 같은 패턴(지역
+  // cancelled 플래그 대신 ref로 "이번 제출 시도가 아직 유효한가"를 표시) —
+  // 취소 시 true로 올리고, 매 제출 시작 시 false로 새로 내린다.
+  const submitCancelledRef = useRef(false)
 
   useEffect(() => {
     return () => {
@@ -72,6 +80,7 @@ export function UploadScreen({ open, onUploaded, onCancel }: UploadScreenProps) 
   }
 
   function handleCancel() {
+    submitCancelledRef.current = true
     if (successTimerRef.current !== null) {
       clearTimeout(successTimerRef.current)
       successTimerRef.current = null
@@ -128,6 +137,7 @@ export function UploadScreen({ open, onUploaded, onCancel }: UploadScreenProps) 
     e.preventDefault()
     if (!file || !fileKind) return
 
+    submitCancelledRef.current = false
     setSubmitError(null)
     setIsSubmitting(true)
     try {
@@ -143,8 +153,13 @@ export function UploadScreen({ open, onUploaded, onCancel }: UploadScreenProps) 
       } else {
         await uploadAudioSong(file, title.trim(), artist.trim())
       }
+      // 모드A 재검토 지적(Low, 반영) — 요청이 서버에 가 있는 동안 사용자가
+      // 이미 취소했다면, 뒤늦게 돌아온 성공 응답으로 모달을 "완료" 상태로
+      // 되살리면 안 된다 — 조용히 무시.
+      if (submitCancelledRef.current) return
       finishWithSuccessFeedback()
     } catch (err) {
+      if (submitCancelledRef.current) return
       setSubmitError(err instanceof ApiError ? err.message : '업로드에 실패했습니다')
       setIsSubmitting(false)
     }

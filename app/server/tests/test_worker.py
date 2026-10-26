@@ -253,6 +253,33 @@ def test_sync_song_status_with_job_leaves_song_alone_when_another_job_is_pending
     assert song.status == SongStatus.PROCESSING  # 강제로 FAILED 되지 않음
 
 
+def test_sync_song_status_with_job_still_fails_when_pending_job_is_unexpected_type(db) -> None:
+    """T3-19 모드A 재검토 지적(Medium, 반영) — "이 곡에 대한 다른 작업이면
+    아무거나" 봐주면, 이 곡과 무관하게 남은 엉뚱한 종류의 작업 때문에 진짜
+    실패를 영영 FAILED로 못 바꾸는 경우가 생길 수 있었다. SEPARATE 다음엔
+    정확히 TRANSCRIBE만 "정상적으로 대기 중"이라고 인정해야 한다 — 예를 들어
+    같은 곡에 또 다른 SEPARATE Job이 QUEUED로 남아있어도(체인 상 안 와야 할
+    종류) 안전망은 그걸 "체인 진행 중"으로 착각하면 안 되고 그대로 FAILED로
+    강제해야 한다."""
+    user, song = _make_user_and_song(db)
+    song.status = SongStatus.PROCESSING
+    db.commit()
+
+    register_handler(JobType.SEPARATE, lambda job: None)  # Song을 PROCESSING에 그대로 둠(버그 흉내)
+    job = Job(user_id=user.id, song_id=song.id, job_type=JobType.SEPARATE)
+    db.add(job)
+    # SEPARATE 다음엔 TRANSCRIBE만 정상 — 또 다른 SEPARATE가 대기 중인 건
+    # 체인의 기대 종류가 아니므로 안전망이 봐줄 이유가 안 된다.
+    db.add(Job(user_id=user.id, song_id=song.id, job_type=JobType.SEPARATE))
+    db.commit()
+
+    result = process_next_job(db)
+
+    assert result.status == JobStatus.COMPLETED
+    db.refresh(song)
+    assert song.status == SongStatus.FAILED  # 엉뚱한 종류라 그대로 FAILED
+
+
 def test_sync_song_status_with_job_rescues_song_stuck_pending(db) -> None:
     """T3-2 모드A 지적(C-003) — 핸들러의 맨 처음 "Song.PROCESSING" 커밋 자체가
     실패하면 Song은 PENDING에 머문 채 Job만 끝날 수 있다. 안전망이
