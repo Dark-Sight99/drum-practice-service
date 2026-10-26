@@ -172,3 +172,111 @@ describe('LibraryScreen — 업로드 완료 토스트(2026-10-26 의뢰인 요�
     expect(screen.queryByRole('status')).not.toBeInTheDocument()
   })
 })
+
+describe('LibraryScreen — 로딩 스켈레톤(2026-10-26 의뢰인 요청)', () => {
+  it('목록을 불러오는 동안 스켈레톤이 뜨고, 응답이 오면 사라짐', async () => {
+    let resolveList: ((songs: SongSummary[]) => void) | undefined
+    listSongsMock.mockReset().mockImplementation(
+      () =>
+        new Promise<SongSummary[]>((resolve) => {
+          resolveList = resolve
+        }),
+    )
+    const { container } = render(
+      <LibraryScreen onOpenSong={() => {}} onEditSong={() => {}} onLoggedOut={() => {}} />,
+    )
+
+    expect(container.querySelectorAll('.skeleton').length).toBeGreaterThan(0)
+    expect(screen.queryByText('아직 업로드한 곡이 없습니다.')).not.toBeInTheDocument()
+
+    await act(async () => {
+      resolveList?.([])
+    })
+    expect(container.querySelectorAll('.skeleton')).toHaveLength(0)
+    expect(screen.getByText('아직 업로드한 곡이 없습니다.')).toBeInTheDocument()
+  })
+})
+
+describe('LibraryScreen — 카드 전체 클릭(2026-10-26 의뢰인 요청)', () => {
+  beforeEach(() => {
+    listSongsMock.mockReset()
+    fetchSongDrumScoreMock.mockReset()
+  })
+
+  it('카드의 빈 영역을 클릭하면 연주 화면으로 이동함(처리 완료된 곡)', async () => {
+    const onOpenSong = vi.fn()
+    const song = makeSong({ status: 'completed' })
+    listSongsMock.mockResolvedValue([song])
+    fetchSongDrumScoreMock.mockResolvedValue({
+      version: 1,
+      meta: { title: '테스트곡', bpm: 120, timeSignature: [4, 4], source: 'audio' },
+      ppq: 480,
+      audioOffsetMs: 0,
+      notes: [],
+    })
+    render(<LibraryScreen onOpenSong={onOpenSong} onEditSong={() => {}} onLoggedOut={() => {}} />)
+    await screen.findByText('테스트곡')
+
+    // 제목 글자(버튼)가 아니라 카드의 "빈 부분"(메타 정보 줄)을 클릭.
+    fireEvent.click(screen.getByText(/BPM 120/))
+    await waitFor(() => expect(onOpenSong).toHaveBeenCalledTimes(1))
+  })
+
+  it('모드A 지적(필수, 반영) — 제목(버튼)을 클릭해도 한 번만 이동함(카드로 중복 전파 안 됨)', async () => {
+    const onOpenSong = vi.fn()
+    const song = makeSong({ status: 'completed' })
+    listSongsMock.mockResolvedValue([song])
+    fetchSongDrumScoreMock.mockResolvedValue({
+      version: 1,
+      meta: { title: '테스트곡', bpm: 120, timeSignature: [4, 4], source: 'audio' },
+      ppq: 480,
+      audioOffsetMs: 0,
+      notes: [],
+    })
+    render(<LibraryScreen onOpenSong={onOpenSong} onEditSong={() => {}} onLoggedOut={() => {}} />)
+
+    const titleButton = await screen.findByRole('button', { name: /테스트곡/ })
+    fireEvent.click(titleButton)
+    await waitFor(() => expect(onOpenSong).toHaveBeenCalledTimes(1))
+  })
+
+  it('편집·이름변경·삭제 버튼을 눌러도 연주 화면으로는 안 넘어감', async () => {
+    const onOpenSong = vi.fn()
+    const onEditSong = vi.fn()
+    const song = makeSong({ status: 'completed' })
+    listSongsMock.mockResolvedValue([song])
+    fetchSongDrumScoreMock.mockResolvedValue({
+      version: 1,
+      meta: { title: '테스트곡', bpm: 120, timeSignature: [4, 4], source: 'audio' },
+      ppq: 480,
+      audioOffsetMs: 0,
+      notes: [],
+    })
+    render(
+      <LibraryScreen onOpenSong={onOpenSong} onEditSong={onEditSong} onLoggedOut={() => {}} />,
+    )
+    await screen.findByText('테스트곡')
+
+    fireEvent.click(screen.getByRole('button', { name: '편집' }))
+    await waitFor(() => expect(onEditSong).toHaveBeenCalledTimes(1))
+    expect(onOpenSong).not.toHaveBeenCalled()
+
+    fireEvent.click(screen.getByRole('button', { name: '이름변경' }))
+    expect(screen.getByDisplayValue('테스트곡')).toBeInTheDocument() // 이름변경 입력창으로 바뀜
+    expect(onOpenSong).not.toHaveBeenCalled()
+
+    // 이름변경 입력창 자체를 클릭해도 카드로 전파돼 이동하면 안 됨.
+    fireEvent.click(screen.getByDisplayValue('테스트곡'))
+    expect(onOpenSong).not.toHaveBeenCalled()
+  })
+
+  it('처리 중(완료 아님)인 카드는 클릭해도 이동하지 않음', async () => {
+    const onOpenSong = vi.fn()
+    listSongsMock.mockResolvedValue([makeSong({ status: 'pending' })])
+    render(<LibraryScreen onOpenSong={onOpenSong} onEditSong={() => {}} onLoggedOut={() => {}} />)
+
+    await screen.findByText('테스트곡')
+    fireEvent.click(screen.getByText(/BPM 120/))
+    expect(onOpenSong).not.toHaveBeenCalled()
+  })
+})

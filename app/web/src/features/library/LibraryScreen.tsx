@@ -12,6 +12,7 @@ import type { DrumScore } from '../../score/types'
 import { filterSongs } from './filterSongs'
 import { UploadScreen } from '../upload/UploadScreen'
 import { Toast } from '../../components/Toast'
+import { SongCardSkeleton } from '../../components/Skeleton'
 
 export interface LibraryScreenProps {
   onOpenSong: (song: SongSummary, drumScore: DrumScore) => void
@@ -192,7 +193,15 @@ export function LibraryScreen({ onOpenSong, onEditSong, onLoggedOut }: LibrarySc
       />
 
       {error && <p style={{ color: 'var(--danger)' }}>{error}</p>}
-      {loading && <p style={{ color: 'var(--text-muted)' }}>불러오는 중…</p>}
+      {loading && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
+          {/* 2026-10-26 의뢰인 요청 — "불러오는 중…" 문구 대신 스켈레톤. 몇 줄이
+           * 뜰지 미리 알 수 없어 적당한 개수(5)만 흉내낸다. */}
+          {Array.from({ length: 5 }, (_, i) => (
+            <SongCardSkeleton key={i} />
+          ))}
+        </div>
+      )}
       {!loading && visibleSongs.length === 0 && (
         <p style={{ color: 'var(--text-muted)' }}>
           {songs.length === 0 ? '아직 업로드한 곡이 없습니다.' : '검색 결과가 없습니다.'}
@@ -202,9 +211,24 @@ export function LibraryScreen({ onOpenSong, onEditSong, onLoggedOut }: LibrarySc
       <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
         {visibleSongs.map((song) => {
           const isReady = song.status === 'completed'
+          const isRenaming = renamingId === song.id
+          // 2026-10-26 의뢰인 요청 — 카드 빈 곳을 눌러도 연주 화면으로 이동(지금까지는
+          // 제목 글자만 버튼이었음). 처리가 안 끝났거나(열 게 없음) 이름을 바꾸는
+          // 중이거나(입력창 클릭이 이동으로 오인되면 안 됨) 이미 여는 중이면 비활성.
+          // 모드A 지적(필수, 반영) — 처음엔 카드 자체를 role="button"으로 만들어
+          // 키보드로도 빈 곳까지 다 누를 수 있게 했는데, 그 안에 실제 <button>
+          // (편집/이름변경/삭제)이 중첩돼 ARIA button 역할의 "자식에 포커스
+          // 가능한 요소가 없어야 한다"는 전제를 깨고 있었음(스크린리더가 중첩
+          // 버튼을 무시하거나 혼란스럽게 읽을 수 있음) — 카드 자체에서
+          // role/tabIndex/onKeyDown을 빼고, 제목을 다시 독립된 <button>으로
+          // 되돌려 키보드 접근은 그쪽이 맡는다. 카드의 onClick(마우스 전용,
+          // 시맨틱 없음)은 "빈 영역 클릭"만 담당.
+          const clickable = isReady && !isRenaming && openingId !== song.id
           return (
             <div
               key={song.id}
+              className={clickable ? 'song-card song-card--clickable' : 'song-card'}
+              onClick={clickable ? () => void handleOpen(song) : undefined}
               style={{
                 display: 'flex',
                 alignItems: 'center',
@@ -216,11 +240,12 @@ export function LibraryScreen({ onOpenSong, onEditSong, onLoggedOut }: LibrarySc
               }}
             >
               <div style={{ flex: 1, minWidth: 0 }}>
-                {renamingId === song.id ? (
+                {isRenaming ? (
                   <input
                     value={renameValue}
                     onChange={(e) => setRenameValue(e.target.value)}
                     onBlur={() => void commitRename(song.id)}
+                    onClick={(e) => e.stopPropagation()}
                     onKeyDown={(e) => {
                       if (e.key === 'Enter') void commitRename(song.id)
                       if (e.key === 'Escape') setRenamingId(null)
@@ -230,7 +255,10 @@ export function LibraryScreen({ onOpenSong, onEditSong, onLoggedOut }: LibrarySc
                   />
                 ) : isReady ? (
                   <button
-                    onClick={() => void handleOpen(song)}
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      void handleOpen(song)
+                    }}
                     disabled={openingId === song.id}
                     style={{
                       background: 'none',
@@ -265,7 +293,11 @@ export function LibraryScreen({ onOpenSong, onEditSong, onLoggedOut }: LibrarySc
                   </span>
                 </div>
               </div>
-              <div style={{ display: 'flex', gap: 'var(--space-1)' }}>
+              {/* 카드 빈 곳 전체가 클릭 영역이라, 여기 버튼들의 클릭은 카드로
+               * 안 퍼지게(stopPropagation) 막아야 "편집" 등을 눌렀는데 동시에
+               * 연주 화면으로도 넘어가는 일이 없다(카드 자체엔 키보드 핸들러가
+               * 없어 키 입력은 막을 필요 없음 — 위 코멘트 참고). */}
+              <div style={{ display: 'flex', gap: 'var(--space-1)' }} onClick={(e) => e.stopPropagation()}>
                 <button
                   onClick={() => void handleEdit(song)}
                   disabled={!isReady || openingId === song.id}

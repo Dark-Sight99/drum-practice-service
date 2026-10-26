@@ -1097,6 +1097,76 @@ export function PracticeCanvas({
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
+      {/* 2026-10-26 의뢰인 요청 — 재생 컨트롤·BPM·루프는 레인(캔버스) 아래로
+       * 옮기고(표준 미디어 플레이어처럼 화면 아래에 조작부), "보이는 마디 수"는
+       * 재생과 무관한 순수 표시 설정이라 레인 위, 화면 맨 위에 단독으로 둔다
+       * (레이아웃만 바뀌고 동작은 그대로라 위험 작업 아님 — T3-4 게이트 피드백
+       * 1차와 같은 기준, 위 믹서 위치 변경 코멘트 참고). */}
+      <label style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
+        보이는 마디 수
+        {/* REQ-04 "낙하 속도" — 값이 작을수록 노트 사이 간격이 넓어짐(빠른
+         * 곡의 촘촘한 타격을 구분하기 쉬워짐). 순수 렌더링 설정이라 BPM/루프와
+         * 달리 재생 중에도 바꿀 수 있게 둔다. */}
+        <select
+          value={barsVisible}
+          onChange={(e) => setBarsVisible(Number(e.target.value))}
+        >
+          <option value={1}>1</option>
+          <option value={2}>2</option>
+          <option value={3}>3</option>
+          <option value={4}>4</option>
+        </select>
+      </label>
+
+      {/* 레인 폭 고정(2026-10-25, 의뢰인 요청) — "화면을 넓게 쓰더라도 노트가
+       * 떨어지는 크기는 고정하고 그 외 여백은 배경으로 채우고 싶다"는 요청.
+       * `maxWidth: PRACTICE_LANE_MAX_WIDTH_PX` + `margin: '0 auto'`로 좁은
+       * 화면(모바일)에서는 기존처럼 꽉 채우고, 넓은 화면에서는 그 이상
+       * 넓어지지 않고 중앙 정렬 + 좌우는 `<main>`의 배경색(--bg)이 그대로
+       * 보이게 둔다(laneRenderer.ts가 매 프레임 canvas.clientWidth를 읽어
+       * 내부 해상도를 맞추므로 렌더러 쪽 변경 불필요). 구체 px 값(추정치,
+       * intent/07-open-questions.md Q-29)은 위 상수 선언부 참고.
+       * T3-11 게이트 피드백 3차(2026-10-25, 의뢰인 "레인도 외곽을 선으로
+       * 감싸서 레인크기를 보고 싶어. 이건 밝은 대비되는색이 아니어도 될거
+       * 같고") — 캔버스 폭을 줄이고 나니 좌우 여백과 레인 배경이 같은 색이라
+       * 경계가 안 보였음. 노트 halo(밝은 대비색)와 달리 이건 "크기가 어디서
+       * 끝나는지"만 보여주면 되므로 이미 쓰던 차분한 `--border` 색으로 테두리. */}
+      <div style={{ position: 'relative', maxWidth: PRACTICE_LANE_MAX_WIDTH_PX, margin: '0 auto' }}>
+        <canvas
+          ref={canvasRef}
+          style={{
+            display: 'block',
+            width: '100%',
+            height: 400,
+            background: 'var(--bg)',
+            border: '1px solid var(--border)',
+          }}
+        />
+        {/* T3-14(진단용 임시, 원인 특정되면 제거) — 실기기 FPS를 화면에 바로
+         * 보여줘 영상 녹화 없이도 숫자로 바로 보고 가능하게. */}
+        {fpsDisplay !== null && (
+          <div
+            style={{
+              position: 'absolute',
+              top: 4,
+              left: 4,
+              padding: '2px 6px',
+              background: 'rgba(0,0,0,0.6)',
+              color: fpsDisplay >= 50 ? 'var(--success)' : fpsDisplay >= 30 ? 'var(--warning)' : 'var(--danger)',
+              fontSize: '0.8em',
+              fontFamily: 'monospace',
+              borderRadius: 4,
+              pointerEvents: 'none',
+            }}
+          >
+            FPS: {fpsDisplay}
+          </div>
+        )}
+      </div>
+
+      {/* 2026-10-26 의뢰인 요청 — 재생 컨트롤·BPM·A-B 루프를 레인 아래로. 진행
+       * 상태(루프 중 안내문·진행바)와 바로 붙어 있어야 자연스러워 그것도
+       * 같이 내려왔다(기존엔 맨 아래, 믹서 다음에 있었음). */}
       <div
         style={{
           display: 'flex',
@@ -1174,22 +1244,6 @@ export function PracticeCanvas({
           <span style={{ color: 'var(--text-muted)' }}>
             (원곡 {score.meta.bpm}, {bpmPercent}%)
           </span>
-        </label>
-
-        <label style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
-          보이는 마디 수
-          {/* REQ-04 "낙하 속도" — 값이 작을수록 노트 사이 간격이 넓어짐(빠른
-           * 곡의 촘촘한 타격을 구분하기 쉬워짐). 순수 렌더링 설정이라 BPM/루프와
-           * 달리 재생 중에도 바꿀 수 있게 둔다. */}
-          <select
-            value={barsVisible}
-            onChange={(e) => setBarsVisible(Number(e.target.value))}
-          >
-            <option value={1}>1</option>
-            <option value={2}>2</option>
-            <option value={3}>3</option>
-            <option value={4}>4</option>
-          </select>
         </label>
 
         {/* T3-9-feedback-2(2026-10-25, 의뢰인 요청) — A-B 루프 체크박스와
@@ -1276,50 +1330,27 @@ export function PracticeCanvas({
         )}
       </div>
 
-      {/* 레인 폭 고정(2026-10-25, 의뢰인 요청) — "화면을 넓게 쓰더라도 노트가
-       * 떨어지는 크기는 고정하고 그 외 여백은 배경으로 채우고 싶다"는 요청.
-       * `maxWidth: PRACTICE_LANE_MAX_WIDTH_PX` + `margin: '0 auto'`로 좁은
-       * 화면(모바일)에서는 기존처럼 꽉 채우고, 넓은 화면에서는 그 이상
-       * 넓어지지 않고 중앙 정렬 + 좌우는 `<main>`의 배경색(--bg)이 그대로
-       * 보이게 둔다(laneRenderer.ts가 매 프레임 canvas.clientWidth를 읽어
-       * 내부 해상도를 맞추므로 렌더러 쪽 변경 불필요). 구체 px 값(추정치,
-       * intent/07-open-questions.md Q-29)은 위 상수 선언부 참고.
-       * T3-11 게이트 피드백 3차(2026-10-25, 의뢰인 "레인도 외곽을 선으로
-       * 감싸서 레인크기를 보고 싶어. 이건 밝은 대비되는색이 아니어도 될거
-       * 같고") — 캔버스 폭을 줄이고 나니 좌우 여백과 레인 배경이 같은 색이라
-       * 경계가 안 보였음. 노트 halo(밝은 대비색)와 달리 이건 "크기가 어디서
-       * 끝나는지"만 보여주면 되므로 이미 쓰던 차분한 `--border` 색으로 테두리. */}
-      <div style={{ position: 'relative', maxWidth: PRACTICE_LANE_MAX_WIDTH_PX, margin: '0 auto' }}>
-        <canvas
-          ref={canvasRef}
+      {loopEnabled && (
+        <span style={{ color: 'var(--text-muted)', fontSize: '0.9em' }}>
+          ⟲ 마디 {loopStartBar1}~{loopEndBar1} 반복 중 — 아래 진행바는 이 구간 안에서의 위치
+        </span>
+      )}
+      <div
+        style={{
+          position: 'relative',
+          height: 8,
+          borderRadius: 4,
+          background: 'var(--surface-2)',
+          overflow: 'hidden',
+        }}
+      >
+        <div
           style={{
-            display: 'block',
-            width: '100%',
-            height: 400,
-            background: 'var(--bg)',
-            border: '1px solid var(--border)',
+            height: '100%',
+            width: `${progressPercent}%`,
+            background: loopEnabled ? 'var(--warning)' : 'var(--accent)',
           }}
         />
-        {/* T3-14(진단용 임시, 원인 특정되면 제거) — 실기기 FPS를 화면에 바로
-         * 보여줘 영상 녹화 없이도 숫자로 바로 보고 가능하게. */}
-        {fpsDisplay !== null && (
-          <div
-            style={{
-              position: 'absolute',
-              top: 4,
-              left: 4,
-              padding: '2px 6px',
-              background: 'rgba(0,0,0,0.6)',
-              color: fpsDisplay >= 50 ? 'var(--success)' : fpsDisplay >= 30 ? 'var(--warning)' : 'var(--danger)',
-              fontSize: '0.8em',
-              fontFamily: 'monospace',
-              borderRadius: 4,
-              pointerEvents: 'none',
-            }}
-          >
-            FPS: {fpsDisplay}
-          </div>
-        )}
       </div>
 
       {/* T3-4 게이트 피드백 1차(2026-10-25) — 믹서를 페이지 맨 아래 단독 블록
@@ -1396,29 +1427,6 @@ export function PracticeCanvas({
             return rows
           })}
         </div>
-      </div>
-
-      {loopEnabled && (
-        <span style={{ color: 'var(--text-muted)', fontSize: '0.9em' }}>
-          ⟲ 마디 {loopStartBar1}~{loopEndBar1} 반복 중 — 아래 진행바는 이 구간 안에서의 위치
-        </span>
-      )}
-      <div
-        style={{
-          position: 'relative',
-          height: 8,
-          borderRadius: 4,
-          background: 'var(--surface-2)',
-          overflow: 'hidden',
-        }}
-      >
-        <div
-          style={{
-            height: '100%',
-            width: `${progressPercent}%`,
-            background: loopEnabled ? 'var(--warning)' : 'var(--accent)',
-          }}
-        />
       </div>
     </div>
   )
