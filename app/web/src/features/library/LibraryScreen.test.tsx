@@ -369,4 +369,39 @@ describe('LibraryScreen — 목록 새로고침 경합(모드A 지적 반영)', 
     expect(screen.queryByText('목록을 불러오지 못했습니다')).not.toBeInTheDocument()
     expect(screen.getByText('테스트곡')).toBeInTheDocument() // 기존 목록 그대로 유지
   })
+
+  it('모드A 5차 재검토 지적(필수, 반영) — 최초 로딩 실패 후 reload()로 재시도하면 옛 에러 문구 대신 스켈레톤이 다시 뜸', async () => {
+    listSongsMock.mockRejectedValueOnce(new Error('최초 실패'))
+    const { container } = render(
+      <LibraryScreen onOpenSong={() => {}} onEditSong={() => {}} onLoggedOut={() => {}} />,
+    )
+    await waitFor(() =>
+      expect(screen.getByText('목록을 불러오지 못했습니다')).toBeInTheDocument(),
+    )
+    expect(container.querySelectorAll('.skeleton')).toHaveLength(0)
+
+    // reload()를 다시 트리거 — 디지털 악보 업로드 완료 시 불리는 onUploaded 경로를
+    // 재사용(= reload()를 부름). 응답을 바로 안 주고 대기시켜 "재시도 진행 중" 화면을
+    // 관찰한다.
+    let resolveRetry: ((songs: SongSummary[]) => void) | undefined
+    listSongsMock.mockImplementationOnce(
+      () =>
+        new Promise<SongSummary[]>((resolve) => {
+          resolveRetry = resolve
+        }),
+    )
+    fireEvent.click(screen.getByRole('button', { name: '+ 업로드' }))
+    fireEvent.click(screen.getByRole('button', { name: 'mock-upload-complete' }))
+
+    await waitFor(() =>
+      expect(screen.queryByText('목록을 불러오지 못했습니다')).not.toBeInTheDocument(),
+    )
+    expect(container.querySelectorAll('.skeleton').length).toBeGreaterThan(0)
+
+    await act(async () => {
+      resolveRetry?.([makeSong({ status: 'completed' })])
+    })
+    expect(screen.getByText('완료')).toBeInTheDocument()
+    expect(container.querySelectorAll('.skeleton')).toHaveLength(0)
+  })
 })

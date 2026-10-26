@@ -96,6 +96,15 @@ export function LibraryScreen({ onOpenSong, onEditSong, onLoggedOut }: LibrarySc
   // 재검토 지적).
   async function fetchSongs({ silent }: { silent: boolean }) {
     const generation = ++songsFetchGenerationRef.current
+    // 모드A 5차 재검토 지적(필수, 반영) — 첫 로딩이 실패해 error가 설정된
+    // 뒤(songs는 여전히 null) reload()로 재시도하면, 여기서 error를 안 지우면
+    // loading(=songs null && error null)이 계속 false라 스켈레톤도 안 뜨고
+    // 그냥 옛 에러 문구만 그대로 보여서 재시도가 진행 중인지 전혀 알 수
+    // 없었다 — 이전 reload()가 시작하자마자 error부터 지우던 동작을 복원.
+    // silent(배경 폴링)는 안 지운다 — 이미 목록이 있는 상태에서의 일시적
+    // 폴링 실패 중간에 에러를 조용히 지웠다 다시 켰다 하며 화면이 깜빡일
+    // 이유가 없고, 애초에 silent는 songs가 비어 있는 한 시작도 안 함.
+    if (!silent) setError(null)
     try {
       const latest = await listSongs()
       if (generation !== songsFetchGenerationRef.current) return
