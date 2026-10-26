@@ -14,7 +14,7 @@ const DRUM_PIECES: readonly DrumPiece[] = [
 
 const HANDS: readonly Hand[] = ['R', 'L', 'RF', 'LF', null]
 const HAND_SOURCES: readonly HandSource[] = ['auto', 'user']
-const SCORE_SOURCES: readonly ScoreSource[] = ['audio', 'omr', 'midi', 'musicxml', 'gp']
+const SCORE_SOURCES: readonly ScoreSource[] = ['audio', 'midi', 'musicxml', 'gp']
 
 export interface ValidationResult {
   valid: boolean

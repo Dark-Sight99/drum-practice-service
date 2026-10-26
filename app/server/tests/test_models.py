@@ -56,7 +56,7 @@ def test_duplicate_username_rejected(session: Session) -> None:
 
 def test_song_belongs_to_user(session: Session) -> None:
     user = _make_user(session)
-    song = Song(user_id=user.id, title="Ling Ling", source_type=SongSourceType.OMR)
+    song = Song(user_id=user.id, title="Ling Ling", source_type=SongSourceType.MIDI)
     session.add(song)
     session.commit()
     session.refresh(song)

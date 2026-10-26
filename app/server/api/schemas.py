@@ -34,8 +34,9 @@ DrumPiece = Literal[
 Hand = Literal["R", "L", "RF", "LF", None]
 HandSource = Literal["auto", "user"]
 # T3-2(REQ-02 경로 A)에서 "audio" 추가 — app/web/src/score/types.ts의
-# ScoreSource(`'audio'|'omr'|'midi'|'musicxml'|'gp'`)와 점진적으로 동기화하는
-# 중. "omr"은 아직 Phase 4 범위라 안 넣음(과한 선확장 방지, work/T3-2/plan.md §5).
+# ScoreSource(`'audio'|'midi'|'musicxml'|'gp'`)와 동기화. "omr"은 2026-10-26
+# 종이 악보 경로 드롭(의뢰인 결정)으로 영구 제외(work/T3-2/plan.md §5, 당시엔
+# "아직 Phase 4 범위라 안 넣음"이었으나 이제 Phase 4 자체가 없음).
 # 이 확장은 PUT /songs/{id}/drumscore(편집 저장)에도 적용됨 — 의도된 전제조건
 # (오디오 기반 DrumScore를 기존 편집기로 수정·저장하려면 "audio"가 허용돼야
 # 함). POST /songs(디지털 악보 업로드)는 확장자-소스 일치 검사가 별도로 있어
