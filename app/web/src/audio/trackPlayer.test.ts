@@ -46,15 +46,38 @@ vi.mock('tone', () => ({
 
 const { createTrackPlayer } = await import('./trackPlayer')
 
+// T3-16-feedback-3 — Web Audio(GainNode) 경로는 이제 iOS에서만 탄다(맥에서
+// 실시간보다 느리게 재생되는 버그 발견, trackPlayer.ts 모듈 상단 주석 참고).
+// jsdom 기본 User-Agent는 iOS가 아니라서, Web Audio 경로를 검증하는 테스트는
+// 이걸로 iPhone을 흉내낸다 — `afterEach`의 `vi.restoreAllMocks()`가 자동 복원.
+const IOS_USER_AGENT =
+  'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1'
+function stubIOSUserAgent(): void {
+  vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue(IOS_USER_AGENT)
+}
+
 describe('createTrackPlayer', () => {
   let playMock: ReturnType<typeof vi.fn>
   let pauseMock: ReturnType<typeof vi.fn>
+  // T3-16-feedback-3 — 데스크톱 경로(element.volume 직접 제어) 테스트용으로
+  // createTrackPlayer()가 만드는 실제 <audio> 엘리먼트를 생성 순서대로 추적
+  // (sources 배열과 같은 순서 — 아래 createGainMock 등과 같은 패턴).
+  let createdAudioElements: HTMLAudioElement[]
+  // vi.spyOn(window, 'Audio')는 화살표 함수 mockImplementation이 `new`로 호출이
+  // 안 돼("is not a constructor") 실제 실행으로 확인 — 생성자는 직접 교체·복원.
+  const OriginalAudio = window.Audio
 
   beforeEach(() => {
     playMock = vi.fn().mockResolvedValue(undefined)
     pauseMock = vi.fn()
     vi.spyOn(HTMLMediaElement.prototype, 'play').mockImplementation(playMock)
     vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(pauseMock)
+    createdAudioElements = []
+    window.Audio = function (this: unknown, src?: string) {
+      const el = new OriginalAudio(src)
+      createdAudioElements.push(el)
+      return el
+    } as unknown as typeof Audio
     // afterEach의 vi.restoreAllMocks()가 일반 vi.fn()의 구현까지 비워버리므로
     // (spyOn 대상이 아니라 "복원할 원본"이 없어 매번 다시 설정해야 함), 매
     // 테스트 시작마다 구현을 다시 붙인다.
@@ -74,9 +97,12 @@ describe('createTrackPlayer', () => {
 
   afterEach(() => {
     vi.restoreAllMocks()
+    window.Audio = OriginalAudio
   })
 
-  it('T3-12: wires each track through Web Audio (source → gain → destination)', () => {
+  it('T3-12/T3-16-feedback-3: iOS에서 각 트랙을 Web Audio로 연결(source → gain → destination)', () => {
+    stubIOSUserAgent()
+
     createTrackPlayer([
       { kind: 'stem_drums', url: 'http://x/drums.wav' },
       { kind: 'stem_bass', url: 'http://x/bass.wav' },
@@ -88,6 +114,17 @@ describe('createTrackPlayer', () => {
     expect(sourceNodes[1].connect).toHaveBeenCalledWith(gainNodes[1])
     expect(gainNodes[0].connect).toHaveBeenCalledWith(FAKE_DESTINATION)
     expect(gainNodes[1].connect).toHaveBeenCalledWith(FAKE_DESTINATION)
+  })
+
+  it('T3-16-feedback-3: 데스크톱(iOS 아님)에서는 Web Audio를 전혀 안 거침', () => {
+    // jsdom 기본 User-Agent는 이미 iOS가 아니므로 별도 스텁 없이 기본 상태로 검증.
+    createTrackPlayer([
+      { kind: 'stem_drums', url: 'http://x/drums.wav' },
+      { kind: 'stem_bass', url: 'http://x/bass.wav' },
+    ])
+
+    expect(createMediaElementSourceMock).not.toHaveBeenCalled()
+    expect(createGainMock).not.toHaveBeenCalled()
   })
 
   it('prime() reports ok:true for every source when play() succeeds', async () => {
@@ -273,13 +310,21 @@ describe('createTrackPlayer', () => {
     expect(pauseMock).toHaveBeenCalledTimes(1)
   })
 
-  it('dispose() disconnects the Web Audio graph nodes (T3-12)', async () => {
+  it('dispose() disconnects the Web Audio graph nodes on iOS (T3-12)', async () => {
+    stubIOSUserAgent()
     const player = createTrackPlayer([{ kind: 'stem_drums', url: 'http://x/drums.wav' }])
     await player.prime()
 
     player.dispose()
 
     expect(gainNodes[0].disconnect).toHaveBeenCalledTimes(1)
+  })
+
+  it('T3-16-feedback-3: dispose()는 데스크톱(노드 없음)에서도 안 터짐', async () => {
+    const player = createTrackPlayer([{ kind: 'stem_drums', url: 'http://x/drums.wav' }])
+    await player.prime()
+
+    expect(() => player.dispose()).not.toThrow()
   })
 
   describe('seekTo() — T3-9(REQ-04): 위치만 옮기고 재생은 시작하지 않음', () => {
@@ -429,8 +474,9 @@ describe('createTrackPlayer', () => {
     })
   })
 
-  describe('setChannelGain() — T3-12: element.volume(iOS 무시됨) 대신 GainNode 사용', () => {
+  describe('setChannelGain() — iOS: T3-12 GainNode 사용(element.volume은 iOS에서 무시됨)', () => {
     it('sets gainNode.gain.value on the matching track only, clamped to [0,1]', async () => {
+      stubIOSUserAgent()
       const player = createTrackPlayer([
         { kind: 'stem_drums', url: 'http://x/drums.wav' },
         { kind: 'stem_bass', url: 'http://x/bass.wav' },
@@ -444,6 +490,7 @@ describe('createTrackPlayer', () => {
     })
 
     it('clamps out-of-range gain to [0,1]', async () => {
+      stubIOSUserAgent()
       const player = createTrackPlayer([{ kind: 'stem_drums', url: 'http://x/drums.wav' }])
       await player.prime()
 
@@ -455,10 +502,37 @@ describe('createTrackPlayer', () => {
     })
 
     it('silently ignores an unknown kind', async () => {
+      stubIOSUserAgent()
       const player = createTrackPlayer([{ kind: 'stem_drums', url: 'http://x/drums.wav' }])
       await player.prime()
 
       expect(() => player.setChannelGain('nonexistent', 0.5)).not.toThrow()
+    })
+  })
+
+  describe('setChannelGain() — T3-16-feedback-3: 데스크톱에서는 element.volume 직접 제어', () => {
+    it('sets element.volume on the matching track only, clamped to [0,1]', async () => {
+      const player = createTrackPlayer([
+        { kind: 'stem_drums', url: 'http://x/drums.wav' },
+        { kind: 'stem_bass', url: 'http://x/bass.wav' },
+      ])
+      await player.prime()
+
+      player.setChannelGain('stem_bass', 0.3)
+
+      expect(createdAudioElements[0].volume).toBe(1) // stem_drums는 안 건드림(기본값 유지)
+      expect(createdAudioElements[1].volume).toBeCloseTo(0.3) // stem_bass만 변경
+    })
+
+    it('clamps out-of-range gain to [0,1]', async () => {
+      const player = createTrackPlayer([{ kind: 'stem_drums', url: 'http://x/drums.wav' }])
+      await player.prime()
+
+      player.setChannelGain('stem_drums', 1.5)
+      expect(createdAudioElements[0].volume).toBe(1)
+
+      player.setChannelGain('stem_drums', -0.5)
+      expect(createdAudioElements[0].volume).toBe(0)
     })
   })
 })
