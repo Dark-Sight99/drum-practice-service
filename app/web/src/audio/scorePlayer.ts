@@ -1,6 +1,7 @@
 import * as Tone from 'tone'
 import type { DrumScore } from '../score/types'
 import { stopAllRinging, type DrumVoiceMap } from './drumVoices'
+import { createClickVoice } from './metronome'
 import type { TrackPlayer } from './trackPlayer'
 import {
   audioTrackPositionSeconds,
@@ -14,7 +15,7 @@ export interface PlaybackHandle {
   stop(): void
   /** T3-6(REQ-04) — Transport는 틱 위치를 동결할 뿐 이미 커밋된 원샷은
    * 자동으로 안 멈추므로(work/T3-6/plan.md §3) stopAllRinging()·
-   * countInSynth.triggerRelease()로 명시적으로 끊는다. */
+   * countInClick.stopRinging()으로 명시적으로 끊는다. */
   pause(): void
   /** 오프셋 없이 transport.start() — 멈춘 지점부터 정확히 재개(plan.md §1). */
   resume(): void
@@ -32,6 +33,13 @@ export interface PlayDrumScoreOptions {
    * 기존과 동일하게 MIDI만 재생(분리 안 된 곡·`audioOffsetMs≠0` 가드가 켜진
    * 경우 — work/T3-3/plan.md §범위경계, 호출자 `PracticeCanvas`가 결정). */
   tracks?: TrackPlayer
+  /** 2026-10-27(의뢰인 요청) — 카운트인 클릭 음량(dB). 기존엔 믹서의 "메트로놈"
+   * 채널 설정과 무관하게 항상 Tone.js 기본 음량(0dB, 꽤 큼)으로 울려서 "음악
+   * 소리는 작은데 그 소리만 너무 크다"는 불편의 원인이었다 — 호출자
+   * (PracticeCanvas)가 재생 시작 시점의 메트로놈 채널 게인을 dB로 변환해
+   * 넘긴다(재생 중 메트로놈 본체에 적용하는 것과 같은 변환). 안 넘기면
+   * createClickVoice의 기본값(-6dB)을 그대로 씀. */
+  countInVolumeDb?: number
 }
 
 /** DrumScore를 재생한다: 마스터 클록(Transport)에 BPM/박자표를 맞추고, 카운트인
@@ -80,14 +88,16 @@ export function playDrumScore(
     4,
     schedule.playbackStartSeconds,
   )
-  const countInSynth = new Tone.MembraneSynth().toDestination()
+  // 2026-10-27(의뢰인 요청) — 재생 중 메트로놈과 같은 소리(createClickVoice)·
+  // 같은 음량 기준(믹서 "메트로놈" 채널, 위 countInVolumeDb 코멘트 참고)을 쓴다.
+  const countInClick = createClickVoice(options.countInVolumeDb)
 
   const scheduledIds: number[] = []
 
   for (const click of countInClicks) {
     scheduledIds.push(
       transport.schedule((time) => {
-        countInSynth.triggerAttackRelease(click.accent ? 'C3' : 'C2', '16n', time)
+        countInClick.trigger(click.accent, time)
       }, click.timeSeconds),
     )
   }
@@ -143,13 +153,13 @@ export function playDrumScore(
       for (const id of scheduledIds) transport.clear(id)
       transport.loop = false
       transport.stop()
-      countInSynth.dispose()
+      countInClick.dispose()
       tracks?.stop()
     },
     pause() {
       transport.pause()
       stopAllRinging(voices)
-      countInSynth.triggerRelease()
+      countInClick.stopRinging()
       tracks?.pause()
     },
     resume() {
