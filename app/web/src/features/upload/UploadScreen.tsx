@@ -54,11 +54,15 @@ export function UploadScreen({ open, onUploaded, onCancel }: UploadScreenProps) 
   // 모드A 재검토 지적(Low, 반영) — 위 타이머 정리만으론 "요청이 아직 진행
   // 중일 때(서버 응답 대기 중) 취소"하는 경로를 못 막았다 — 그 요청이 나중에
   // 응답하면 이미 취소된 뒤인데도 finishWithSuccessFeedback()/setSubmitError가
-  // 그대로 불려 모달이 멋대로 "완료"로 바뀌거나 에러가 뜰 수 있었음.
-  // trackPlayer.ts 등 이 프로젝트의 비동기 레이스 처리와 같은 패턴(지역
-  // cancelled 플래그 대신 ref로 "이번 제출 시도가 아직 유효한가"를 표시) —
-  // 취소 시 true로 올리고, 매 제출 시작 시 false로 새로 내린다.
-  const submitCancelledRef = useRef(false)
+  // 그대로 불려 모달이 멋대로 "완료"로 바뀌거나 에러가 뜰 수 있었음. 처음엔
+  // 단순 불리언 플래그(submitCancelledRef)로 고쳤는데, 모드A 3차 재검토에서
+  // "취소 후 모달을 다시 열고 새로 제출하면 그 불리언이 false로 되돌아가,
+  // 그 사이 뒤늦게 응답한 **이전(취소된) 제출**이 새 제출인 것처럼 통과해
+  // 아직 안 끝난 새 업로드를 멋대로 완료 처리할 수 있다"는 지적을 받음 —
+  // 불리언 대신 "제출 세대 번호"로 바꿔, 응답이 돌아왔을 때 그 응답이 **지금
+  // 유효한 바로 그 제출**의 것인지(세대 번호 일치)까지 확인한다. 취소와 새
+  // 제출 둘 다 번호를 올려 이전 세대를 무효화.
+  const submitGenerationRef = useRef(0)
 
   useEffect(() => {
     return () => {
@@ -80,7 +84,7 @@ export function UploadScreen({ open, onUploaded, onCancel }: UploadScreenProps) 
   }
 
   function handleCancel() {
-    submitCancelledRef.current = true
+    submitGenerationRef.current += 1 // 진행 중이던 제출이 있었다면 무효화
     if (successTimerRef.current !== null) {
       clearTimeout(successTimerRef.current)
       successTimerRef.current = null
@@ -137,7 +141,9 @@ export function UploadScreen({ open, onUploaded, onCancel }: UploadScreenProps) 
     e.preventDefault()
     if (!file || !fileKind) return
 
-    submitCancelledRef.current = false
+    // 이번 제출의 "세대 번호" — 응답이 돌아왔을 때 아직 이 번호가 최신인지로
+    // 그 사이 취소되거나 다른 제출로 덮어써지지 않았는지 확인한다.
+    const mySubmitGeneration = ++submitGenerationRef.current
     setSubmitError(null)
     setIsSubmitting(true)
     try {
@@ -154,12 +160,13 @@ export function UploadScreen({ open, onUploaded, onCancel }: UploadScreenProps) 
         await uploadAudioSong(file, title.trim(), artist.trim())
       }
       // 모드A 재검토 지적(Low, 반영) — 요청이 서버에 가 있는 동안 사용자가
-      // 이미 취소했다면, 뒤늦게 돌아온 성공 응답으로 모달을 "완료" 상태로
-      // 되살리면 안 된다 — 조용히 무시.
-      if (submitCancelledRef.current) return
+      // 이미 취소했다면(또는 그 사이 새로 다른 파일을 제출했다면), 뒤늦게
+      // 돌아온 이 응답으로 모달을 "완료" 상태로 되살리면 안 된다 — 세대
+      // 번호가 그 사이 바뀌었으면(취소·재제출 둘 다 번호를 올림) 조용히 무시.
+      if (mySubmitGeneration !== submitGenerationRef.current) return
       finishWithSuccessFeedback()
     } catch (err) {
-      if (submitCancelledRef.current) return
+      if (mySubmitGeneration !== submitGenerationRef.current) return
       setSubmitError(err instanceof ApiError ? err.message : '업로드에 실패했습니다')
       setIsSubmitting(false)
     }

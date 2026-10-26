@@ -168,6 +168,64 @@ describe('UploadScreen (모달)', () => {
     expect(onUploaded).not.toHaveBeenCalled() // 이미 취소했으니 뒤늦은 성공 응답은 무시돼야 함
   })
 
+  it('모드A 3차 재검토 지적(Low, 반영) — 취소 후 다시 제출했는데, 취소된 이전 요청이 뒤늦게 응답해도 완료 처리를 또 부르지 않음', async () => {
+    let resolveFirst: ((value: typeof audioUploadResult) => void) | undefined
+    let resolveSecond: ((value: typeof audioUploadResult) => void) | undefined
+    uploadAudioSongMock
+      .mockImplementationOnce(
+        () =>
+          new Promise<typeof audioUploadResult>((resolve) => {
+            resolveFirst = resolve
+          }),
+      )
+      .mockImplementationOnce(
+        () =>
+          new Promise<typeof audioUploadResult>((resolve) => {
+            resolveSecond = resolve
+          }),
+      )
+    const onUploaded = vi.fn()
+    const onCancel = vi.fn()
+    render(<UploadScreen open onUploaded={onUploaded} onCancel={onCancel} />)
+    const input = screen.getByLabelText('파일 선택') as HTMLInputElement
+
+    // 1차 제출 — 응답 대기 중에 취소
+    selectFile(input, new File(['x'], 'first.mp3', { type: 'audio/mpeg' }))
+    await flush()
+    fireEvent.click(screen.getByRole('button', { name: '업로드' }))
+    await flush()
+    fireEvent.click(screen.getByRole('presentation'))
+    expect(onCancel).toHaveBeenCalledTimes(1)
+
+    // 취소 후 같은 모달(마운트 상태 유지 — LibraryScreen이 open만 토글)에
+    // 다시 파일을 골라 2차로 제출(아직 응답 안 함, 대기 중)
+    selectFile(input, new File(['x'], 'second.mp3', { type: 'audio/mpeg' }))
+    await flush()
+    fireEvent.click(screen.getByRole('button', { name: '업로드' }))
+    await flush()
+    expect(uploadAudioSongMock).toHaveBeenCalledTimes(2)
+
+    // 1차(이미 취소된) 요청이 이제서야 뒤늦게 응답 — 2차가 아직 안 끝났는데도
+    // onUploaded가 불리면 안 됨(세대 번호 불일치로 무시돼야 함).
+    await act(async () => {
+      resolveFirst?.(audioUploadResult)
+      await vi.advanceTimersByTimeAsync(1000)
+    })
+    expect(onUploaded).not.toHaveBeenCalled()
+    expect(screen.getByRole('button', { name: '업로드 중…' })).toBeInTheDocument() // 2차는 여전히 대기 중
+
+    // 2차 요청이 정상 응답하면 그때서야 완료 처리
+    await act(async () => {
+      resolveSecond?.(audioUploadResult)
+      await vi.advanceTimersByTimeAsync(0)
+    })
+    expect(screen.getByRole('button', { name: '업로드완료 ✓' })).toBeInTheDocument()
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1000)
+    })
+    expect(onUploaded).toHaveBeenCalledTimes(1)
+  })
+
   it('디지털 악보 파일을 고르면 클라이언트에서 바로 파싱해 미리보기를 보여줌', async () => {
     importScoreFileMock.mockReturnValue({
       ok: true,
