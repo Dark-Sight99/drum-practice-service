@@ -177,63 +177,112 @@ export function UploadScreen({ open, onUploaded, onCancel }: UploadScreenProps) 
 
   return (
     <Modal open={open} onClose={handleCancel} title="악보/음원 업로드">
-      <p style={{ color: 'var(--text-muted)' }}>
-        음원(mp3, wav, m4a, flac, mp4) 또는 디지털 악보(MIDI, MusicXML, Guitar Pro)를 올릴 수
-        있습니다.
-      </p>
-
-      <input
-        type="file"
-        aria-label="파일 선택"
-        accept={ACCEPT}
-        onChange={(e) => void handleFileChange(e)}
-      />
-
-      {parseError && <p style={{ color: 'var(--danger)' }}>{parseError}</p>}
-
-      {fileKind === 'digital' && parsedScore && (
-        <p style={{ color: 'var(--success)' }}>
-          인식됨 — 노트 {noteCount}개, BPM {parsedScore.meta.bpm}
+      {/* 2026-10-26 의뢰인 요청 — 모달이 가로로 길쭉한 사각형이었던 걸 정사각형에
+       * 가깝게(폭 고정 + 줄바꿈으로 세로 길이 확보), 안내 문구는 두 줄로,
+       * 파일 선택·취소는 가운데 정렬. 폭을 너무 좁게(280) 잡으면 문구가 더
+       * 쪼개져 4줄까지 밀렸던 걸 다시 넓혀 자연스럽게 2줄로 — 정확한 폭은
+       * 브라우저로 실측해 맞춤(2026-10-26 재조정).
+       *
+       * 파일 input은 네이티브 "선택된 파일 없음" 텍스트가 버튼에 붙어 있어
+       * 전체 너비가 가변적이라, flex justify-center로는 가운데로 안 왔다(의뢰인
+       * 재지적) — input 자체는 시각적으로 숨기고 라벨을 버튼처럼 꾸며 가운데
+       * 정렬하고, 고른 파일명은 그 아래 별도 줄로 보여준다. */}
+      <div style={{ width: 360 }}>
+        <p style={{ color: 'var(--text-muted)', textAlign: 'center' }}>
+          음원(mp3, wav, m4a, flac, mp4) 또는 디지털 악보(MIDI, MusicXML, Guitar Pro)를 올릴 수
+          있습니다.
         </p>
-      )}
 
-      {canSubmit && (
-        <form
-          onSubmit={(e) => void handleSubmit(e)}
+        <div
           style={{
             display: 'flex',
             flexDirection: 'column',
-            gap: 'var(--space-3)',
-            marginTop: 'var(--space-4)',
+            alignItems: 'center',
+            gap: 'var(--space-1)',
           }}
         >
-          <label style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-1)' }}>
-            제목
-            <input value={title} onChange={(e) => setTitle(e.target.value)} required />
+          <label
+            htmlFor="upload-file-input"
+            style={{
+              display: 'inline-block',
+              padding: 'var(--space-2) var(--space-3)',
+              border: '1px solid var(--border)',
+              borderRadius: 'var(--radius-control)',
+              cursor: 'pointer',
+            }}
+          >
+            파일 선택
           </label>
-          <label style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-1)' }}>
-            아티스트(선택)
-            <input value={artist} onChange={(e) => setArtist(e.target.value)} />
-          </label>
-          {submitError && <p style={{ color: 'var(--danger)' }}>{submitError}</p>}
-          <div style={{ display: 'flex', gap: 'var(--space-2)' }}>
-            <button type="submit" disabled={isSubmitting || justUploaded}>
-              {justUploaded ? '업로드완료 ✓' : isSubmitting ? '업로드 중…' : '업로드'}
-            </button>
+          <input
+            id="upload-file-input"
+            type="file"
+            accept={ACCEPT}
+            onChange={(e) => void handleFileChange(e)}
+            style={{
+              position: 'absolute',
+              width: 1,
+              height: 1,
+              padding: 0,
+              margin: -1,
+              overflow: 'hidden',
+              clip: 'rect(0, 0, 0, 0)',
+              whiteSpace: 'nowrap',
+              border: 0,
+            }}
+          />
+          {file && (
+            <span style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>{file.name}</span>
+          )}
+        </div>
+
+        {parseError && (
+          <p style={{ color: 'var(--danger)', textAlign: 'center' }}>{parseError}</p>
+        )}
+
+        {fileKind === 'digital' && parsedScore && (
+          <p style={{ color: 'var(--success)', textAlign: 'center' }}>
+            인식됨 — 노트 {noteCount}개, BPM {parsedScore.meta.bpm}
+          </p>
+        )}
+
+        {canSubmit && (
+          <form
+            onSubmit={(e) => void handleSubmit(e)}
+            style={{
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 'var(--space-3)',
+              marginTop: 'var(--space-4)',
+            }}
+          >
+            <label style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-1)' }}>
+              제목
+              <input value={title} onChange={(e) => setTitle(e.target.value)} required />
+            </label>
+            <label style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-1)' }}>
+              아티스트(선택)
+              <input value={artist} onChange={(e) => setArtist(e.target.value)} />
+            </label>
+            {submitError && <p style={{ color: 'var(--danger)' }}>{submitError}</p>}
+            <div style={{ display: 'flex', gap: 'var(--space-2)', justifyContent: 'center' }}>
+              <button type="submit" disabled={isSubmitting || justUploaded}>
+                {justUploaded ? '업로드완료 ✓' : isSubmitting ? '업로드 중…' : '업로드'}
+              </button>
+              <button type="button" onClick={handleCancel}>
+                취소
+              </button>
+            </div>
+          </form>
+        )}
+
+        {!canSubmit && (
+          <div style={{ marginTop: 'var(--space-4)', display: 'flex', justifyContent: 'center' }}>
             <button type="button" onClick={handleCancel}>
               취소
             </button>
           </div>
-        </form>
-      )}
-
-      {!canSubmit && (
-        <div style={{ marginTop: 'var(--space-4)' }}>
-          <button type="button" onClick={handleCancel}>
-            취소
-          </button>
-        </div>
-      )}
+        )}
+      </div>
     </Modal>
   )
 }
