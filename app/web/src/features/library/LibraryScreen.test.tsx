@@ -438,4 +438,50 @@ describe('LibraryScreen — 목록 새로고침 경합(모드A 지적 반영)', 
     expect(screen.getByText('바뀐이름')).toBeInTheDocument() // 덮어쓰이면 안 됨
     expect(screen.queryByText('원래이름')).not.toBeInTheDocument()
   })
+
+  it('모드A 7차 재검토 지적(필수, 반영) — 같은 곡을 연달아 두 번 이름변경하면, 먼저 보낸 요청이 나중에 응답해도 나중에 보낸(최신) 이름이 남음', async () => {
+    const song = makeSong({ id: 9, title: '원래이름' })
+    listSongsMock.mockResolvedValueOnce([song])
+    render(<LibraryScreen onOpenSong={() => {}} onEditSong={() => {}} onLoggedOut={() => {}} />)
+    await screen.findByText('원래이름')
+
+    let resolveFirst: ((song: SongSummary) => void) | undefined
+    let resolveSecond: ((song: SongSummary) => void) | undefined
+    renameSongMock
+      .mockImplementationOnce(
+        () =>
+          new Promise<SongSummary>((resolve) => {
+            resolveFirst = resolve
+          }),
+      )
+      .mockImplementationOnce(
+        () =>
+          new Promise<SongSummary>((resolve) => {
+            resolveSecond = resolve
+          }),
+      )
+
+    fireEvent.click(screen.getByRole('button', { name: '이름변경' }))
+    const input = screen.getByDisplayValue('원래이름')
+    // 1차 커밋(Enter) — 아직 응답 안 함. renamingId는 finally에서만 풀리므로
+    // 입력창이 그대로 열려 있어(공란이 아닌 한) 바로 이어서 또 바꿀 수 있다.
+    fireEvent.change(input, { target: { value: '첫번째이름' } })
+    fireEvent.keyDown(input, { key: 'Enter' })
+    expect(renameSongMock).toHaveBeenCalledTimes(1)
+
+    // 2차 커밋(blur) — 1차가 아직 응답하기 전에 또 바꿔서 커밋.
+    fireEvent.change(input, { target: { value: '두번째이름' } })
+    fireEvent.blur(input)
+    expect(renameSongMock).toHaveBeenCalledTimes(2)
+
+    // 1차(먼저 보낸, 낡은) 요청이 2차보다 늦게 응답 — 반영되면 안 됨.
+    await act(async () => {
+      resolveFirst?.({ ...song, title: '첫번째이름' })
+    })
+    await act(async () => {
+      resolveSecond?.({ ...song, title: '두번째이름' })
+    })
+    expect(screen.getByText('두번째이름')).toBeInTheDocument()
+    expect(screen.queryByText('첫번째이름')).not.toBeInTheDocument()
+  })
 })
