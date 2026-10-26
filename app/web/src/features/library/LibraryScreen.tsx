@@ -72,6 +72,14 @@ export function LibraryScreen({ onOpenSong, onEditSong, onLoggedOut }: LibrarySc
   // 보임) — 두 함수가 세대 번호를 공유해, 자기 호출 이후 더 최신 호출이
   // 있었으면 응답을 무시한다(UploadScreen의 submitGenerationRef와 같은 패턴).
   const songsFetchGenerationRef = useRef(0)
+  // 모드A 재검토 지적(필수, 반영) — silentReload()가 "최초 로딩이 아직 안
+  // 끝난(loading===true) 바로 그 요청"으로서 실패하는 경우를 구분하려고
+  // loading의 최신 값을 ref로도 들고 있는다(PracticeCanvas의 mixerStateRef와
+  // 같은 패턴 — 클로저 안에서 state의 최신 값을 읽기 위함).
+  const loadingRef = useRef(loading)
+  useEffect(() => {
+    loadingRef.current = loading
+  }, [loading])
 
   async function reload() {
     const generation = ++songsFetchGenerationRef.current
@@ -112,7 +120,19 @@ export function LibraryScreen({ onOpenSong, onEditSong, onLoggedOut }: LibrarySc
       setSongs(latest)
       setLoading(false)
     } catch {
-      // 조용히 무시 — 다음 폴링에서 재시도
+      // 모드A 재검토 지적(필수, 반영) — 배경 폴링은 songs가 비어 있는 한
+      // 시작도 안 하므로(아래 폴링 effect의 hasPending 조건), 이 catch가
+      // "최초 로딩이 아직 안 끝난" 상태로 불릴 수 있는 유일한 경로는
+      // onSongCreated처럼 reload()가 아직 응답 전인데 먼저 실패하는
+      // 좁은 창뿐이다 — 그땐 reload()와 똑같이 에러로 전환해야 스켈레톤이
+      // 영원히 안 걷히는 걸 막는다. 이미 목록이 떠 있는 상태(loading이
+      // 이미 false)의 배경 폴링 실패는 기존 원칙대로 조용히 무시 — 다음
+      // 폴링에서 재시도(일시적 오류로 이미 보여주던 목록 위에 에러를 덮지
+      // 않음).
+      if (generation === songsFetchGenerationRef.current && loadingRef.current) {
+        setError('목록을 불러오지 못했습니다')
+        setLoading(false)
+      }
     }
   }
 

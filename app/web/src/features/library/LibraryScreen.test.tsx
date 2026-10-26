@@ -333,4 +333,36 @@ describe('LibraryScreen — 목록 새로고침 경합(모드A 지적 반영)', 
     expect(screen.queryByText('대기 중')).not.toBeInTheDocument()
     expect(container.querySelectorAll('.skeleton')).toHaveLength(0)
   })
+
+  it('모드A 재검토 2차 지적(필수, 반영) — 최초 로딩이 아직 안 끝난 상태에서 silentReload가 실패해도 스켈레톤이 안 남고 에러로 전환됨', async () => {
+    // 1차(reload)는 응답 안 함(마운트 시 보낸 채로 계속 대기) — 배경 폴링은
+    // songs가 비어 있는 한 시작도 안 해서, onSongCreated만이 이 상황을
+    // 재현할 수 있는 유일한 경로다.
+    listSongsMock.mockImplementationOnce(() => new Promise<SongSummary[]>(() => {}))
+    const { container } = render(
+      <LibraryScreen onOpenSong={() => {}} onEditSong={() => {}} onLoggedOut={() => {}} />,
+    )
+    expect(container.querySelectorAll('.skeleton').length).toBeGreaterThan(0)
+
+    fireEvent.click(screen.getByRole('button', { name: '+ 업로드' }))
+    listSongsMock.mockRejectedValueOnce(new Error('network down'))
+    fireEvent.click(screen.getByRole('button', { name: 'mock-song-created' }))
+
+    await waitFor(() => expect(container.querySelectorAll('.skeleton')).toHaveLength(0))
+    expect(screen.getByText('목록을 불러오지 못했습니다')).toBeInTheDocument()
+  })
+
+  it('이미 목록이 떠 있는 상태(최초 로딩 완료 후)의 배경 폴링 실패는 조용히 무시됨(에러 배너 안 뜸)', async () => {
+    listSongsMock.mockResolvedValueOnce([makeSong({ status: 'pending' })])
+    render(<LibraryScreen onOpenSong={() => {}} onEditSong={() => {}} onLoggedOut={() => {}} />)
+    await screen.findByText('테스트곡') // 최초 로딩 완료(loading===false)
+
+    listSongsMock.mockRejectedValueOnce(new Error('transient'))
+    fireEvent.click(screen.getByRole('button', { name: '+ 업로드' }))
+    fireEvent.click(screen.getByRole('button', { name: 'mock-song-created' }))
+
+    await waitFor(() => expect(listSongsMock).toHaveBeenCalled())
+    expect(screen.queryByText('목록을 불러오지 못했습니다')).not.toBeInTheDocument()
+    expect(screen.getByText('테스트곡')).toBeInTheDocument() // 기존 목록 그대로 유지
+  })
 })
