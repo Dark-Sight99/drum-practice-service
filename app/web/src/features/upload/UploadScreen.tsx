@@ -249,14 +249,23 @@ export function UploadScreen({
 
   async function handlePlayGenerated() {
     if (!generatingSong) return
+    // 모드A 지적(필수, 반영) — DrumScore를 가져오는 도중 사용자가 배경
+    // 클릭·Esc·닫기로 모달을 먼저 닫으면(handleCancel이 submitGenerationRef를
+    // 올림), 뒤늦게 도착한 응답으로 onPlaySong이 불려 이미 닫은 모달에서
+    // 느닷없이 연주 화면으로 넘어가 버릴 수 있었다 — 업로드 제출과 같은
+    // 세대 번호 가드를 재사용(이 ref는 "이 모달 세션에서 지금 유효한 비동기
+    // 작업이 맞는지"를 범용으로 추적).
+    const myGeneration = ++submitGenerationRef.current
     setPlayError(null)
     setIsFetchingScore(true)
     try {
       const drumScore = await fetchSongDrumScore(generatingSong.id)
+      if (myGeneration !== submitGenerationRef.current) return // 그 사이 닫혔으면 무시
       onPlaySong(generatingSong, drumScore)
       resetState()
       onCancel() // 모달 닫기만 — 완료 토스트는 필요 없음(바로 연주 화면으로 이동)
     } catch (err) {
+      if (myGeneration !== submitGenerationRef.current) return
       setPlayError(err instanceof ApiError ? err.message : '곡을 여는 데 실패했습니다')
       setIsFetchingScore(false)
     }

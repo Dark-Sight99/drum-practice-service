@@ -31,10 +31,23 @@ vi.mock('../../api/auth', () => ({ logout: logoutMock }))
 // UploadScreen.test.tsx에서 이미 검증하므로, 여기선 LibraryScreen이
 // onUploaded를 받았을 때 토스트를 띄우는지만 확인 — UploadScreen을 "완료
 // 버튼"만 있는 자리표시자로 대체.
+// 2026-10-27 — onSongCreated(silentReload 트리거)도 테스트에서 직접 눌러
+// 유발할 수 있게 자리표시자에 버튼을 하나 더 둠(요청 경합 회귀 테스트용).
 vi.mock('../upload/UploadScreen', () => ({
-  UploadScreen: ({ open, onUploaded }: { open: boolean; onUploaded: () => void }) =>
+  UploadScreen: ({
+    open,
+    onUploaded,
+    onSongCreated,
+  }: {
+    open: boolean
+    onUploaded: () => void
+    onSongCreated: () => void
+  }) =>
     open ? (
-      <button onClick={onUploaded}>mock-upload-complete</button>
+      <>
+        <button onClick={onUploaded}>mock-upload-complete</button>
+        <button onClick={onSongCreated}>mock-song-created</button>
+      </>
     ) : null,
 }))
 
@@ -278,5 +291,36 @@ describe('LibraryScreen — 카드 전체 클릭(2026-10-26 의뢰인 요청)', 
     await screen.findByText('테스트곡')
     fireEvent.click(screen.getByText(/BPM 120/))
     expect(onOpenSong).not.toHaveBeenCalled()
+  })
+})
+
+describe('LibraryScreen — 목록 새로고침 경합(모드A 지적 반영)', () => {
+  beforeEach(() => {
+    listSongsMock.mockReset()
+  })
+
+  it('먼저 보낸 요청이 더 늦게 응답해도, 그 사이 들어온 최신 목록을 덮어쓰지 않음', async () => {
+    let resolveFirst: ((songs: SongSummary[]) => void) | undefined
+    listSongsMock.mockImplementationOnce(
+      () =>
+        new Promise<SongSummary[]>((resolve) => {
+          resolveFirst = resolve
+        }),
+    )
+    render(<LibraryScreen onOpenSong={() => {}} onEditSong={() => {}} onLoggedOut={() => {}} />)
+    // 마운트 시 reload()가 1차 요청을 보냄 — 아직 응답 안 함(로딩 스켈레톤 상태).
+
+    // onSongCreated(silentReload)로 2차(최신) 요청을 보내고, 1차보다 먼저 응답하게 함.
+    fireEvent.click(screen.getByRole('button', { name: '+ 업로드' }))
+    listSongsMock.mockResolvedValueOnce([makeSong({ status: 'completed' })])
+    fireEvent.click(screen.getByRole('button', { name: 'mock-song-created' }))
+    await waitFor(() => expect(screen.getByText('완료')).toBeInTheDocument())
+
+    // 이제서야 1차(더 오래된) 요청이 "대기 중"으로 뒤늦게 응답 — 반영되면 안 됨.
+    await act(async () => {
+      resolveFirst?.([makeSong({ status: 'pending' })])
+    })
+    expect(screen.getByText('완료')).toBeInTheDocument() // 최신 상태 그대로 유지
+    expect(screen.queryByText('대기 중')).not.toBeInTheDocument()
   })
 })

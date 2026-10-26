@@ -65,15 +65,27 @@ export function LibraryScreen({ onOpenSong, onEditSong, onLoggedOut }: LibrarySc
   const [renameValue, setRenameValue] = useState('')
   const [openingId, setOpeningId] = useState<number | null>(null)
 
+  // 모드A 지적(필수, 반영) — reload()/silentReload()가 겹쳐 돌 수 있다(배경
+  // 폴링 2초 간격 도중 다른 reload()가 또 불리는 경우 등). 응답이 요청 순서와
+  // 다르게 도착하면(네트워크 지연) 더 오래된 응답이 나중에 와서 이미 최신으로
+  // 갱신된 songs를 옛 상태로 덮어쓸 수 있었음(예: 완료된 곡이 다시 "처리 중"으로
+  // 보임) — 두 함수가 세대 번호를 공유해, 자기 호출 이후 더 최신 호출이
+  // 있었으면 응답을 무시한다(UploadScreen의 submitGenerationRef와 같은 패턴).
+  const songsFetchGenerationRef = useRef(0)
+
   async function reload() {
+    const generation = ++songsFetchGenerationRef.current
     setLoading(true)
     setError(null)
     try {
-      setSongs(await listSongs())
+      const latest = await listSongs()
+      if (generation !== songsFetchGenerationRef.current) return
+      setSongs(latest)
     } catch (err) {
+      if (generation !== songsFetchGenerationRef.current) return
       setError(err instanceof ApiError ? err.message : '목록을 불러오지 못했습니다')
     } finally {
-      setLoading(false)
+      if (generation === songsFetchGenerationRef.current) setLoading(false)
     }
   }
 
@@ -83,8 +95,11 @@ export function LibraryScreen({ onOpenSong, onEditSong, onLoggedOut }: LibrarySc
   // 폴링에서 다시 시도(목록이 이미 떠 있는 상태에서 일시적 네트워크 오류로
   // 화면 전체를 에러로 덮을 필요는 없음).
   async function silentReload() {
+    const generation = ++songsFetchGenerationRef.current
     try {
-      setSongs(await listSongs())
+      const latest = await listSongs()
+      if (generation !== songsFetchGenerationRef.current) return
+      setSongs(latest)
     } catch {
       // 조용히 무시 — 다음 폴링에서 재시도
     }

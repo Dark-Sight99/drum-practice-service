@@ -179,6 +179,57 @@ describe('UploadScreen (모달)', () => {
     expect(onCancel).toHaveBeenCalledTimes(1) // 완료 토스트 없이 모달만 닫힘(바로 연주 화면으로 이동)
   })
 
+  it('모드A 지적(필수, 반영) — 연주하기로 DrumScore를 가져오는 도중 모달을 닫으면, 뒤늦은 응답이 와도 연주 화면으로 안 넘어감', async () => {
+    const onPlaySong = vi.fn()
+    const onCancel = vi.fn()
+    let resolveDrumScore: ((value: unknown) => void) | undefined
+    fetchSongDrumScoreMock.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveDrumScore = resolve
+        }),
+    )
+    render(
+      <UploadScreen
+        open
+        onUploaded={noop}
+        onCancel={onCancel}
+        onSongCreated={noop}
+        onPlaySong={onPlaySong}
+      />,
+    )
+    const input = screen.getByLabelText('파일 선택') as HTMLInputElement
+    selectFile(input, new File(['x'], 'song.mp3', { type: 'audio/mpeg' }))
+    await flush()
+    fireEvent.click(screen.getByRole('button', { name: '업로드' }))
+    await flush()
+
+    fetchSongMock.mockResolvedValueOnce({ ...uploadedSong, status: 'completed' })
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2000)
+    })
+    fireEvent.click(screen.getByRole('button', { name: '연주하기' }))
+    await flush()
+    expect(fetchSongDrumScoreMock).toHaveBeenCalledTimes(1)
+
+    // 응답이 오기 전에 배경 클릭으로 모달을 닫음
+    fireEvent.click(screen.getByRole('presentation'))
+    expect(onCancel).toHaveBeenCalledTimes(1)
+
+    // 그제서야 DrumScore 응답이 늦게 도착
+    await act(async () => {
+      resolveDrumScore?.({
+        version: 1,
+        meta: { title: '곡', bpm: 120, timeSignature: [4, 4], source: 'audio' },
+        ppq: 480,
+        audioOffsetMs: 0,
+        notes: [],
+      })
+      await vi.advanceTimersByTimeAsync(0)
+    })
+    expect(onPlaySong).not.toHaveBeenCalled() // 이미 닫았으니 뒤늦은 응답은 무시돼야 함
+  })
+
   it('생성이 실패(failed)하면 실패 안내를 보여주고 연주하기는 안 뜸', async () => {
     render(
       <UploadScreen
