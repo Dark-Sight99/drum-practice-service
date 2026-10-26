@@ -293,7 +293,17 @@ export function LibraryScreen({ onOpenSong, onEditSong, onLoggedOut }: LibrarySc
     songMutationKindRef.current.set(song.id, 'delete')
     try {
       await deleteSong(song.id)
-      if (songMutationSeqRef.current.get(song.id) !== mySeq) return
+      // 모드A 10차 재검토 지적(필수, 반영) — 삭제 성공은 되돌릴 수 없는
+      // 사실이라, 그 사이 같은 곡에 대해 더 늦게 "시작된" 수정(이름변경)이
+      // 있었다는 이유로 무시하면 안 된다. 실제로 재현됨: 삭제 요청을 보낸
+      // 뒤 응답 전에 같은 곡 이름변경을 커밋해 먼저 성공하면(순번이 삭제보다
+      // 높아짐), 이후 서버에서도 삭제가 성공했는데도 이 가드 때문에 로컬
+      // 목록에 그대로 남아 있었다(심지어 배경 조회가 그 곡을 응답에서
+      // 빠뜨리면 위 rescue pass가 "마지막 수정이 rename"이라며 되살리기까지
+      // 함). songMutationSeqRef는 곡 id별이라 이 가드를 빼도 다른 곡에는
+      // 영향이 없고, 이후 더 늦게 도착하는 이름변경 응답의 `.map()`은 이미
+      // 빠진 id에는 아무 효과가 없어(새로 추가하지 않음) 이 곡이 다시
+      // 살아날 일도 없다.
       const next = (songsRef.current ?? []).filter((s) => s.id !== song.id)
       songsRef.current = next
       setSongs(next)
