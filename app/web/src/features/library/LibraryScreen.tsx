@@ -27,6 +27,20 @@ const SOURCE_LABEL: Record<string, string> = {
   audio: '음원',
 }
 
+// T3-19 모드A 지적 후 추가 발견(2026-10-26, 의뢰인 실사용 중 재발견) — 음원
+// 업로드가 생기면서 "분리·채보가 아직 안 끝난 곡"이 라이브러리에 훨씬 더
+// 흔하게(몇 분씩) 떠 있게 됐는데, 그 상태에서 "열기"/"편집"을 눌러도 막는
+// 게 없어 아직 없는 DrumScore를 조회하다 "DrumScore를 찾을 수 없습니다"
+// 에러가 그대로 사용자에게 보였음(실제로 재현됨, 의뢰인 스크린샷). 처리가
+// 끝난(`completed`) 곡만 열 수 있게 막고, 상태도 영어 원문 대신 한글로
+// 보여준다.
+const STATUS_LABEL: Record<string, string> = {
+  pending: '대기 중',
+  processing: '처리 중…',
+  completed: '완료',
+  failed: '실패',
+}
+
 export function LibraryScreen({ onOpenSong, onEditSong, onLoggedOut }: LibraryScreenProps) {
   // T3-19(2026-10-26 의뢰인 요청) — 업로드를 별도 화면(전체 페이지 전환)이
   // 아니라 모달로 띄운다. 업로드 완료 시 목록을 다시 불러와 새 곡이 바로
@@ -170,66 +184,85 @@ export function LibraryScreen({ onOpenSong, onEditSong, onLoggedOut }: LibrarySc
       )}
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
-        {visibleSongs.map((song) => (
-          <div
-            key={song.id}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              gap: 'var(--space-3)',
-              padding: 'var(--space-3)',
-              background: 'var(--surface)',
-              borderRadius: 'var(--radius-control)',
-            }}
-          >
-            <div style={{ flex: 1, minWidth: 0 }}>
-              {renamingId === song.id ? (
-                <input
-                  value={renameValue}
-                  onChange={(e) => setRenameValue(e.target.value)}
-                  onBlur={() => void commitRename(song.id)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') void commitRename(song.id)
-                    if (e.key === 'Escape') setRenamingId(null)
-                  }}
-                  // eslint-disable-next-line jsx-a11y/no-autofocus -- 인라인 이름변경 진입 시 바로 타이핑
-                  autoFocus
-                />
-              ) : (
+        {visibleSongs.map((song) => {
+          const isReady = song.status === 'completed'
+          return (
+            <div
+              key={song.id}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: 'var(--space-3)',
+                padding: 'var(--space-3)',
+                background: 'var(--surface)',
+                borderRadius: 'var(--radius-control)',
+              }}
+            >
+              <div style={{ flex: 1, minWidth: 0 }}>
+                {renamingId === song.id ? (
+                  <input
+                    value={renameValue}
+                    onChange={(e) => setRenameValue(e.target.value)}
+                    onBlur={() => void commitRename(song.id)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') void commitRename(song.id)
+                      if (e.key === 'Escape') setRenamingId(null)
+                    }}
+                    // eslint-disable-next-line jsx-a11y/no-autofocus -- 인라인 이름변경 진입 시 바로 타이핑
+                    autoFocus
+                  />
+                ) : isReady ? (
+                  <button
+                    onClick={() => void handleOpen(song)}
+                    disabled={openingId === song.id}
+                    style={{
+                      background: 'none',
+                      border: 'none',
+                      color: 'var(--text)',
+                      textAlign: 'left',
+                      padding: 0,
+                      font: 'inherit',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    <strong>{song.title}</strong>
+                    {song.artist && (
+                      <span style={{ color: 'var(--text-muted)' }}> — {song.artist}</span>
+                    )}
+                  </button>
+                ) : (
+                  // 처리가 아직 안 끝난 곡은 눌러도 열 게 없으므로(DrumScore가
+                  // 없음) 버튼이 아니라 그냥 글자로 — 실수로 눌러도 에러가 안 남.
+                  <span>
+                    <strong>{song.title}</strong>
+                    {song.artist && (
+                      <span style={{ color: 'var(--text-muted)' }}> — {song.artist}</span>
+                    )}
+                  </span>
+                )}
+                <div style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>
+                  {song.original_bpm != null ? `BPM ${song.original_bpm}` : 'BPM 미상'} ·{' '}
+                  {SOURCE_LABEL[song.source_type] ?? song.source_type} ·{' '}
+                  <span style={{ color: song.status === 'failed' ? 'var(--danger)' : undefined }}>
+                    {STATUS_LABEL[song.status] ?? song.status}
+                  </span>
+                </div>
+              </div>
+              <div style={{ display: 'flex', gap: 'var(--space-1)' }}>
                 <button
-                  onClick={() => void handleOpen(song)}
-                  disabled={openingId === song.id}
-                  style={{
-                    background: 'none',
-                    border: 'none',
-                    color: 'var(--text)',
-                    textAlign: 'left',
-                    padding: 0,
-                    font: 'inherit',
-                    cursor: 'pointer',
-                  }}
+                  onClick={() => void handleEdit(song)}
+                  disabled={!isReady || openingId === song.id}
+                  title={isReady ? undefined : '처리가 끝나야 편집할 수 있습니다'}
                 >
-                  <strong>{song.title}</strong>
-                  {song.artist && (
-                    <span style={{ color: 'var(--text-muted)' }}> — {song.artist}</span>
-                  )}
+                  편집
                 </button>
-              )}
-              <div style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>
-                {song.original_bpm != null ? `BPM ${song.original_bpm}` : 'BPM 미상'} ·{' '}
-                {SOURCE_LABEL[song.source_type] ?? song.source_type} · {song.status}
+                <button onClick={() => startRename(song)}>이름변경</button>
+                <button onClick={() => void handleDelete(song)}>삭제</button>
               </div>
             </div>
-            <div style={{ display: 'flex', gap: 'var(--space-1)' }}>
-              <button onClick={() => void handleEdit(song)} disabled={openingId === song.id}>
-                편집
-              </button>
-              <button onClick={() => startRename(song)}>이름변경</button>
-              <button onClick={() => void handleDelete(song)}>삭제</button>
-            </div>
-          </div>
-        ))}
+          )
+        })}
       </div>
     </main>
   )
