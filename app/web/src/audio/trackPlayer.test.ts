@@ -519,8 +519,27 @@ describe('createTrackPlayer', () => {
         ]),
       ).toThrow('Web Audio 노드 생성 실패 시뮬레이션')
 
-      // 첫 번째 트랙은 이미 만들어졌으므로 정리(일시정지)됐어야 함.
+      // 두 트랙 다 정리(일시정지)됐어야 함 — 첫 번째(stem_drums)는 이미
+      // 완성돼 바깥 catch의 정리 루프가, 두 번째(stem_bass, 실패한 그
+      // 트랙 자신)는 모드A 지적으로 추가한 안쪽 catch의 즉시 정리가 맡는다.
+      expect(pauseMock).toHaveBeenCalledTimes(2)
+    })
+
+    it('모드A 지적(필수, 반영함) — createMediaElementSource()는 성공하고 createGain()이 실패해도(같은 트랙 안에서) 그 트랙의 엘리먼트·부분 생성된 노드가 샘 없이 정리됨', () => {
+      stubIOSUserAgent()
+      createGainMock.mockImplementation(() => {
+        throw new Error('createGain 실패 시뮬레이션')
+      })
+
+      expect(() =>
+        createAudioTrackPool([{ kind: 'stem_drums', url: 'http://x/drums.wav' }]),
+      ).toThrow('createGain 실패 시뮬레이션')
+
+      // 이 트랙은 tracks 배열에 push되기 전에 실패했지만(바깥 catch의 정리
+      // 루프가 못 보는 범위), 실패 지점에서 즉시 자기 자신을 정리해야 한다 —
+      // element.pause()와 이미 만들어진 sourceNode.disconnect() 둘 다.
       expect(pauseMock).toHaveBeenCalledTimes(1)
+      expect(sourceNodes[0].disconnect).toHaveBeenCalledTimes(1)
     })
   })
 

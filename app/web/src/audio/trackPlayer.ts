@@ -152,11 +152,37 @@ export function createAudioTrackPool(sources: TrackSource[]): AudioTrackPool {
         })
         continue
       }
-      const sourceNode = context.createMediaElementSource(element)
-      const gainNode = context.createGain()
-      sourceNode.connect(gainNode)
-      gainNode.connect(context.destination)
-      tracks.push({ kind: source.kind, element, sourceNode, gainNode, unlocked: false, started: false })
+      // 모드A 지적(필수, 반영함) — 이 트랙 자체(createMediaElementSource는
+      // 성공했는데 createGain()/connect()가 실패하는 경우 등)가 완성되기
+      // 전에 던지면, 아직 `tracks.push()` 전이라 바깥 catch의 정리 루프가
+      // 이 트랙을 못 본다 — element·부분적으로 만들어진 sourceNode가 그대로
+      // 샌다. 트랙 하나 단위로 즉시 정리하고 다시 던져서, 바깥 catch는
+      // "이전까지 이미 완성된 트랙들"만 정리하면 되게 한다.
+      let sourceNode: MediaElementAudioSourceNode | null = null
+      try {
+        sourceNode = context.createMediaElementSource(element)
+        const gainNode = context.createGain()
+        sourceNode.connect(gainNode)
+        gainNode.connect(context.destination)
+        tracks.push({ kind: source.kind, element, sourceNode, gainNode, unlocked: false, started: false })
+      } catch (err) {
+        try {
+          element.pause()
+        } catch {
+          /* 무시 */
+        }
+        try {
+          sourceNode?.disconnect()
+        } catch {
+          /* 무시 */
+        }
+        try {
+          element.src = ''
+        } catch {
+          /* 무시 */
+        }
+        throw err
+      }
     }
   } catch (err) {
     for (const track of tracks) {
