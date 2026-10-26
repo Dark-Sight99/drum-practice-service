@@ -10,7 +10,7 @@ import {
 } from '../audio/timing'
 
 export type NoteShape =
-  'x' | 'x-ring' | 'x-large' | 'diamond' | 'rounded-rect' | 'circle' | 'circle-large' | 'bar'
+  'x' | 'x-ring' | 'x-large' | 'diamond' | 'rounded-rect' | 'circle' | 'circle-large' | 'bar' | 'bar-ring'
 
 export interface LaneDef {
   /** 이 레인에 속하는 DrumPiece(하이햇 닫힘/열림은 한 레인을 공유 — 04-ui-ux.md §3). */
@@ -25,19 +25,27 @@ export interface LaneDef {
  * 스네어·하이탐과 같이 자주 섞어 치는 패턴을 한눈에 보기 어렵다는 지적.
  * 킥을 스네어 바로 다음(하이탐 앞)으로 옮김 — 스네어·킥·하이탐이 서로
  * 가까워져 베이스/스네어/탐 조합 패턴을 한 화면에서 더 쉽게 읽을 수 있음. */
+// 2026-10-26(의뢰인 피드백) — 원래는 피스마다 다른 모양(✕/◇/사각형/원 등)이었는데,
+// 레인이 피스별로 이미 나뉘어 있어 그 자체로 피스를 구분할 수 있는데도 모양까지
+// 다르면 "같은 타이밍인지 다른 타이밍인지" 순간적으로 읽기 더 어렵다는 지적 —
+// 빠르게 훑어볼 때는 모양 차이가 오히려 방해. 전부 킥(KK)의 막대 모양으로
+// 통일하고 색으로만 구분(레인 위치+ 색이 이미 접근성을 보장 — intent/08-design.md
+// §1의 "색약 대응" 취지는 레인 구조 자체로 유지됨, 모양을 더할 필요 없음).
+// 하이햇 열림/닫힘만 예외 — 모양이 아니라 "치는 방법 자체"가 달라 구분이 필요해
+// 막대 위에 테두리 원(`bar-ring`)을 얹어 유지.
 export const LANES: readonly LaneDef[] = [
   {
     pieces: ['hihat_closed', 'hihat_open'],
     label: 'HH',
-    shapeByPiece: { hihat_closed: 'x', hihat_open: 'x-ring' },
+    shapeByPiece: { hihat_closed: 'bar', hihat_open: 'bar-ring' },
   },
-  { pieces: ['crash'], label: 'CR', shapeByPiece: { crash: 'x-large' } },
-  { pieces: ['snare'], label: 'SN', shapeByPiece: { snare: 'rounded-rect' } },
+  { pieces: ['crash'], label: 'CR', shapeByPiece: { crash: 'bar' } },
+  { pieces: ['snare'], label: 'SN', shapeByPiece: { snare: 'bar' } },
   { pieces: ['kick'], label: 'KK', shapeByPiece: { kick: 'bar' } },
-  { pieces: ['tom_high'], label: 'HT', shapeByPiece: { tom_high: 'circle' } },
-  { pieces: ['tom_mid'], label: 'MT', shapeByPiece: { tom_mid: 'circle' } },
-  { pieces: ['tom_floor'], label: 'FT', shapeByPiece: { tom_floor: 'circle-large' } },
-  { pieces: ['ride'], label: 'RD', shapeByPiece: { ride: 'diamond' } },
+  { pieces: ['tom_high'], label: 'HT', shapeByPiece: { tom_high: 'bar' } },
+  { pieces: ['tom_mid'], label: 'MT', shapeByPiece: { tom_mid: 'bar' } },
+  { pieces: ['tom_floor'], label: 'FT', shapeByPiece: { tom_floor: 'bar' } },
+  { pieces: ['ride'], label: 'RD', shapeByPiece: { ride: 'bar' } },
 ]
 
 export function laneIndexForPiece(piece: DrumPiece): number {
