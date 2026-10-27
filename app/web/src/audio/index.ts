@@ -10,6 +10,8 @@ export {
   effectiveGain,
   isMusicMuted,
   linearGainToDb,
+  METRONOME_BOOST_DB,
+  metronomeGainToDb,
   MUSIC_STEM_KEYS,
   musicVolume,
   setMusicMuted,

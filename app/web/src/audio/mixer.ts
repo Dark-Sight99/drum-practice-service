@@ -137,3 +137,21 @@ export function linearGainToDb(linear: number): number {
   if (linear <= 0) return -Infinity
   return 20 * Math.log10(linear)
 }
+
+/** T3-39(2026-10-27, 의뢰인 요청) — "메트로놈 소리가 노래에 묻힌다, 100
+ * 기준으로 좀 더 컸으면 좋겠다". 메트로놈 슬라이더가 100(선형 1.0)일 때의
+ * 상한(dB)을 그만큼 올린다 — 슬라이더를 낮추면 여기서도 비례해서 같이
+ * 줄어드는 기존 동작은 그대로 유지(단순히 상한 자체를 올리는 것).
+ * 몇 dB가 "딱 맞는지"는 Claude가 소리를 직접 들을 수 없어 판단 불가
+ * (CLAUDE.md §1) — +6dB(체감 음량 약 2배)를 1차 추정치로 적용, 의뢰인이
+ * 직접 들어보고 모자라거나 과하면 조정. */
+export const METRONOME_BOOST_DB = 6
+
+/** linearGainToDb()에 위 METRONOME_BOOST_DB를 더한 메트로놈 전용 버전.
+ * -Infinity(무음)에 유한수를 더해도 그대로 -Infinity라 별도 분기 불필요.
+ * 재생 중 메트로놈(PracticeCanvas)·카운트인 클릭(scorePlayer.ts에 넘기는
+ * countInVolumeDb) 둘 다 이 함수를 써야 "같은 소리·같은 음량 기준"이라는
+ * 기존 원칙(metronome.ts 코멘트)이 깨지지 않는다. */
+export function metronomeGainToDb(linear: number): number {
+  return linearGainToDb(linear) + METRONOME_BOOST_DB
+}
