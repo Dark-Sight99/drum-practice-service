@@ -12,7 +12,12 @@ from pathlib import Path
 from db import session as db_session
 from db.models import Asset, AssetKind, Job, JobType, Song, SongStatus
 from file_storage import resolve_asset_path, write_song_file
-from modules.separator.demucs_separator import encode_mp3, separate
+from modules.separator.demucs_separator import (
+    apply_gain,
+    compute_playback_gain,
+    encode_mp3,
+    separate,
+)
 
 logger = logging.getLogger("worker.separate")
 
@@ -71,6 +76,14 @@ def separate_handler(job: Job) -> None:
             elapsed = time.monotonic() - start
             logger.info("separate song=%s elapsed=%.1fs device_auto=yes", song.id, elapsed)
 
+            # 2026-10-27(의뢰인 요청) — "곡마다 믹서 100%일 때 음량이 달라
+            # 매번 다시 맞춰야 한다"는 불편 해소. 원곡 전체 믹스의 RMS를 기준
+            # 게인 하나로 계산해(demucs_separator.compute_playback_gain) 스템
+            # 4개 전부에 그대로 적용 — 이미 거치는 인코딩/저장 단계에 끼워
+            # 넣는 것이라 재인코딩이 추가로 생기지 않는다(음질 손실 없음).
+            gain_linear = compute_playback_gain(original_path, stems.values())
+            logger.info("song=%s playback_gain=%.3fx", song.id, gain_linear)
+
             # T3-16-feedback(네트워크 스트리밍) — drums는 T3-2 채보 파이프라인이
             # 그대로 읽으므로(librosa, WAV 입력 전제로 검증됨) 손대지 않고 WAV
             # 그대로 저장한다. bass/other/vocals는 "음악" 묶음으로 항상 셋이
@@ -79,9 +92,15 @@ def separate_handler(job: Job) -> None:
             # 네트워크(Tailscale)에서 끊김 — MP3로 압축해 저장한다.
             for name, stem_path in stems.items():
                 if name == "drums":
-                    rel_path = write_song_file(song.id, "stem_drums.wav", stem_path.read_bytes())
+                    rel_path = write_song_file(
+                        song.id, "stem_drums.wav", apply_gain(stem_path, gain_linear)
+                    )
                 else:
-                    rel_path = write_song_file(song.id, f"stem_{name}.mp3", encode_mp3(stem_path))
+                    rel_path = write_song_file(
+                        song.id,
+                        f"stem_{name}.mp3",
+                        encode_mp3(stem_path, gain_linear=gain_linear),
+                    )
                 written.append((name, rel_path))
 
             # T3-16-feedback-2(네트워크 스트리밍) — stem_drums.wav(38.7MB)는
@@ -97,7 +116,9 @@ def separate_handler(job: Job) -> None:
             # 안 깨짐.
             try:
                 sidecar_rel = write_song_file(
-                    song.id, "stem_drums.mp3", encode_mp3(stems["drums"])
+                    song.id,
+                    "stem_drums.mp3",
+                    encode_mp3(stems["drums"], gain_linear=gain_linear),
                 )
                 sidecar_written.append(sidecar_rel)
             except Exception:
