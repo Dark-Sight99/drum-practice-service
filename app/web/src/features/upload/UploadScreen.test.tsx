@@ -283,7 +283,7 @@ describe('UploadScreen (모달)', () => {
     expect(screen.queryByRole('button', { name: '연주하기' })).not.toBeInTheDocument()
   })
 
-  it('모드A 재검토 지적(Low, 반영) — 업로드 요청이 서버 응답 대기 중일 때 취소하면, 뒤늦게 응답이 와도 생성 중 화면으로 안 넘어감', async () => {
+  it('2026-10-27(의뢰인 요청) — 업로드 요청이 서버 응답 대기 중일 때는 취소 버튼이 없고 배경 클릭으로도 안 닫힘(실제로 취소되지 않는데 취소된 것처럼 보이는 걸 막음)', async () => {
     let resolveUpload: ((value: typeof audioUploadResult) => void) | undefined
     uploadAudioSongMock.mockImplementation(
       () =>
@@ -291,14 +291,13 @@ describe('UploadScreen (모달)', () => {
           resolveUpload = resolve
         }),
     )
-    const onSongCreated = vi.fn()
     const onCancel = vi.fn()
     render(
       <UploadScreen
         open
         onUploaded={noop}
         onCancel={onCancel}
-        onSongCreated={onSongCreated}
+        onSongCreated={noop}
         onPlaySong={noop}
       />,
     )
@@ -311,81 +310,19 @@ describe('UploadScreen (모달)', () => {
     expect(uploadAudioSongMock).toHaveBeenCalledTimes(1)
     expect(screen.getByRole('button', { name: '업로드 중…' })).toBeInTheDocument() // 응답 대기 중
 
-    fireEvent.click(screen.getByRole('presentation')) // 배경 클릭으로 취소(요청은 여전히 떠 있음)
-    expect(onCancel).toHaveBeenCalledTimes(1)
+    expect(screen.queryByRole('button', { name: '취소' })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('presentation')) // 배경 클릭 — 응답 대기 중엔 무시돼야 함
+    expect(onCancel).not.toHaveBeenCalled()
+    expect(screen.getByRole('button', { name: '업로드 중…' })).toBeInTheDocument() // 모달 그대로 열려있음
 
-    // 그제서야 서버 응답이 늦게 도착
+    // 응답이 오면(= 이 화면은 "생성 중" 화면으로 전환) 다시 닫을 수 있다.
     await act(async () => {
       resolveUpload?.(audioUploadResult)
       await vi.advanceTimersByTimeAsync(0)
     })
-
-    expect(onSongCreated).not.toHaveBeenCalled() // 이미 취소했으니 뒤늦은 성공 응답은 무시돼야 함
-    expect(screen.queryByRole('status')).not.toBeInTheDocument()
-  })
-
-  it('모드A 3차 재검토 지적(Low, 반영) — 취소 후 다시 제출했는데, 취소된 이전 요청이 뒤늦게 응답해도 생성 중 화면을 또 안 띄움', async () => {
-    let resolveFirst: ((value: typeof audioUploadResult) => void) | undefined
-    let resolveSecond: ((value: typeof audioUploadResult) => void) | undefined
-    uploadAudioSongMock
-      .mockImplementationOnce(
-        () =>
-          new Promise<typeof audioUploadResult>((resolve) => {
-            resolveFirst = resolve
-          }),
-      )
-      .mockImplementationOnce(
-        () =>
-          new Promise<typeof audioUploadResult>((resolve) => {
-            resolveSecond = resolve
-          }),
-      )
-    const onSongCreated = vi.fn()
-    const onCancel = vi.fn()
-    render(
-      <UploadScreen
-        open
-        onUploaded={noop}
-        onCancel={onCancel}
-        onSongCreated={onSongCreated}
-        onPlaySong={noop}
-      />,
-    )
-    const input = screen.getByLabelText('파일 선택') as HTMLInputElement
-
-    // 1차 제출 — 응답 대기 중에 취소
-    selectFile(input, new File(['x'], 'first.mp3', { type: 'audio/mpeg' }))
-    await flush()
-    fireEvent.click(screen.getByRole('button', { name: '업로드' }))
-    await flush()
+    expect(screen.getByRole('status')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('presentation'))
     expect(onCancel).toHaveBeenCalledTimes(1)
-
-    // 취소 후 같은 모달(마운트 상태 유지 — LibraryScreen이 open만 토글)에
-    // 다시 파일을 골라 2차로 제출(아직 응답 안 함, 대기 중)
-    selectFile(input, new File(['x'], 'second.mp3', { type: 'audio/mpeg' }))
-    await flush()
-    fireEvent.click(screen.getByRole('button', { name: '업로드' }))
-    await flush()
-    expect(uploadAudioSongMock).toHaveBeenCalledTimes(2)
-
-    // 1차(이미 취소된) 요청이 이제서야 뒤늦게 응답 — 2차가 아직 안 끝났는데도
-    // onSongCreated가 불리면 안 됨(세대 번호 불일치로 무시돼야 함).
-    await act(async () => {
-      resolveFirst?.({ ...audioUploadResult, song: { ...uploadedSong, id: 101 } })
-      await vi.advanceTimersByTimeAsync(0)
-    })
-    expect(onSongCreated).not.toHaveBeenCalled()
-    expect(screen.queryByRole('status')).not.toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '업로드 중…' })).toBeInTheDocument() // 2차는 여전히 대기 중
-
-    // 2차 요청이 정상 응답하면 그때서야 생성 중 화면으로 전환
-    await act(async () => {
-      resolveSecond?.({ ...audioUploadResult, song: { ...uploadedSong, id: 202 } })
-      await vi.advanceTimersByTimeAsync(0)
-    })
-    expect(onSongCreated).toHaveBeenCalledTimes(1)
-    expect(screen.getByRole('status')).toBeInTheDocument()
   })
 
   it('디지털 악보 파일을 고르면 클라이언트에서 바로 파싱해 미리보기를 보여줌', async () => {

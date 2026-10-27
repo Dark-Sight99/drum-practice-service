@@ -215,7 +215,17 @@ export function UploadScreen({
     setIsSubmitting(true)
     try {
       if (fileKind === 'digital') {
-        if (!parsedScore) return
+        // Codex 모드A 지적(필수, 반영) — canSubmit 가드 때문에 지금은 이
+        // 분기에 도달할 때 parsedScore가 항상 있어야 하지만("방어적" 체크),
+        // 혹시라도 도달하면 위에서 이미 true로 올린 isSubmitting을 안
+        // 돌려놓고 그냥 return해 모달이 "업로드 중…"에 영원히 멈췄다 — 위
+        // Modal onClose/취소 버튼 숨김 변경으로 그 상태에선 닫을 방법도
+        // 없어져 진짜 막다른 상태가 됨. 바로 아래 검증 실패 분기와 같은
+        // 패턴으로 돌려놓는다.
+        if (!parsedScore) {
+          setIsSubmitting(false)
+          return
+        }
         const validation = validateDrumScore(parsedScore)
         if (!validation.valid) {
           setSubmitError(`악보 데이터가 올바르지 않습니다: ${validation.errors.join(', ')}`)
@@ -275,7 +285,17 @@ export function UploadScreen({
     file !== null && fileKind !== null && (fileKind === 'audio' || parsedScore !== null)
 
   return (
-    <Modal open={open} onClose={handleCancel} title="악보/음원 업로드">
+    // 2026-10-27(의뢰인 요청) — "업로드 중에 취소를 눌러도 [서버 쪽은]
+    // 계속 진행된다"는 지적(handleCancel은 실제 요청을 중단시키지 않고
+    // 세대 번호만 올려 응답을 무시할 뿐 — 위 submitGenerationRef 코멘트
+    // 참고, 진짜로 취소되는 게 아니라 오해를 살 수 있음) — 업로드 요청이
+    // 실제로 오가는 동안(isSubmitting)은 배경 클릭·Esc로도 모달이 안
+    // 닫히게 막는다(onClose를 아무 일도 안 하는 함수로 교체).
+    <Modal
+      open={open}
+      onClose={isSubmitting ? () => {} : handleCancel}
+      title="악보/음원 업로드"
+    >
       {/* 2026-10-26 의뢰인 요청 — 모달이 가로로 길쭉한 사각형이었던 걸 정사각형에
        * 가깝게(폭 고정 + 줄바꿈으로 세로 길이 확보), 안내 문구는 두 줄로,
        * 파일 선택·취소는 가운데 정렬. 폭을 너무 좁게(280) 잡으면 문구가 더
@@ -444,9 +464,14 @@ export function UploadScreen({
                   <button type="submit" disabled={isSubmitting || justUploaded}>
                     {justUploaded ? '업로드완료 ✓' : isSubmitting ? '업로드 중…' : '업로드'}
                   </button>
-                  <button type="button" onClick={handleCancel}>
-                    취소
-                  </button>
+                  {/* 2026-10-27(의뢰인 요청) — 위 Modal onClose 코멘트와 같은
+                   * 이유로, 실제로 취소되지 않는 "취소" 버튼을 업로드 요청이
+                   * 오가는 동안은 아예 안 보여준다. */}
+                  {!isSubmitting && (
+                    <button type="button" onClick={handleCancel}>
+                      취소
+                    </button>
+                  )}
                 </div>
               </form>
             )}
