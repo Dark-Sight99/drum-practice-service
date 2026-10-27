@@ -18,6 +18,10 @@ def _make_midi(notes: list[tuple[int, float, float, int]], ppq: int = 220, bpm: 
 
 
 def test_maps_all_five_adtof_classes_to_expected_pieces():
+    """Q-41(의뢰인 발견, 반영) — 42/47이 벤더(ADTOF-pytorch) 채널 순서
+    버그 때문에 GM 표준 관례와 반대로 매핑돼야 한다(모듈 docstring의
+    실측 근거 참고): GM42(보통 하이햇 번호)로 나오는 소리가 실제로는 탐,
+    GM47(보통 탐 번호)로 나오는 소리가 실제로는 하이햇."""
     pitches = [35, 38, 42, 47, 49]
     midi = _make_midi([(p, i * 0.5, i * 0.5 + 0.1, 100) for i, p in enumerate(pitches)])
 
@@ -25,7 +29,7 @@ def test_maps_all_five_adtof_classes_to_expected_pieces():
 
     assert unmapped == 0
     pieces = [n["piece"] for n in drumscore["notes"]]
-    assert pieces == ["kick", "snare", "hihat_closed", "tom_mid", "crash"]
+    assert pieces == ["kick", "snare", "tom_mid", "hihat_closed", "crash"]
 
 
 def test_notes_sorted_by_tick_and_velocity_preserved():
