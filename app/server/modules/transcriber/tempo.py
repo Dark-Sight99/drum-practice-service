@@ -34,6 +34,19 @@ def estimate_tempo(audio_path, start_bpm: float = DEFAULT_START_BPM) -> float:
     추정한다. 실패하거나(디코딩 오류 등) 비정상 결과(0 이하·NaN·Inf)면
     `DEFAULT_BPM`(기존 "템포 추정 없음" 동작과 같은 값)으로 안전하게
     돌아간다.
+
+    2026-10-27(의뢰인 발견, Q-40 추가) — `librosa.beat.beat_track()`은
+    연속값(예: 92.28515625)을 돌려주는데, 실제 악보·메트로놈 표기는 항상
+    정수다(의뢰인 지적: "메트로놈도 소수점은 없어요" — 맞는 말이고, 추정이
+    딱 정수로 안 맞는 건 비트 트래킹 알고리즘의 정밀도 한계일 뿐 실제
+    음악적 의미가 있는 소수점이 아니다). 그래서 반환 직전에 정수로
+    반올림한다 — 어차피 ±1~2bpm 수준의 추정 오차가 있는 값이라, 소수점을
+    보여주는 게 오히려 "정확도가 그만큼 있다"는 잘못된 인상을 준다.
+
+    2026-10-27(Codex 모드A 지적, T3-44) — 반올림은 유한·양수 검사 **뒤에**
+    하므로, 0보다 크지만 0.5 미만인 유효한 추정값(예: 0.4)이 반올림 후
+    0.0이 되어 "비정상 값은 DEFAULT_BPM으로 폴백한다"는 이 함수의 약속을
+    깨고 그대로 반환될 수 있었음 — 반올림한 값도 다시 검사해 막는다.
     """
     try:
         y, sr = librosa.load(str(audio_path), sr=None, mono=True)
@@ -43,4 +56,7 @@ def estimate_tempo(audio_path, start_bpm: float = DEFAULT_START_BPM) -> float:
         return DEFAULT_BPM
     if not np.isfinite(bpm) or bpm <= 0:
         return DEFAULT_BPM
-    return bpm
+    rounded_bpm = float(round(bpm))
+    if rounded_bpm <= 0:
+        return DEFAULT_BPM
+    return rounded_bpm
