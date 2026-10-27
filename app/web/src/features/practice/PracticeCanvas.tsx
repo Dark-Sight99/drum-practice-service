@@ -869,9 +869,8 @@ export function PracticeCanvas({
     playbackRef.current = null
     isPlayingRef.current = false
     lastActiveMapRef.current = new Map()
-    lastProgressKeyRef.current = -1
     setActiveHandByPiece(new Map())
-    setProgressPercent(0)
+    if (progressBarRef.current) progressBarRef.current.style.height = '0%'
     setIsPlaying(false)
   }
 
