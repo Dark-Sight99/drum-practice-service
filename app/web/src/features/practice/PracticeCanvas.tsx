@@ -667,8 +667,17 @@ export function PracticeCanvas({
   // 가비지를 만들고 있었음. 직전 Map을 그대로 들고 있다가 크기+항목을 직접
   // 비교(할당 없음)하는 방식으로 교체.
   const lastActiveMapRef = useRef<ReadonlyMap<DrumPiece, Hand>>(new Map())
-  const [progressPercent, setProgressPercent] = useState(0)
-  const lastProgressKeyRef = useRef(-1)
+  // 2026-10-27(의뢰인 요청) — "진행바가 계단식으로 찬다"는 지적. 바로 위
+  // activeHandByPiece와 같은 이유로 예전엔 정수 %로 반올림해 값이 "실제로"
+  // 바뀔 때만 setState했었다(매 프레임 setState하면 리렌더가 쌓여 T2-3/
+  // T3-16에서 측정한 모바일 fps 저하가 재발함) — 그런데 그 최적화 자체가
+  // "1%가 오르는 데 걸리는 몇 초 동안 멈춰있다가 한 번에 점프"하는 모양을
+  // 만든 원인이었다(1% 미만의 변화는 아예 반영 안 됨). 이 값은 "바뀔 때만"이
+  // 아니라 매 프레임의 실제 값을 그대로 보여줘야 부드러우므로 같은 최적화를
+  // 쓸 수 없다 — 대신 React state를 거치지 않고 이 바를 가리키는 ref에
+  // style.height를 매 프레임 직접 쓴다(한 엘리먼트의 한 CSS 속성만 바뀌는
+  // DOM 쓰기라 VDOM diff·리렌더 없음 — 오히려 기존 setState보다 가벼움).
+  const progressBarRef = useRef<HTMLDivElement>(null)
   // T3-3(REQ-04) — 오디오 트랙 리싱크 폴링 스로틀(위 TRACK_RESYNC_INTERVAL_MS).
   const lastTrackResyncAtRef = useRef(0)
 
@@ -786,10 +795,9 @@ export function PracticeCanvas({
           rawPercent = totalBars > 0 ? (songElapsedSeconds / (barSeconds * totalBars)) * 100 : 0
         }
       }
-      const nextPercent = Math.min(100, Math.max(0, Math.round(rawPercent)))
-      if (nextPercent !== lastProgressKeyRef.current) {
-        lastProgressKeyRef.current = nextPercent
-        setProgressPercent(nextPercent)
+      const clampedPercent = Math.min(100, Math.max(0, rawPercent))
+      if (progressBarRef.current) {
+        progressBarRef.current.style.height = `${clampedPercent}%`
       }
       rafIdRef.current = requestAnimationFrame(loop)
     }
@@ -1354,7 +1362,10 @@ export function PracticeCanvas({
        * 오른쪽의 세로 막대로 옮긴다. 레인+진행바를 한 플렉스 행으로 묶고
        * 그 행 전체를 가운데 정렬(캔버스 단독으로 margin:auto 하던 걸,
        * 바로 옆에 진행바가 붙으므로 둘을 같이 중앙에 놓도록 바꿈). 기능은
-       * 그대로 — progressPercent가 0일 때 바닥, 100일 때 꼭대기까지 찬다. */}
+       * 그대로 — 0%일 때 바닥, 100%일 때 꼭대기까지 찬다(실제 height는
+       * 위 progressBarRef가 매 프레임 직접 씀 — 아래 style엔 일부러
+       * height를 안 둔다: 여기 두면 다른 이유로 리렌더될 때마다 React가
+       * ref가 써둔 값을 이 값으로 되돌려버린다). */}
       <div
         style={{
           display: 'flex',
@@ -1406,14 +1417,13 @@ export function PracticeCanvas({
           }}
         >
           <div
+            ref={progressBarRef}
             style={{
               position: 'absolute',
               bottom: 0,
               left: 0,
               right: 0,
-              height: `${progressPercent}%`,
               background: loopEnabled ? 'var(--warning)' : 'var(--accent)',
-              transition: 'height 100ms linear',
             }}
           />
         </div>
