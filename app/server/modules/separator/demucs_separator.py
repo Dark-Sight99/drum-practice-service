@@ -202,10 +202,20 @@ def compute_playback_gain(
     낼 수 있다 — 그래서 분리된 스템 전부의 실제 피크를 직접 확인해, 어느
     하나라도 0.99를 넘기면 그 스템 기준으로 게인을 다시 낮춘다
     (`normalize_loudness()`와 같은 0.99 클램프, 가장 엄격한 스템에 맞춤).
+
+    Codex 모드A 지적(Medium, 반영) — 원곡이 사실상 빈 파일(디코딩 결과
+    샘플 0개)이면 `np.mean`이 빈 배열의 평균을 구하려다 NaN을 내는데,
+    `NaN < PLAYBACK_SILENCE_RMS_FLOOR` 비교는 NaN과의 모든 비교가 그렇듯
+    False라 무음 처리 분기를 그냥 통과해버린다 — 그러면 NaN이 그대로
+    게인으로 반환돼 ffmpeg `volume=nan` 필터에 들어가 스템 쓰기 전체가
+    실패할 수 있었다. `np.isfinite`를 같이 확인해 이런 퇴화 입력도 "게인
+    없음(1.0)"으로 안전하게 빠지게 한다.
     """
     y, _ = librosa.load(str(original_path), sr=None, mono=False)
+    if y.size == 0:
+        return 1.0
     rms = float(np.sqrt(np.mean(y.astype(np.float64) ** 2)))
-    if rms < PLAYBACK_SILENCE_RMS_FLOOR:
+    if not np.isfinite(rms) or rms < PLAYBACK_SILENCE_RMS_FLOOR:
         return 1.0
     current_db = 20 * np.log10(rms)
     gain_db = target_rms_dbfs - current_db

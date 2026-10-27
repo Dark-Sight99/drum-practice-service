@@ -335,3 +335,20 @@ def test_compute_playback_gain_leaves_near_silent_song_unboosted(tmp_path):
     gain = compute_playback_gain(original_path, [drums_path], target_rms_dbfs=-18.0)
 
     assert gain == 1.0
+
+
+def test_compute_playback_gain_handles_empty_decoded_audio_without_nan(tmp_path):
+    """Codex 모드A 지적(Medium, 반영) — 디코딩 결과 샘플이 0개(사실상 빈
+    파일)면 RMS 계산이 NaN을 낼 수 있는데, 그 NaN이 PLAYBACK_SILENCE_RMS_FLOOR
+    비교를 그냥 통과해(NaN과의 비교는 전부 False) 게인으로 그대로 반환되면
+    ffmpeg volume 필터에 'nan'이 들어가 스템 쓰기 전체가 실패할 수 있었다.
+    빈 입력도 무음과 똑같이 게인 1.0(무변화)으로 안전하게 빠져야 한다."""
+    original_path = tmp_path / "empty.wav"
+    sf.write(str(original_path), np.zeros(0, dtype=np.float32), 44100)
+    drums_path = tmp_path / "drums.wav"
+    _write_tone(drums_path, 10 ** (-18.0 / 20))
+
+    gain = compute_playback_gain(original_path, [drums_path], target_rms_dbfs=-18.0)
+
+    assert gain == 1.0
+    assert not np.isnan(gain)
