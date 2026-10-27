@@ -18,6 +18,7 @@ from db.models import Asset, AssetKind, Job, Song, SongStatus
 from file_storage import resolve_asset_path, write_song_file
 from modules.transcriber.adtof_transcriber import transcribe
 from modules.transcriber.midi_to_drumscore import midi_to_drumscore
+from modules.transcriber.tempo import estimate_tempo
 
 logger = logging.getLogger("worker.transcribe")
 
@@ -74,8 +75,16 @@ def transcribe_handler(job: Job) -> None:
             elapsed = time.monotonic() - start
             logger.info("transcribe song=%s elapsed=%.1fs device_auto=yes", song.id, elapsed)
 
+            # 2026-10-27(의뢰인 발견, Q-40) — ADTOF는 템포를 전혀 추정하지
+            # 않아(온셋 분류 모델일 뿐) 지금까지 모든 음원 업로드 곡이 실제
+            # 템포와 무관하게 pretty_midi 기본값(120)으로 저장돼왔다. 드럼
+            # 스템에서 직접 템포를 추정해(실패해도 안전하게 DEFAULT_BPM로
+            # 폴백) 넘긴다.
+            bpm = estimate_tempo(drums_path)
+            logger.info("transcribe song=%s estimated_bpm=%.2f", song.id, bpm)
+
             midi = pretty_midi.PrettyMIDI(str(tmp_midi))
-            drumscore_dict, unmapped_count = midi_to_drumscore(midi, title=song.title)
+            drumscore_dict, unmapped_count = midi_to_drumscore(midi, title=song.title, bpm=bpm)
             if unmapped_count:
                 logger.info(
                     "transcribe song=%s unmapped_pitch_count=%d", song.id, unmapped_count

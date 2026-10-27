@@ -98,6 +98,39 @@ def test_transcribe_handler_success_creates_drumscore_raw_asset(db, monkeypatch)
     assert not (path.parent / "drumscore.json.new").exists()
 
 
+def test_transcribe_handler_passes_estimated_tempo_to_midi_to_drumscore(db, monkeypatch) -> None:
+    """Q-40(의뢰인 발견) — estimate_tempo()가 드럼 스템 경로로 호출되고, 그
+    결과가 그대로 midi_to_drumscore()의 bpm으로 전달되는지(배선 자체)를
+    확인한다. 실제 librosa 비트 트래킹 정확도는 test_tempo.py가 진짜
+    오디오로 검증 — 여기선 핸들러를 거쳐 어디까지 전파되는지만 본다."""
+    _, song, job = _make_song_with_drums_stem(db)
+    monkeypatch.setattr(handler_module, "transcribe", _fake_transcribe_writing_midi([35]))
+
+    FIXED_BPM = 97.5
+    estimate_tempo_calls: list[Path] = []
+    midi_to_drumscore_bpm_calls: list[float] = []
+    real_midi_to_drumscore = handler_module.midi_to_drumscore
+
+    def spy_estimate_tempo(audio_path) -> float:
+        estimate_tempo_calls.append(audio_path)
+        return FIXED_BPM
+
+    def spy_midi_to_drumscore(midi, title, bpm):
+        midi_to_drumscore_bpm_calls.append(bpm)
+        return real_midi_to_drumscore(midi, title=title, bpm=bpm)
+
+    monkeypatch.setattr(handler_module, "estimate_tempo", spy_estimate_tempo)
+    monkeypatch.setattr(handler_module, "midi_to_drumscore", spy_midi_to_drumscore)
+
+    handler_module.transcribe_handler(job)
+
+    db.refresh(song)
+    assert song.status == SongStatus.COMPLETED
+    assert len(estimate_tempo_calls) == 1
+    assert estimate_tempo_calls[0].name == "stem_drums.wav"
+    assert midi_to_drumscore_bpm_calls == [FIXED_BPM]
+
+
 def test_transcribe_handler_re_run_does_not_duplicate_raw_asset(db, monkeypatch) -> None:
     """모드C C-002 회귀 테스트 — 재채보해도 DRUMSCORE_RAW 행이 1개만 있어야 함."""
     _, song, job = _make_song_with_drums_stem(db)
@@ -195,7 +228,7 @@ def test_transcribe_handler_invalid_drumscore_fails_cleanly(db, monkeypatch) -> 
     monkeypatch.setattr(
         handler_module,
         "midi_to_drumscore",
-        lambda midi, title: (invalid_drumscore, 0),
+        lambda midi, title, bpm: (invalid_drumscore, 0),
     )
 
     with pytest.raises(Exception):  # noqa: B017 — pydantic ValidationError, 구체 타입은 구현 세부사항
