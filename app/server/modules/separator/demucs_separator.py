@@ -220,6 +220,12 @@ def compute_playback_gain(
     current_db = 20 * np.log10(rms)
     gain_db = target_rms_dbfs - current_db
     gain_linear = 10 ** (gain_db / 20)
+    # Codex 모드A 2차 지적(Low, 반영) — 위에서 막은 건 "원곡이 비정상"인
+    # 경우뿐, `target_rms_dbfs`를 호출자가 비정상 값(NaN/±Inf)으로 넘기면
+    # 여기서 바로 비정상 게인이 나올 수 있다(지금의 유일한 호출자인
+    # handler.py는 항상 기본값만 쓰지만, 이 함수 자체의 방어로 둔다).
+    if not np.isfinite(gain_linear):
+        return 1.0
 
     for stem_path in stem_paths:
         y_stem, _ = librosa.load(str(stem_path), sr=None, mono=False)

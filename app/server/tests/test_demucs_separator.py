@@ -352,3 +352,37 @@ def test_compute_playback_gain_handles_empty_decoded_audio_without_nan(tmp_path)
 
     assert gain == 1.0
     assert not np.isnan(gain)
+
+
+@pytest.mark.parametrize("bad_target", [float("nan"), float("inf")])
+def test_compute_playback_gain_falls_back_to_unity_for_nan_or_inf_target(tmp_path, bad_target):
+    """Codex 모드A 2차 지적(Low, 반영) — 원곡 자체는 정상이어도 호출자가
+    `target_rms_dbfs`를 NaN/+Inf로 넘기면 게인이 바로 비정상(NaN/Inf)이 돼
+    ffmpeg volume 필터로 흘러들어갈 수 있었다. 지금의 유일한 호출자
+    (handler.py)는 항상 기본값만 쓰지만, 함수 자체가 안전해야 한다."""
+    original_path = tmp_path / "normal.wav"
+    _write_tone(original_path, 10 ** (-30.0 / 20))
+    drums_path = tmp_path / "drums.wav"
+    _write_tone(drums_path, 10 ** (-30.0 / 20))
+
+    gain = compute_playback_gain(original_path, [drums_path], target_rms_dbfs=bad_target)
+
+    assert gain == 1.0
+    assert np.isfinite(gain)
+
+
+def test_compute_playback_gain_stays_finite_for_negative_infinity_target(tmp_path):
+    """-Inf 타깃은 수학적으로 10**(-inf/20)=0.0(유한·안전)으로 수렴한다 —
+    NaN/+Inf처럼 되돌릴 필요는 없지만(ffmpeg volume=0은 정상적으로 무음을
+    만들 뿐 터지지 않음), 그래도 항상 유한해야 한다는 안전 속성 자체는
+    똑같이 성립해야 한다."""
+    original_path = tmp_path / "normal.wav"
+    _write_tone(original_path, 10 ** (-30.0 / 20))
+    drums_path = tmp_path / "drums.wav"
+    _write_tone(drums_path, 10 ** (-30.0 / 20))
+
+    gain = compute_playback_gain(
+        original_path, [drums_path], target_rms_dbfs=float("-inf")
+    )
+
+    assert np.isfinite(gain)
