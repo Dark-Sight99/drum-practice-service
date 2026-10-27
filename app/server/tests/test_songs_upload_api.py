@@ -12,7 +12,7 @@ import file_storage
 from api.deps import get_db
 from api.main import app
 from auth.security import hash_password
-from db.models import Base, Job, JobType, User
+from db.models import Base, Job, JobStatus, JobType, User
 from db.session import create_sqlite_engine
 
 
@@ -314,6 +314,37 @@ def test_delete_song_with_job_succeeds(client: TestClient, db_session) -> None:
     assert resp.status_code == 204
     assert client.get(f"/songs/{song_id}").status_code == 404
     assert db_session.query(Job).filter(Job.song_id == song_id).count() == 0
+
+
+def test_delete_song_blocked_while_job_processing(client: TestClient, db_session) -> None:
+    """Codex 모드A 지적(필수, 반영) — 위 cascade 수정으로 삭제 자체는 이제
+    성공하지만, 워커가 바로 지금 이 곡의 Job을 PROCESSING 중이면 경합이
+    생긴다: 워커는 이미 메모리에 들고 있는 Job 객체로 계속 파일을 쓰고
+    Asset을 커밋하려 드는데, 그 사이 여기서 DB 행과 파일을 먼저 지워버리면
+    핸들러의 커밋이 실패하거나 방금 지운 곡 폴더에 파일을 다시 써 넣어
+    디스크에 고아 파일로 영구히 남을 수 있다 — PROCESSING인 Job이 있으면
+    삭제 자체를 막아 경합을 원천 차단한다. QUEUED는 아직 아무도 안 집어서
+    안전(워커가 집으려 할 때 이미 없는 행이라 그냥 건너뜀)하므로 막지 않음
+    — test_delete_song_with_job_succeeds(기본값 QUEUED)가 이미 확인."""
+    user = _make_user(db_session, "u1")
+    _login(client, "u1")
+    song_id = _upload(client).json()["id"]
+
+    db_session.add(
+        Job(
+            user_id=user.id,
+            song_id=song_id,
+            job_type=JobType.SEPARATE,
+            status=JobStatus.PROCESSING,
+        )
+    )
+    db_session.commit()
+
+    resp = client.delete(f"/songs/{song_id}")
+    assert resp.status_code == 409
+    # 아무것도 안 지워졌어야 함 — 곡도, 그 Job도.
+    assert client.get(f"/songs/{song_id}").status_code == 200
+    assert db_session.query(Job).filter(Job.song_id == song_id).count() == 1
 
 
 def test_resolve_asset_path_blocks_traversal(tmp_path, monkeypatch) -> None:
