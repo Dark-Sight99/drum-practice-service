@@ -5,6 +5,8 @@ import {
   effectiveGain,
   isMusicMuted,
   linearGainToDb,
+  METRONOME_BOOST_DB,
+  metronomeGainToDb,
   musicVolume,
   setMusicMuted,
   setMusicVolume,
@@ -249,5 +251,19 @@ describe('linearGainToDb', () => {
 
   it('maps half gain to approximately -6dB (standard dB halving)', () => {
     expect(linearGainToDb(0.5)).toBeCloseTo(-6.02, 1)
+  })
+})
+
+describe('metronomeGainToDb — T3-39(2026-10-27, 의뢰인 요청: 메트로놈이 노래에 묻힘)', () => {
+  it('boosts the metronome ceiling by METRONOME_BOOST_DB at unity gain', () => {
+    expect(metronomeGainToDb(1)).toBeCloseTo(METRONOME_BOOST_DB, 6)
+  })
+
+  it('still scales down proportionally as the slider is lowered', () => {
+    expect(metronomeGainToDb(0.5)).toBeCloseTo(linearGainToDb(0.5) + METRONOME_BOOST_DB, 6)
+  })
+
+  it('stays -Infinity (silent) at zero gain, not a finite boosted value', () => {
+    expect(metronomeGainToDb(0)).toBe(-Infinity)
   })
 })

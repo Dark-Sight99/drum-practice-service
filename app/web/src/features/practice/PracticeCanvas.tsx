@@ -30,7 +30,7 @@ import {
   effectiveGain,
   getMasterClock,
   isMusicMuted,
-  linearGainToDb,
+  metronomeGainToDb,
   MUSIC_STEM_KEYS,
   musicVolume,
   playDrumScore,
@@ -709,7 +709,7 @@ export function PracticeCanvas({
       if (key === 'synth_drums') {
         session.synthGain.gain.value = gain
       } else if (key === 'metronome') {
-        session.metronome.setVolume(linearGainToDb(gain))
+        session.metronome.setVolume(metronomeGainToDb(gain))
       } else {
         session.tracks?.setChannelGain(key, gain)
       }
@@ -1122,7 +1122,7 @@ export function PracticeCanvas({
         // 무관하게 항상 고정 음량으로 울려 "음악은 작은데 그 소리만 크다"는
         // 불편의 원인이었다 — 재생 시작 시점의 메트로놈 게인을 그대로 넘겨
         // 아래(재생 중 본체 메트로놈에 적용하는 것)와 같은 기준을 쓰게 한다.
-        countInVolumeDb: linearGainToDb(effectiveGain(mixerStateRef.current.metronome)),
+        countInVolumeDb: metronomeGainToDb(effectiveGain(mixerStateRef.current.metronome)),
       })
       playbackRef.current = { handle, voices, tracks, synthGain, limiter, metronome }
       isStartingRef.current = false
@@ -1140,7 +1140,7 @@ export function PracticeCanvas({
       if (key === 'synth_drums') {
         synthGain.gain.value = gain
       } else if (key === 'metronome') {
-        metronome.setVolume(linearGainToDb(gain))
+        metronome.setVolume(metronomeGainToDb(gain))
       } else {
         tracks?.setChannelGain(key, gain)
       }
