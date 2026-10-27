@@ -386,3 +386,30 @@ def test_compute_playback_gain_stays_finite_for_negative_infinity_target(tmp_pat
     )
 
     assert np.isfinite(gain)
+
+
+def test_compute_playback_gain_handles_mp4_original_file(tmp_path):
+    """2026-10-27(실사용 중 재현된 버그, 반영) — `librosa.load()`가 mp4
+    컨테이너를 직접 못 열어(`LibsndfileError: Format not recognised`)
+    mp4로 업로드한 곡의 분리 작업 전체가 실패했음(실제 업로드로 재현).
+    `_decode_to_wav_for_measurement()`가 먼저 ffmpeg로 WAV를 뽑아내므로
+    더 이상 터지지 않아야 한다 — 진짜 mp4 파일(오디오 트랙 포함, ffmpeg로
+    직접 생성)로 회귀 검증."""
+    import imageio_ffmpeg
+
+    wav_path = tmp_path / "tone.wav"
+    _write_tone(wav_path, 10 ** (-20.0 / 20))
+
+    mp4_path = tmp_path / "original.mp4"
+    ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
+    proc = subprocess.run(
+        [ffmpeg_exe, "-y", "-i", str(wav_path), "-c:a", "aac", str(mp4_path)],
+        capture_output=True,
+        text=True,
+    )
+    assert proc.returncode == 0, proc.stderr
+
+    gain = compute_playback_gain(mp4_path, [], target_rms_dbfs=-18.0)
+
+    assert np.isfinite(gain)
+    assert gain > 0

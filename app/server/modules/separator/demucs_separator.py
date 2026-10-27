@@ -179,6 +179,33 @@ def apply_gain(wav_path: Path, gain_linear: float) -> bytes:
         tmp_path.unlink(missing_ok=True)
 
 
+def _decode_to_wav_for_measurement(input_path: Path) -> Path:
+    """2026-10-27(실사용 중 재현된 버그) — `compute_playback_gain()`이 원곡
+    원본 파일(`original_path`)을 직접 `librosa.load()`하려다, mp4처럼
+    `soundfile`(libsndfile)이 컨테이너 자체를 못 여는 형식에서
+    `LibsndfileError: Format not recognised`로 실패했다(실제 업로드로
+    재현 — mp4는 REQ-01 확장으로 이미 허용된 형식인데, Demucs는 ffmpeg
+    백엔드라 문제없이 처리하지만 librosa의 기본 경로는 못 연다). `encode_mp3()`/
+    `apply_gain()`과 같은 번들 ffmpeg로 먼저 WAV로 디코딩해두면, Demucs가
+    여는 모든 형식(mp3/wav/m4a/flac/mp4)을 이 측정 함수도 똑같이 열 수
+    있다. 호출자가 다 쓴 뒤 정리할 책임을 진다(`normalize_loudness()`와
+    같은 패턴)."""
+    import imageio_ffmpeg
+
+    ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
+    fd, tmp_path_str = tempfile.mkstemp(suffix=".wav")
+    tmp_path = Path(tmp_path_str)
+    os.close(fd)
+    cmd = [ffmpeg_exe, "-y", "-i", str(input_path), str(tmp_path)]
+    proc = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
+    if proc.returncode != 0:
+        tmp_path.unlink(missing_ok=True)
+        raise SeparationError(
+            f"음량 측정용 디코딩 실패(returncode={proc.returncode}): {proc.stderr[-2000:]}"
+        )
+    return tmp_path
+
+
 def compute_playback_gain(
     original_path: Path,
     stem_paths: Iterable[Path],
@@ -210,8 +237,18 @@ def compute_playback_gain(
     게인으로 반환돼 ffmpeg `volume=nan` 필터에 들어가 스템 쓰기 전체가
     실패할 수 있었다. `np.isfinite`를 같이 확인해 이런 퇴화 입력도 "게인
     없음(1.0)"으로 안전하게 빠지게 한다.
+
+    2026-10-27(실사용 중 재현된 버그, 반영) — `original_path`는 Demucs가
+    받는 그대로의 원본(mp3/wav/m4a/flac/mp4 전부 가능, REQ-01)이라
+    `librosa.load()`가 직접 못 여는 형식(mp4 등)이 있을 수 있다 —
+    `_decode_to_wav_for_measurement()`로 먼저 WAV로 디코딩해둔다(Demucs와
+    같은 ffmpeg 백엔드라 Demucs가 여는 모든 형식을 똑같이 연다).
     """
-    y, _ = librosa.load(str(original_path), sr=None, mono=False)
+    decoded_original_path = _decode_to_wav_for_measurement(original_path)
+    try:
+        y, _ = librosa.load(str(decoded_original_path), sr=None, mono=False)
+    finally:
+        decoded_original_path.unlink(missing_ok=True)
     if y.size == 0:
         return 1.0
     rms = float(np.sqrt(np.mean(y.astype(np.float64) ** 2)))
