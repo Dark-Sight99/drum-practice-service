@@ -42,6 +42,11 @@ def estimate_tempo(audio_path, start_bpm: float = DEFAULT_START_BPM) -> float:
     음악적 의미가 있는 소수점이 아니다). 그래서 반환 직전에 정수로
     반올림한다 — 어차피 ±1~2bpm 수준의 추정 오차가 있는 값이라, 소수점을
     보여주는 게 오히려 "정확도가 그만큼 있다"는 잘못된 인상을 준다.
+
+    2026-10-27(Codex 모드A 지적, T3-44) — 반올림은 유한·양수 검사 **뒤에**
+    하므로, 0보다 크지만 0.5 미만인 유효한 추정값(예: 0.4)이 반올림 후
+    0.0이 되어 "비정상 값은 DEFAULT_BPM으로 폴백한다"는 이 함수의 약속을
+    깨고 그대로 반환될 수 있었음 — 반올림한 값도 다시 검사해 막는다.
     """
     try:
         y, sr = librosa.load(str(audio_path), sr=None, mono=True)
@@ -51,4 +56,7 @@ def estimate_tempo(audio_path, start_bpm: float = DEFAULT_START_BPM) -> float:
         return DEFAULT_BPM
     if not np.isfinite(bpm) or bpm <= 0:
         return DEFAULT_BPM
-    return float(round(bpm))
+    rounded_bpm = float(round(bpm))
+    if rounded_bpm <= 0:
+        return DEFAULT_BPM
+    return rounded_bpm

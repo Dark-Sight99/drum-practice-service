@@ -83,6 +83,25 @@ def test_estimate_tempo_rounds_to_nearest_integer(tmp_path, monkeypatch):
     assert bpm == round(bpm)
 
 
+def test_estimate_tempo_falls_back_to_default_when_rounding_produces_zero(tmp_path, monkeypatch):
+    """Codex 모드A 지적(T3-44) — 0보다 크지만 0.5 미만인 유효한 추정값은
+    유한·양수 검사를 통과한 뒤 반올림되면 0.0이 된다. 이 함수의 약속은
+    "비정상 값이면 DEFAULT_BPM으로 폴백"이므로, 반올림 후에도 0이 되는
+    경우를 안전하게 막아야 한다."""
+    monkeypatch.setattr(
+        tempo_module.librosa, "load", lambda *a, **k: (np.zeros(1000, dtype=np.float32), 44100)
+    )
+    monkeypatch.setattr(
+        tempo_module.librosa.beat,
+        "beat_track",
+        lambda *a, **k: (np.array(0.4), None),
+    )
+
+    bpm = estimate_tempo(tmp_path / "dummy.wav")
+
+    assert bpm == DEFAULT_BPM
+
+
 def test_estimate_tempo_falls_back_to_default_on_silence(tmp_path):
     """완전 무음(온셋이 전혀 없음)이면 비트 트래킹이 의미 있는 결과를 못
     내므로, 크래시 없이 안전한 기본값으로 끝나야 한다(0bpm 등 비정상 값을
