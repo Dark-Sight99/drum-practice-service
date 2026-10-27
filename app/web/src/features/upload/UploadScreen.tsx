@@ -215,7 +215,17 @@ export function UploadScreen({
     setIsSubmitting(true)
     try {
       if (fileKind === 'digital') {
-        if (!parsedScore) return
+        // Codex 모드A 지적(필수, 반영) — canSubmit 가드 때문에 지금은 이
+        // 분기에 도달할 때 parsedScore가 항상 있어야 하지만("방어적" 체크),
+        // 혹시라도 도달하면 위에서 이미 true로 올린 isSubmitting을 안
+        // 돌려놓고 그냥 return해 모달이 "업로드 중…"에 영원히 멈췄다 — 위
+        // Modal onClose/취소 버튼 숨김 변경으로 그 상태에선 닫을 방법도
+        // 없어져 진짜 막다른 상태가 됨. 바로 아래 검증 실패 분기와 같은
+        // 패턴으로 돌려놓는다.
+        if (!parsedScore) {
+          setIsSubmitting(false)
+          return
+        }
         const validation = validateDrumScore(parsedScore)
         if (!validation.valid) {
           setSubmitError(`악보 데이터가 올바르지 않습니다: ${validation.errors.join(', ')}`)
