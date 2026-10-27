@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { LibraryScreen } from './LibraryScreen'
 import type { SongSummary } from '../../api/songs'
@@ -207,6 +207,56 @@ describe('LibraryScreen — 로딩 스켈레톤(2026-10-26 의뢰인 요청)', (
     })
     expect(container.querySelectorAll('.skeleton')).toHaveLength(0)
     expect(screen.getByText('아직 업로드한 곡이 없습니다.')).toBeInTheDocument()
+  })
+})
+
+describe('LibraryScreen — 삭제 확인 모달(2026-10-27 의뢰인 요청, window.confirm 대체)', () => {
+  beforeEach(() => {
+    listSongsMock.mockReset()
+    deleteSongMock.mockReset()
+  })
+
+  it('삭제 버튼을 누르면 모달이 뜨고, deleteSong은 아직 안 불림', async () => {
+    const song = makeSong({ title: '지울곡' })
+    listSongsMock.mockResolvedValueOnce([song])
+    render(<LibraryScreen onOpenSong={() => {}} onEditSong={() => {}} onLoggedOut={() => {}} />)
+    await screen.findByText('지울곡')
+
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '삭제' }))
+
+    expect(screen.getByRole('dialog')).toBeInTheDocument()
+    expect(screen.getByText(/지울곡.*삭제할까요/)).toBeInTheDocument()
+    expect(deleteSongMock).not.toHaveBeenCalled()
+  })
+
+  it('취소를 누르면 모달이 닫히고 삭제되지 않음', async () => {
+    const song = makeSong({ title: '지울곡' })
+    listSongsMock.mockResolvedValueOnce([song])
+    render(<LibraryScreen onOpenSong={() => {}} onEditSong={() => {}} onLoggedOut={() => {}} />)
+    await screen.findByText('지울곡')
+
+    fireEvent.click(screen.getByRole('button', { name: '삭제' }))
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: '취소' }))
+
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(deleteSongMock).not.toHaveBeenCalled()
+    expect(screen.getByText('지울곡')).toBeInTheDocument()
+  })
+
+  it('모달에서 삭제를 누르면 실제로 삭제되고 모달이 닫힘', async () => {
+    const song = makeSong({ title: '지울곡' })
+    listSongsMock.mockResolvedValueOnce([song])
+    deleteSongMock.mockResolvedValueOnce(undefined)
+    render(<LibraryScreen onOpenSong={() => {}} onEditSong={() => {}} onLoggedOut={() => {}} />)
+    await screen.findByText('지울곡')
+
+    fireEvent.click(screen.getByRole('button', { name: '삭제' }))
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: '삭제' }))
+
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    await waitFor(() => expect(deleteSongMock).toHaveBeenCalledWith(song.id))
+    await waitFor(() => expect(screen.queryByText('지울곡')).not.toBeInTheDocument())
   })
 })
 
@@ -511,12 +561,11 @@ describe('LibraryScreen — 목록 새로고침 경합(모드A 지적 반영)', 
     // B 삭제 — A의 이름변경보다 먼저 응답(완료)됨. 전역 세대 번호 하나를
     // 공유하던 이전 구현(모드A 7차)이었다면 이 시점에 A의 이름변경이
     // "낡음"으로 취급돼 버려졌을 것.
-    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
     deleteSongMock.mockResolvedValueOnce(undefined)
     const deleteButtons = screen.getAllByRole('button', { name: '삭제' })
-    fireEvent.click(deleteButtons[1]) // B
+    fireEvent.click(deleteButtons[1]) // B — 모달을 염
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: '삭제' }))
     await waitFor(() => expect(screen.queryByText('B곡')).not.toBeInTheDocument())
-    confirmSpy.mockRestore()
 
     // 이제서야 A의 이름변경이 응답 — 무관한 곡(B) 삭제가 먼저 끝났다고
     // 버려지면 안 된다.
@@ -577,8 +626,7 @@ describe('LibraryScreen — 목록 새로고침 경합(모드A 지적 반영)', 
     fireEvent.click(screen.getByRole('button', { name: '+ 업로드' }))
     fireEvent.click(screen.getByRole('button', { name: 'mock-song-created' }))
 
-    // 삭제를 시작하되(deleteSong은 아직 응답 안 함) 확인창은 통과시킨다.
-    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    // 삭제를 시작하되(deleteSong은 아직 응답 안 함) 모달에서 확인을 누른다.
     let resolveDelete: (() => void) | undefined
     deleteSongMock.mockImplementationOnce(
       () =>
@@ -587,7 +635,7 @@ describe('LibraryScreen — 목록 새로고침 경합(모드A 지적 반영)', 
         }),
     )
     fireEvent.click(screen.getByRole('button', { name: '삭제' }))
-    confirmSpy.mockRestore()
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: '삭제' }))
 
     // 배경 조회가 응답 — 삭제가 서버엔 이미 반영돼 그 곡이 없는 목록이
     // 왔다고 가정(클라이언트의 deleteSong 응답은 아직 안 옴). 마지막 수정이
@@ -611,7 +659,6 @@ describe('LibraryScreen — 목록 새로고침 경합(모드A 지적 반영)', 
     await screen.findByText('지우고바꿀곡')
 
     // 삭제를 먼저 시작하되 아직 응답 안 함.
-    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
     let resolveDelete: (() => void) | undefined
     deleteSongMock.mockImplementationOnce(
       () =>
@@ -620,7 +667,7 @@ describe('LibraryScreen — 목록 새로고침 경합(모드A 지적 반영)', 
         }),
     )
     fireEvent.click(screen.getByRole('button', { name: '삭제' }))
-    confirmSpy.mockRestore()
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: '삭제' }))
     expect(deleteSongMock).toHaveBeenCalledTimes(1)
 
     // 삭제가 아직 안 끝난 사이, 같은 곡의 이름변경을 시작해 먼저 성공시킨다
