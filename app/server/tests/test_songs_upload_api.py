@@ -12,7 +12,7 @@ import file_storage
 from api.deps import get_db
 from api.main import app
 from auth.security import hash_password
-from db.models import Base, User
+from db.models import Base, Job, JobType, User
 from db.session import create_sqlite_engine
 
 
@@ -291,6 +291,29 @@ def test_delete_song_removes_files(client: TestClient, db_session) -> None:
     assert resp.status_code == 204
     assert client.get(f"/songs/{song_id}").status_code == 404
     assert not song_dir.exists()
+
+
+def test_delete_song_with_job_succeeds(client: TestClient, db_session) -> None:
+    """2026-10-27(실사용 중 재현된 버그, 의뢰인 보고 "삭제가 안 된다") —
+    Song.jobs 관계에 cascade가 없으면 곡을 삭제할 때 SQLAlchemy가 연결된
+    Job 행을 지우는 대신 FK 컬럼(song_id/user_id)을 NULL로 비우려 시도하는데,
+    둘 다 nullable=False라 "NOT NULL constraint failed: jobs.user_id"
+    IntegrityError로 삭제 자체가 실패했다 — 업로드로 생긴 곡은 거의 전부
+    Job(분리/채보) 행을 최소 하나는 가지므로 실사용에서는 거의 모든 곡
+    삭제가 이 경로로 실패하고 있었다. 위 test_delete_song_removes_files는
+    MIDI 업로드(_upload)만 써서 Job이 안 생겨 이 버그를 못 잡았다 — 이
+    테스트는 Job을 직접 만들어 재현한다."""
+    user = _make_user(db_session, "u1")
+    _login(client, "u1")
+    song_id = _upload(client).json()["id"]
+
+    db_session.add(Job(user_id=user.id, song_id=song_id, job_type=JobType.SEPARATE))
+    db_session.commit()
+
+    resp = client.delete(f"/songs/{song_id}")
+    assert resp.status_code == 204
+    assert client.get(f"/songs/{song_id}").status_code == 404
+    assert db_session.query(Job).filter(Job.song_id == song_id).count() == 0
 
 
 def test_resolve_asset_path_blocks_traversal(tmp_path, monkeypatch) -> None:

@@ -145,7 +145,16 @@ class Song(Base):
     # overlaps: Job이 user_id를 (users FK)와 (songs 복합 FK) 양쪽에서 쓰는 것에 대해
     # SQLAlchemy가 경고를 내는데, 의도한 설계(Job.user_id는 항상 Job.song.user_id와 같아야 함)라
     # 실제 실행 결과(SAWarning 문구)가 안내한 대로 overlaps를 달아 경고를 끈다.
-    jobs: Mapped[list["Job"]] = relationship(back_populates="song", overlaps="jobs")
+    # 2026-10-27(실사용 중 재현된 버그) — cascade가 없으면 곡 삭제 시 SQLAlchemy가
+    # 연결된 Job 행을 지우는 대신 FK 컬럼(song_id/user_id)을 NULL로 비우려
+    # 시도하는데, 둘 다 nullable=False라 "NOT NULL constraint failed: jobs.user_id"
+    # IntegrityError로 즉시 실패해 삭제 자체가 먹히지 않았다(실제 재현: 분리
+    # 작업(Job)이 하나라도 있는 곡은 전부 삭제가 안 됨 — 업로드된 곡은 거의
+    # 전부 해당). assets/practice_setting과 같은 원칙으로 cascade 추가 — 곡이
+    # 지워지면 그 처리 기록(Job)도 같이 지워지는 게 맞다(남겨둘 이유 없음).
+    jobs: Mapped[list["Job"]] = relationship(
+        back_populates="song", cascade="all, delete-orphan", overlaps="jobs"
+    )
     practice_setting: Mapped["PracticeSetting | None"] = relationship(
         back_populates="song", uselist=False, cascade="all, delete-orphan"
     )
