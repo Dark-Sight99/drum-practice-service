@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest'
 
 // jsdom의 HTMLMediaElement.play()는 실제로 "Not implemented"만 찍고 끝나(실제
 // 실행으로 확인) 성공/실패 분기를 전혀 재현하지 못한다 — 그래서 prototype의
@@ -69,8 +69,8 @@ async function createPlayer(sources: TrackSource[]) {
 }
 
 describe('createTrackPlayer', () => {
-  let playMock: ReturnType<typeof vi.fn>
-  let pauseMock: ReturnType<typeof vi.fn>
+  let playMock: Mock<() => Promise<void>>
+  let pauseMock: Mock<() => void>
   // T3-16-feedback-3 — 데스크톱 경로(element.volume 직접 제어) 테스트용으로
   // createAudioTrackPool()이 만드는 실제 <audio> 엘리먼트를 생성 순서대로
   // 추적(sources 배열과 같은 순서 — 아래 createGainMock 등과 같은 패턴).
@@ -91,8 +91,8 @@ describe('createTrackPlayer', () => {
   let objectUrlCounter: number
 
   beforeEach(() => {
-    playMock = vi.fn().mockResolvedValue(undefined)
-    pauseMock = vi.fn()
+    playMock = vi.fn<() => Promise<void>>().mockResolvedValue(undefined)
+    pauseMock = vi.fn<() => void>()
     vi.spyOn(HTMLMediaElement.prototype, 'play').mockImplementation(playMock)
     vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(pauseMock)
     createdAudioElements = []
