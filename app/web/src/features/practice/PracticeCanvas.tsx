@@ -1512,24 +1512,24 @@ export function PracticeCanvas({
           <button
             type="button"
             className="transport-btn transport-btn--play"
-            style={{ width: 64, height: 64 }}
+            style={{ width: 50, height: 50 }}
             title="일시정지"
             aria-label="일시정지"
             onClick={handlePause}
           >
-            <Pause size={28} aria-hidden="true" />
+            <Pause size={22} aria-hidden="true" />
           </button>
         ) : (
           <button
             type="button"
             className="transport-btn transport-btn--play"
-            style={{ width: 64, height: 64 }}
+            style={{ width: 50, height: 50 }}
             title={audioTracksLoading ? '음원 불러오는 중…' : '재생'}
             aria-label={audioTracksLoading ? '음원 불러오는 중' : '재생'}
             onClick={handlePlay}
             disabled={isStarting || audioTracksLoading}
           >
-            <Play size={28} aria-hidden="true" style={{ marginLeft: 2 }} />
+            <Play size={22} aria-hidden="true" style={{ marginLeft: 2 }} />
           </button>
         )}
         <button
@@ -1564,18 +1564,23 @@ export function PracticeCanvas({
          * 아니어도 항상 눌러서 끌 수 있다(기존 체크박스가 그랬던 것과 동일 —
          * "루프를 그만 걸고 싶다"는 재생 상태와 무관해야 함). 2026-10-27
          * 추가 요청 — 리셋 버튼 우측으로 위치 이동(원래 상단 BPM 옆이었음). */}
+        {/* 2026-10-27(의뢰인 요청) — "재생 버튼·루프 시작 버튼이 과하게
+         * 크다" 지적 — 패딩·글자 크기를 줄여 옆의 작은 아이콘 버튼들과
+         * 어울리는 크기로(텍스트는 이미 짧아 더 줄이기보단 크기만 축소). */}
         <button
           type="button"
           onClick={handleLoopButtonClick}
           disabled={loopPhase !== 'active' && !isPlaying && !isPaused}
           style={{
             whiteSpace: 'nowrap',
+            padding: '6px 10px',
+            fontSize: '0.85em',
             ...(loopPhase === 'active'
               ? { background: 'var(--warning)', borderColor: 'var(--warning)', color: 'var(--bg)' }
               : undefined),
           }}
         >
-          <Repeat size={16} aria-hidden="true" style={{ verticalAlign: 'middle', marginRight: 4 }} />
+          <Repeat size={14} aria-hidden="true" style={{ verticalAlign: 'middle', marginRight: 4 }} />
           {loopPhase === 'idle' ? '루프 시작' : loopPhase === 'start-marked' ? '여기까지' : '루프 진행중'}
         </button>
       </div>
