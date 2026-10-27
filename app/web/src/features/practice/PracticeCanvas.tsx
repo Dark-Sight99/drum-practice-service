@@ -21,11 +21,13 @@ import {
   barIndexForSeconds,
   barIndexForTick,
   CHANNEL_KEYS,
+  CLICK_SOUND_LABELS,
   createAudioTrackPool,
   createDrumVoices,
   createMetronome,
   createTrackPlayer,
   defaultMixerState,
+  DEFAULT_CLICK_SOUND_ID,
   disposeDrumVoices,
   effectiveGain,
   getMasterClock,
@@ -39,6 +41,7 @@ import {
   type AudioTrackPool,
   type ChannelKey,
   type ChannelState,
+  type ClickSoundId,
   type DrumVoiceMap,
   type LoopBars,
   type Metronome,
@@ -486,6 +489,12 @@ export function PracticeCanvas({
     songEndPositionSeconds,
   ])
 
+  // 2026-10-27(의뢰인 요청) — "메트로놈 소리가 잘 안 들린다. 후보를 몇 개
+  // 보여주면 그중 고르겠다." 의뢰인이 실제로 들어보고 고를 때까지의 임시
+  // 결정용 선택지라 계정/곡 어디에도 저장하지 않는다(고른 뒤엔 그 하나로
+  // 고정하고 이 선택 UI 자체를 치울 예정 — work/T3-29/plan.md §범위경계).
+  const [metronomeSoundId, setMetronomeSoundId] = useState<ClickSoundId>(DEFAULT_CLICK_SOUND_ID)
+
   // --- T3-4(REQ-05) 믹서: 볼륨/음소거/솔로 — work/T3-4/plan.md ---
   const [mixerState, setMixerState] = useState<MixerState>(defaultMixerState())
   const mixerStateRef = useRef(mixerState)
@@ -869,9 +878,8 @@ export function PracticeCanvas({
     playbackRef.current = null
     isPlayingRef.current = false
     lastActiveMapRef.current = new Map()
-    lastProgressKeyRef.current = -1
     setActiveHandByPiece(new Map())
-    setProgressPercent(0)
+    if (progressBarRef.current) progressBarRef.current.style.height = '0%'
     setIsPlaying(false)
   }
 
@@ -1024,7 +1032,10 @@ export function PracticeCanvas({
       }
       // 메트로놈은 이번에 처음 재생 흐름에 연결됨(§범위경계 — T2-4가 믹서로
       // 미뤄뒀던 부분).
-      metronome = createMetronome({ timeSignature: score.meta.timeSignature })
+      metronome = createMetronome({
+        timeSignature: score.meta.timeSignature,
+        soundId: metronomeSoundId,
+      })
       if (primePromise) await primePromise
       if (playSessionIdRef.current !== mySessionId) {
         cleanupAbortedSetup()
@@ -1047,6 +1058,7 @@ export function PracticeCanvas({
         // 불편의 원인이었다 — 재생 시작 시점의 메트로놈 게인을 그대로 넘겨
         // 아래(재생 중 본체 메트로놈에 적용하는 것)와 같은 기준을 쓰게 한다.
         countInVolumeDb: linearGainToDb(effectiveGain(mixerStateRef.current.metronome)),
+        countInSoundId: metronomeSoundId,
       })
       playbackRef.current = { handle, voices, tracks, synthGain, limiter, metronome }
       isStartingRef.current = false
@@ -1551,6 +1563,32 @@ export function PracticeCanvas({
               🥁 원곡 드럼 {mixerState.stem_drums.volume === 0 ? '켜기' : '끄기'}
             </button>
           </div>
+          {/* 2026-10-27(의뢰인 요청) — "메트로놈 소리 후보 몇 개를 보여주면
+           * 그중 고르겠다". 결정 전까지의 임시 선택 UI(§범위경계, 위
+           * metronomeSoundId 선언부 코멘트 참고) — 재생 중 바꾼 값은 지금
+           * 돌고 있는 메트로놈엔 바로 안 바뀌고(createMetronome이 재생
+           * 시작 시점에만 생성됨) 다음 재생부터 적용된다. */}
+          <label
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 'var(--space-2)',
+              fontSize: '0.85em',
+              color: 'var(--text-muted)',
+            }}
+          >
+            메트로놈 소리(후보, 재생 전 선택)
+            <select
+              value={metronomeSoundId}
+              onChange={(e) => setMetronomeSoundId(e.target.value as ClickSoundId)}
+            >
+              {Object.entries(CLICK_SOUND_LABELS).map(([id, label]) => (
+                <option key={id} value={id}>
+                  {label}
+                </option>
+              ))}
+            </select>
+          </label>
           {/* T3-4 게이트 피드백 2차(2026-10-25) — M 체크박스를 눌러도 화면에서
            * 티가 잘 안 난다는 지적 → 약어 뜻을 바로 아래에 적어두고, 아래 각
            * 채널 행에서 음소거 중이면 흐리게 해 즉시 눈에 띄게 한다.
