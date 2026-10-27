@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@coderline/alphatab": "^1.8.4",
+    "@formkit/auto-animate": "^0.10.0",
     "@tonejs/midi": "^2.0.28",
     "lucide-react": "^0.550.0",
     "react": "^19.3.1",
