@@ -197,7 +197,19 @@ def _decode_to_wav_for_measurement(input_path: Path) -> Path:
     tmp_path = Path(tmp_path_str)
     os.close(fd)
     cmd = [ffmpeg_exe, "-y", "-i", str(input_path), str(tmp_path)]
-    proc = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
+    # Codex 모드A 지적(Medium, 반영) — subprocess.run() 호출 자체가 예외를
+    # 던지면(ffmpeg 실행파일 손상·권한 문제 등 — 드물지만 반환코드가 아니라
+    # 예외로 나타남) returncode 분기를 아예 못 타 tmp_path가 안 지워진 채
+    # 새고, SeparationError가 아닌 원시 예외가 그대로 전파됐다 —
+    # encode_mp3()/apply_gain()과 똑같이 try/except로 감싸 어떤 실패든
+    # 임시 파일이 지워지고 일관되게 SeparationError로 변환되게 한다.
+    try:
+        proc = subprocess.run(
+            cmd, capture_output=True, text=True, encoding="utf-8", errors="replace"
+        )
+    except OSError as exc:
+        tmp_path.unlink(missing_ok=True)
+        raise SeparationError(f"음량 측정용 디코딩 실행 실패: {exc}") from exc
     if proc.returncode != 0:
         tmp_path.unlink(missing_ok=True)
         raise SeparationError(

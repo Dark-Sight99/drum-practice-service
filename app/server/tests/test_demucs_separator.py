@@ -6,6 +6,7 @@
 """
 
 import subprocess
+import tempfile
 from pathlib import Path
 
 import numpy as np
@@ -14,6 +15,7 @@ import soundfile as sf
 
 from modules.separator.demucs_separator import (
     SeparationError,
+    _decode_to_wav_for_measurement,
     apply_gain,
     compute_playback_gain,
     encode_mp3,
@@ -413,3 +415,38 @@ def test_compute_playback_gain_handles_mp4_original_file(tmp_path):
 
     assert np.isfinite(gain)
     assert gain > 0
+
+
+def test_decode_to_wav_for_measurement_cleans_up_temp_file_if_subprocess_raises(
+    tmp_path, monkeypatch
+):
+    """Codex 모드A 지적(Medium, 반영) — subprocess.run() 호출 자체가(반환코드가
+    아니라) 예외를 던지면(ffmpeg 실행파일 손상·권한 문제 등) 이전엔 그 분기를
+    아예 못 타 임시 WAV가 안 지워진 채 새고 있었다. 이제는 그 경우도
+    SeparationError로 변환되고, 만든 임시 파일도 지워져야 한다."""
+    import imageio_ffmpeg
+
+    monkeypatch.setattr(imageio_ffmpeg, "get_ffmpeg_exe", lambda: "FAKE_FFMPEG")
+    created_tmp_paths: list[Path] = []
+    real_mkstemp = tempfile.mkstemp
+
+    def spy_mkstemp(*args, **kwargs):
+        fd, path_str = real_mkstemp(*args, **kwargs)
+        created_tmp_paths.append(Path(path_str))
+        return fd, path_str
+
+    monkeypatch.setattr(tempfile, "mkstemp", spy_mkstemp)
+
+    def raising_run(cmd, capture_output, text, encoding=None, errors=None):
+        raise OSError("실행파일을 찾을 수 없음(시뮬레이션)")
+
+    monkeypatch.setattr(subprocess, "run", raising_run)
+
+    input_path = tmp_path / "whatever.mp4"
+    input_path.write_bytes(b"x")
+
+    with pytest.raises(SeparationError, match="디코딩 실행 실패"):
+        _decode_to_wav_for_measurement(input_path)
+
+    assert len(created_tmp_paths) == 1
+    assert not created_tmp_paths[0].exists()
