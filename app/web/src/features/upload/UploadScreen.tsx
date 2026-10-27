@@ -27,7 +27,17 @@ export interface UploadScreenProps {
 const POLL_INTERVAL_MS = 2000
 const TERMINAL_STATUSES = new Set(['completed', 'failed'])
 
-const DIGITAL_EXTENSIONS = ['.mid', '.midi', '.musicxml', '.mxl', '.gp', '.gp3', '.gp4', '.gp5', '.gpx']
+const DIGITAL_EXTENSIONS = [
+  '.mid',
+  '.midi',
+  '.musicxml',
+  '.mxl',
+  '.gp',
+  '.gp3',
+  '.gp4',
+  '.gp5',
+  '.gpx',
+]
 const AUDIO_EXTENSIONS = ['.mp3', '.wav', '.m4a', '.flac', '.mp4']
 const ACCEPT = [...DIGITAL_EXTENSIONS, ...AUDIO_EXTENSIONS].join(',')
 
@@ -47,11 +57,12 @@ function detectKind(filename: string): FileKind | null {
 // (Phase 4) 경로를 드롭하면서 음원 업로드가 사실상 유일한 주 경로가 돼 이번에
 // 같이 연결. 확장자로 디지털/음원 경로를 자동 분기 — 디지털은 기존처럼
 // 클라이언트에서 바로 파싱해 미리보기(노트 수·BPM)까지 보여주고, 음원은
-// 서버가 분리·채보까지 자동으로 이어 하므로(핸들러가 분리 성공 시 채보
-// 작업을 자동 큐잉, `modules/separator/handler.py`) 여기선 파일을 올리기만
-// 하면 끝 — 업로드 자체가 끝나는 대로 "업로드완료" 표시 후 모달이 닫힘(의뢰인
-// 요청 — 분리·채보는 몇 분 걸릴 수 있어 그걸 기다리게 하지 않음, 진행 상태는
-// 라이브러리의 상태 표시로 확인).
+// 서버가 분리·채보까지 자동으로 이어 한다(핸들러가 분리 성공 시 채보
+// 작업을 자동 큐잉, `modules/separator/handler.py`). 디지털 악보는 업로드
+// 자체가 끝나는 대로 "업로드완료" 표시 후 모달이 바로 닫히지만, 음원은
+// 분리·채보가 몇 분 걸릴 수 있어 아래 generatingSong 상태로 전환해 모달
+// 안에서 진행 상태를 보여준다(2026-10-26 의뢰인 요청 — 아래 generatingSong
+// 코멘트 참고).
 export function UploadScreen({
   open,
   onUploaded,
@@ -111,10 +122,10 @@ export function UploadScreen({
   }, [])
 
   // 노트 생성 진행 상태 폴링 — 완료/실패(terminal) 상태가 되면 더 이상 예약하지
-  // 않아 자연히 멈춘다. 모달을 닫아도(generatingSong이 null로 리셋) 아래
-  // cleanup이 타이머를 지운다 — "닫아도 처리는 계속된다"는 안내와 모순되지
-  // 않음(서버 쪽 작업 자체는 모달과 무관하게 계속 진행, 여기서 멈추는 건
-  // 화면 쪽 폴링뿐).
+  // 않아 자연히 멈춘다. 2026-10-27(의뢰인 요청) — 생성 중(非terminal)에는
+  // 아래 Modal onClose가 막혀 있어 모달 자체를 못 닫으므로, 이 effect가
+  // cleanup될 일은 완료/실패로 끝나거나(둘 다 이 effect가 아예 재실행 안 함)
+  // 실제로 언마운트될 때뿐이다.
   useEffect(() => {
     if (!generatingSong || TERMINAL_STATUSES.has(generatingSong.status)) return
     let cancelled = false
@@ -283,17 +294,25 @@ export function UploadScreen({
 
   const canSubmit =
     file !== null && fileKind !== null && (fileKind === 'audio' || parsedScore !== null)
+  // 2026-10-27(의뢰인 요청) — "노트를 생성하는 중…" 화면(완료/실패 전)에서
+  // 배경을 눌러도 모달이 안 닫히게 — 이 상태에서 모달이 사라지면 사용자가
+  // 이 곡이 어떻게 됐는지 다시 확인할 방법이 라이브러리 새로고침뿐이라
+  // 혼란스러울 수 있음(아래 "닫기" 버튼·안내 문구 제거와 같은 취지).
+  // 완료/실패(terminal)로 끝나면 다시 닫을 수 있다.
+  const isGeneratingInProgress =
+    generatingSong !== null && !TERMINAL_STATUSES.has(generatingSong.status)
 
   return (
     // 2026-10-27(의뢰인 요청) — "업로드 중에 취소를 눌러도 [서버 쪽은]
     // 계속 진행된다"는 지적(handleCancel은 실제 요청을 중단시키지 않고
     // 세대 번호만 올려 응답을 무시할 뿐 — 위 submitGenerationRef 코멘트
     // 참고, 진짜로 취소되는 게 아니라 오해를 살 수 있음) — 업로드 요청이
-    // 실제로 오가는 동안(isSubmitting)은 배경 클릭·Esc로도 모달이 안
-    // 닫히게 막는다(onClose를 아무 일도 안 하는 함수로 교체).
+    // 실제로 오가는 동안(isSubmitting)과 노트 생성 중(isGeneratingInProgress)엔
+    // 배경 클릭·Esc로도 모달이 안 닫히게 막는다(onClose를 아무 일도 안 하는
+    // 함수로 교체).
     <Modal
       open={open}
-      onClose={isSubmitting ? () => {} : handleCancel}
+      onClose={isSubmitting || isGeneratingInProgress ? () => {} : handleCancel}
       title="악보/음원 업로드"
     >
       {/* 2026-10-26 의뢰인 요청 — 모달이 가로로 길쭉한 사각형이었던 걸 정사각형에
@@ -356,6 +375,11 @@ export function UploadScreen({
                 </button>
               </>
             ) : (
+              // 2026-10-27(의뢰인 요청) — "창을 닫아도 처리는 계속돼요" 안내와
+              // "닫기" 버튼을 없앰 — 위 Modal onClose가 이 단계(완료/실패 전)엔
+              // 배경 클릭·Esc도 막아 실제로 닫을 방법이 없으므로, 닫을 수 있다는
+              // 인상을 주는 문구·버튼을 같이 없애는 게 맞다(실제로 안 되는 걸
+              // 된다고 암시하면 안 된다는 원칙 — T3-35 취소 버튼 제거와 같은 맥락).
               <>
                 <Spinner />
                 <p style={{ textAlign: 'center', margin: 0 }}>노트를 생성하는 중…</p>
@@ -367,19 +391,16 @@ export function UploadScreen({
                     margin: 0,
                   }}
                 >
-                  곡 길이에 따라 몇 분 걸릴 수 있어요. 창을 닫아도 처리는 계속돼요.
+                  곡 길이에 따라 몇 분 걸릴 수 있어요.
                 </p>
-                <button type="button" onClick={handleCancel}>
-                  닫기
-                </button>
               </>
             )}
           </div>
         ) : (
           <>
             <p style={{ color: 'var(--text-muted)', textAlign: 'center' }}>
-              음원(mp3, wav, m4a, flac, mp4) 또는 디지털 악보(MIDI, MusicXML, Guitar Pro)를 올릴
-              수 있습니다.
+              음원(mp3, wav, m4a, flac, mp4) 또는 디지털 악보(MIDI, MusicXML, Guitar Pro)를 올릴 수
+              있습니다.
             </p>
 
             <div
@@ -425,9 +446,7 @@ export function UploadScreen({
                 }}
               />
               {file && (
-                <span style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>
-                  {file.name}
-                </span>
+                <span style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>{file.name}</span>
               )}
             </div>
 
