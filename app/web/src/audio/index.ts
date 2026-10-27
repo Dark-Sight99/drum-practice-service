@@ -2,8 +2,8 @@ export type { MasterClock } from './clock'
 export { getMasterClock } from './clock'
 export { createDrumVoices, disposeDrumVoices } from './drumVoices'
 export type { DrumVoice, DrumVoiceMap } from './drumVoices'
-export { createMetronome, CLICK_SOUND_LABELS, DEFAULT_CLICK_SOUND_ID } from './metronome'
-export type { Metronome, MetronomeOptions, ClickSoundId } from './metronome'
+export { createMetronome } from './metronome'
+export type { Metronome, MetronomeOptions } from './metronome'
 export {
   CHANNEL_KEYS,
   defaultMixerState,

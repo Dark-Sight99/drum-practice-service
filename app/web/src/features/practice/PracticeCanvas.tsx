@@ -21,13 +21,11 @@ import {
   barIndexForSeconds,
   barIndexForTick,
   CHANNEL_KEYS,
-  CLICK_SOUND_LABELS,
   createAudioTrackPool,
   createDrumVoices,
   createMetronome,
   createTrackPlayer,
   defaultMixerState,
-  DEFAULT_CLICK_SOUND_ID,
   disposeDrumVoices,
   effectiveGain,
   getMasterClock,
@@ -41,7 +39,6 @@ import {
   type AudioTrackPool,
   type ChannelKey,
   type ChannelState,
-  type ClickSoundId,
   type DrumVoiceMap,
   type LoopBars,
   type Metronome,
@@ -193,6 +190,67 @@ function usePortraitPhoneLayout(): boolean {
     return () => mq.removeEventListener('change', onChange)
   }, [])
   return isPortraitPhone
+}
+
+// Codex 모드A 지적(T3-29 리뷰 C-001, 반영) — T3-28에서 믹서 저장이 곡별이
+// 아니라 계정 전체 자원이 됐는데, 이 저장 파이프라인(아래 scheduleMixerSave
+// 등)은 여전히 컴포넌트 인스턴스별 useRef(savingRef/pendingSaveRef/
+// saveTimerRef)였다. PracticeCanvas는 곡이 바뀌면 통째로 재마운트되므로,
+// 곡 A를 떠나며 언마운트 flush로 보낸 PUT이 아직 응답 전인 채로 곡 B의 새
+// 인스턴스가 또 PUT을 보내면, 둘이 역순으로 도착했을 때(예: 곡 A의 느린
+// 요청이 곡 B의 요청보다 늦게 도착) 곡 B에서 방금 바꾼 최신 값을 곡 A의
+// 낡은 값이 덮어쓸 수 있었다 — 같은 곡의 레코드끼리만 겹치던 예전(곡별)
+// 구조에선 없던 경합. 계정 전체로 공유되는 자원이니 저장 파이프라인도
+// 컴포넌트 수명이 아니라 모듈(앱) 수명 하나로 묶어 직렬화한다 — 디바운스
+// 타이머가 아직 안 끝났어도 "최신으로 알려진 값"(latestMixerValueToSave)은
+// schedule 시점이 아니라 실제로 저장을 실행하는 시점에 넘겨받은 getter로
+// 다시 읽어, 같은 디바운스 창 안에서 여러 번 바뀐 경우에도 항상 "그 순간의
+// 최신 값"을 저장한다(기존 ref 기반 지연읽기와 같은 원리).
+let mixerSaveGetter: (() => MixerState) | null = null
+let mixerSaveTimer: ReturnType<typeof setTimeout> | null = null
+let mixerSaveInFlight = false
+let mixerSavePending = false
+
+async function runMixerSave() {
+  if (mixerSaveInFlight) {
+    mixerSavePending = true
+    return
+  }
+  const getter = mixerSaveGetter
+  if (!getter) return
+  mixerSaveInFlight = true
+  try {
+    await saveMixerSetting(getter())
+  } catch {
+    // 실패해도 조용히 넘어감 — 다음 변경 때 다시 저장 시도됨, 믹서 설정
+    // 하나가 잠깐 이전 값으로 남는 정도라 치명적이지 않음.
+  } finally {
+    mixerSaveInFlight = false
+    if (mixerSavePending) {
+      mixerSavePending = false
+      await runMixerSave()
+    }
+  }
+}
+
+function scheduleMixerSaveGlobal(getter: () => MixerState) {
+  mixerSaveGetter = getter
+  if (mixerSaveTimer !== null) clearTimeout(mixerSaveTimer)
+  mixerSaveTimer = setTimeout(() => {
+    mixerSaveTimer = null
+    void runMixerSave()
+  }, 400)
+}
+
+/** 언마운트(곡 전환 포함) 시 대기 중인 디바운스를 즉시 flush — 모드C
+ * 1라운드 C-002와 같은 이유. 대기 중인 타이머가 없으면(= 이 세션 동안
+ * 아무 변경도 없었으면) 아무 일도 안 함. */
+function flushMixerSaveGlobal(getter: () => MixerState) {
+  if (mixerSaveTimer === null) return
+  clearTimeout(mixerSaveTimer)
+  mixerSaveTimer = null
+  mixerSaveGetter = getter
+  void runMixerSave()
 }
 
 export interface PracticeCanvasProps {
@@ -489,12 +547,6 @@ export function PracticeCanvas({
     songEndPositionSeconds,
   ])
 
-  // 2026-10-27(의뢰인 요청) — "메트로놈 소리가 잘 안 들린다. 후보를 몇 개
-  // 보여주면 그중 고르겠다." 의뢰인이 실제로 들어보고 고를 때까지의 임시
-  // 결정용 선택지라 계정/곡 어디에도 저장하지 않는다(고른 뒤엔 그 하나로
-  // 고정하고 이 선택 UI 자체를 치울 예정 — work/T3-29/plan.md §범위경계).
-  const [metronomeSoundId, setMetronomeSoundId] = useState<ClickSoundId>(DEFAULT_CLICK_SOUND_ID)
-
   // --- T3-4(REQ-05) 믹서: 볼륨/음소거/솔로 — work/T3-4/plan.md ---
   const [mixerState, setMixerState] = useState<MixerState>(defaultMixerState())
   const mixerStateRef = useRef(mixerState)
@@ -552,51 +604,17 @@ export function PracticeCanvas({
     }
   }, [])
 
-  // 저장 요청 직렬화(모드C 2라운드 지적 반영) — 이 탭에서 PUT이 클라이언트가
-  // 인지하는 한 항상 1개씩만 뜨도록: 진행 중이면 새로 안 보내고 플래그만
-  // 세우고, 끝나면 그 시점의 최신 상태로 한 번만 더 보낸다. 모호한 네트워크
-  // 실패 시의 좁은 순서 역전 잔존 위험은 마스터가 수용한 한계(§마스터 최종
-  // 판단). T3-28에서 계정 전체 공유로 바뀌며 song_id가 더 이상 필요 없어짐.
-  const savingRef = useRef(false)
-  const pendingSaveRef = useRef(false)
-  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-
-  async function doSaveMixer() {
-    if (savingRef.current) {
-      pendingSaveRef.current = true
-      return
-    }
-    savingRef.current = true
-    try {
-      await saveMixerSetting(mixerStateRef.current)
-    } catch {
-      // 실패해도 조용히 넘어감 — 다음 변경 때 다시 저장 시도됨, 믹서 설정
-      // 하나가 잠깐 이전 값으로 남는 정도라 치명적이지 않음.
-    } finally {
-      savingRef.current = false
-      if (pendingSaveRef.current) {
-        pendingSaveRef.current = false
-        await doSaveMixer()
-      }
-    }
-  }
-
+  // 저장 요청 직렬화(모드C 2라운드 지적 반영, T3-29 리뷰 C-001로 모듈
+  // 스코프로 승격 — 위 scheduleMixerSaveGlobal 등 코멘트 참고) — 이
+  // 컴포넌트 인스턴스는 "지금 저장할 값"을 읽어오는 getter만 등록한다.
   function scheduleMixerSave() {
-    if (saveTimerRef.current !== null) clearTimeout(saveTimerRef.current)
-    saveTimerRef.current = setTimeout(() => {
-      saveTimerRef.current = null
-      void doSaveMixer()
-    }, 400)
+    scheduleMixerSaveGlobal(() => mixerStateRef.current)
   }
 
   // 언마운트·곡 전환 시 대기 중인 디바운스를 즉시 flush(모드C 1라운드 C-002).
   useEffect(() => {
     return () => {
-      if (saveTimerRef.current !== null) {
-        clearTimeout(saveTimerRef.current)
-        saveTimerRef.current = null
-        void doSaveMixer()
-      }
+      flushMixerSaveGlobal(() => mixerStateRef.current)
     }
   }, [])
 
@@ -1032,10 +1050,7 @@ export function PracticeCanvas({
       }
       // 메트로놈은 이번에 처음 재생 흐름에 연결됨(§범위경계 — T2-4가 믹서로
       // 미뤄뒀던 부분).
-      metronome = createMetronome({
-        timeSignature: score.meta.timeSignature,
-        soundId: metronomeSoundId,
-      })
+      metronome = createMetronome({ timeSignature: score.meta.timeSignature })
       if (primePromise) await primePromise
       if (playSessionIdRef.current !== mySessionId) {
         cleanupAbortedSetup()
@@ -1058,7 +1073,6 @@ export function PracticeCanvas({
         // 불편의 원인이었다 — 재생 시작 시점의 메트로놈 게인을 그대로 넘겨
         // 아래(재생 중 본체 메트로놈에 적용하는 것)와 같은 기준을 쓰게 한다.
         countInVolumeDb: linearGainToDb(effectiveGain(mixerStateRef.current.metronome)),
-        countInSoundId: metronomeSoundId,
       })
       playbackRef.current = { handle, voices, tracks, synthGain, limiter, metronome }
       isStartingRef.current = false
@@ -1563,37 +1577,6 @@ export function PracticeCanvas({
               🥁 원곡 드럼 {mixerState.stem_drums.volume === 0 ? '켜기' : '끄기'}
             </button>
           </div>
-          {/* 2026-10-27(의뢰인 요청) — "메트로놈 소리 후보 몇 개를 보여주면
-           * 그중 고르겠다". 결정 전까지의 임시 선택 UI(§범위경계, 위
-           * metronomeSoundId 선언부 코멘트 참고) — 재생 중 바꾼 값은 지금
-           * 돌고 있는 메트로놈엔 바로 안 바뀌고(createMetronome이 재생
-           * 시작 시점에만 생성됨) 다음 재생부터 적용된다. */}
-          <label
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 'var(--space-2)',
-              fontSize: '0.85em',
-              color: 'var(--text-muted)',
-            }}
-          >
-            메트로놈 소리(후보, 재생 전 선택)
-            <select
-              value={metronomeSoundId}
-              onChange={(e) => setMetronomeSoundId(e.target.value as ClickSoundId)}
-            >
-              {Object.entries(CLICK_SOUND_LABELS).map(([id, label]) => (
-                <option key={id} value={id}>
-                  {label}
-                </option>
-              ))}
-            </select>
-          </label>
-          {/* T3-4 게이트 피드백 2차(2026-10-25) — M 체크박스를 눌러도 화면에서
-           * 티가 잘 안 난다는 지적 → 약어 뜻을 바로 아래에 적어두고, 아래 각
-           * 채널 행에서 음소거 중이면 흐리게 해 즉시 눈에 띄게 한다.
-           * T3-8(2026-10-25, 의뢰인 요청) — 솔로(S) 버튼은 제거("필요없다"). */}
-          <span style={{ color: 'var(--text-muted)', fontSize: '0.85em' }}>M = 음소거</span>
           {MIXER_ROW_KEYS.map((key) => {
             const channel = mixerState[key]
             const rows = [

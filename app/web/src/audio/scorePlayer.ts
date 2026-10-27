@@ -1,7 +1,7 @@
 import * as Tone from 'tone'
 import type { DrumScore } from '../score/types'
 import { stopAllRinging, type DrumVoiceMap } from './drumVoices'
-import { createClickVoice, type ClickSoundId } from './metronome'
+import { createClickVoice } from './metronome'
 import type { TrackPlayer } from './trackPlayer'
 import {
   audioTrackPositionSeconds,
@@ -40,10 +40,6 @@ export interface PlayDrumScoreOptions {
    * 넘긴다(재생 중 메트로놈 본체에 적용하는 것과 같은 변환). 안 넘기면
    * createClickVoice의 기본값(-6dB)을 그대로 씀. */
   countInVolumeDb?: number
-  /** 2026-10-27(의뢰인 요청) — 메트로놈 소리 후보 선택(metronome.ts
-   * ClickSoundId). 재생 중 메트로놈(PracticeCanvas의 createMetronome
-   * 호출)과 같은 값을 넘겨야 카운트인·본 재생이 같은 소리로 이어진다. */
-  countInSoundId?: ClickSoundId
 }
 
 /** DrumScore를 재생한다: 마스터 클록(Transport)에 BPM/박자표를 맞추고, 카운트인
@@ -94,7 +90,7 @@ export function playDrumScore(
   )
   // 2026-10-27(의뢰인 요청) — 재생 중 메트로놈과 같은 소리(createClickVoice)·
   // 같은 음량 기준(믹서 "메트로놈" 채널, 위 countInVolumeDb 코멘트 참고)을 쓴다.
-  const countInClick = createClickVoice(options.countInVolumeDb, options.countInSoundId)
+  const countInClick = createClickVoice(options.countInVolumeDb)
 
   const scheduledIds: number[] = []
 
