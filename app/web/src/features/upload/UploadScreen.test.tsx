@@ -141,7 +141,12 @@ describe('UploadScreen (모달)', () => {
     const onCancel = vi.fn()
     const drumScore = {
       version: 1 as const,
-      meta: { title: '곡', bpm: 120, timeSignature: [4, 4] as [number, number], source: 'audio' as const },
+      meta: {
+        title: '곡',
+        bpm: 120,
+        timeSignature: [4, 4] as [number, number],
+        source: 'audio' as const,
+      },
       ppq: 480,
       audioOffsetMs: 0,
       notes: [],
@@ -254,7 +259,7 @@ describe('UploadScreen (모달)', () => {
     expect(screen.queryByRole('button', { name: '연주하기' })).not.toBeInTheDocument()
   })
 
-  it('생성 중 모달을 닫으면 생성 중 화면이 사라지고, 그 뒤 뒤늦은 폴링 응답은 반영되지 않음', async () => {
+  it('2026-10-27(의뢰인 요청) — 노트 생성 중엔 배경 클릭·Esc로 모달이 안 닫히고, "닫기" 버튼·"창을 닫아도…" 안내도 없음', async () => {
     const onCancel = vi.fn()
     render(
       <UploadScreen
@@ -271,16 +276,49 @@ describe('UploadScreen (모달)', () => {
     fireEvent.click(screen.getByRole('button', { name: '업로드' }))
     await flush()
     expect(screen.getByRole('status')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '닫기' })).not.toBeInTheDocument()
+    expect(screen.queryByText(/창을 닫아도/)).not.toBeInTheDocument()
 
-    fireEvent.click(screen.getByRole('presentation')) // 배경 클릭으로 닫기
-    expect(onCancel).toHaveBeenCalledTimes(1)
-    expect(screen.queryByRole('status')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('presentation')) // 배경 클릭 — 생성 중엔 무시돼야 함
+    expect(onCancel).not.toHaveBeenCalled()
+    expect(screen.getByRole('status')).toBeInTheDocument() // 모달 그대로 열려있음
 
+    fireEvent.keyDown(window, { key: 'Escape' }) // Esc도 마찬가지로 무시돼야 함
+    expect(onCancel).not.toHaveBeenCalled()
+    expect(screen.getByRole('status')).toBeInTheDocument()
+
+    // 완료(terminal)로 끝나면 다시 닫을 수 있다.
     fetchSongMock.mockResolvedValueOnce({ ...uploadedSong, status: 'completed' })
     await act(async () => {
       await vi.advanceTimersByTimeAsync(2000)
     })
-    expect(screen.queryByRole('button', { name: '연주하기' })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('presentation'))
+    expect(onCancel).toHaveBeenCalledTimes(1)
+  })
+
+  it('2026-10-27(의뢰인 요청) — 노트 생성 실패(failed)로 끝나면 배경 클릭으로 다시 닫을 수 있음', async () => {
+    const onCancel = vi.fn()
+    render(
+      <UploadScreen
+        open
+        onUploaded={noop}
+        onCancel={onCancel}
+        onSongCreated={noop}
+        onPlaySong={noop}
+      />,
+    )
+    const input = screen.getByLabelText('파일 선택') as HTMLInputElement
+    selectFile(input, new File(['x'], 'song.mp3', { type: 'audio/mpeg' }))
+    await flush()
+    fireEvent.click(screen.getByRole('button', { name: '업로드' }))
+    await flush()
+
+    fetchSongMock.mockResolvedValueOnce({ ...uploadedSong, status: 'failed' })
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2000)
+    })
+    fireEvent.click(screen.getByRole('presentation'))
+    expect(onCancel).toHaveBeenCalledTimes(1)
   })
 
   it('2026-10-27(의뢰인 요청) — 업로드 요청이 서버 응답 대기 중일 때는 취소 버튼이 없고 배경 클릭으로도 안 닫힘(실제로 취소되지 않는데 취소된 것처럼 보이는 걸 막음)', async () => {
@@ -315,14 +353,18 @@ describe('UploadScreen (모달)', () => {
     expect(onCancel).not.toHaveBeenCalled()
     expect(screen.getByRole('button', { name: '업로드 중…' })).toBeInTheDocument() // 모달 그대로 열려있음
 
-    // 응답이 오면(= 이 화면은 "생성 중" 화면으로 전환) 다시 닫을 수 있다.
+    // 응답이 오면 "생성 중" 화면으로 전환되는데, 2026-10-27(의뢰인 요청)로
+    // 그 화면도 완료/실패 전까지는 여전히 안 닫혀야 한다(위 전용 테스트
+    // 참고) — 업로드 응답 대기와 생성 중, 두 단계 전부 안 닫히는 걸 이어서
+    // 확인.
     await act(async () => {
       resolveUpload?.(audioUploadResult)
       await vi.advanceTimersByTimeAsync(0)
     })
     expect(screen.getByRole('status')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('presentation'))
-    expect(onCancel).toHaveBeenCalledTimes(1)
+    expect(onCancel).not.toHaveBeenCalled()
+    expect(screen.getByRole('status')).toBeInTheDocument()
   })
 
   it('디지털 악보 파일을 고르면 클라이언트에서 바로 파싱해 미리보기를 보여줌', async () => {
