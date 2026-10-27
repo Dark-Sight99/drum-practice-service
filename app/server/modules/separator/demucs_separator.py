@@ -195,26 +195,34 @@ def _decode_to_wav_for_measurement(input_path: Path) -> Path:
     ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
     fd, tmp_path_str = tempfile.mkstemp(suffix=".wav")
     tmp_path = Path(tmp_path_str)
-    os.close(fd)
-    cmd = [ffmpeg_exe, "-y", "-i", str(input_path), str(tmp_path)]
-    # Codex 모드A 지적(Medium, 반영) — subprocess.run() 호출 자체가 예외를
-    # 던지면(ffmpeg 실행파일 손상·권한 문제 등 — 드물지만 반환코드가 아니라
-    # 예외로 나타남) returncode 분기를 아예 못 타 tmp_path가 안 지워진 채
-    # 새고, SeparationError가 아닌 원시 예외가 그대로 전파됐다 —
-    # encode_mp3()/apply_gain()과 똑같이 try/except로 감싸 어떤 실패든
-    # 임시 파일이 지워지고 일관되게 SeparationError로 변환되게 한다.
+    # 이 함수는 (encode_mp3()/apply_gain()과 달리) 바이트가 아니라 "경로"를
+    # 돌려주고, 호출자(compute_playback_gain())가 다 쓴 뒤 지울 책임을 진다
+    # (위 docstring) — 그래서 성공 시엔 finally에서 지우면 안 되고, 실패한
+    # 경로에서만 지워야 한다. Codex 모드A 2차 지적(Low, 반영) — 1차 수정은
+    # subprocess.run()만 try/except로 감쌌는데, os.close(fd)가 그 try 밖에
+    # 있어 close 자체가(드물게) 실패하면 여전히 새고 있었다 — os.close(fd)부터
+    # 전부(성공 시 바로 return하는 한 단계 안쪽 try) 감싸, 그 사이 어떤
+    # 단계에서 실패하든 바깥 except가 지우고 다시 던지게 한다.
     try:
-        proc = subprocess.run(
-            cmd, capture_output=True, text=True, encoding="utf-8", errors="replace"
-        )
-    except OSError as exc:
+        os.close(fd)
+        cmd = [ffmpeg_exe, "-y", "-i", str(input_path), str(tmp_path)]
+        # Codex 모드A 1차 지적(Medium, 반영) — subprocess.run() 호출 자체가
+        # 예외를 던지면(ffmpeg 실행파일 손상·권한 문제 등 — 드물지만
+        # 반환코드가 아니라 예외로 나타남) SeparationError가 아닌 원시
+        # 예외가 그대로 전파됐다 — 이 모듈의 다른 에러와 일관되게 변환.
+        try:
+            proc = subprocess.run(
+                cmd, capture_output=True, text=True, encoding="utf-8", errors="replace"
+            )
+        except OSError as exc:
+            raise SeparationError(f"음량 측정용 디코딩 실행 실패: {exc}") from exc
+        if proc.returncode != 0:
+            raise SeparationError(
+                f"음량 측정용 디코딩 실패(returncode={proc.returncode}): {proc.stderr[-2000:]}"
+            )
+    except Exception:
         tmp_path.unlink(missing_ok=True)
-        raise SeparationError(f"음량 측정용 디코딩 실행 실패: {exc}") from exc
-    if proc.returncode != 0:
-        tmp_path.unlink(missing_ok=True)
-        raise SeparationError(
-            f"음량 측정용 디코딩 실패(returncode={proc.returncode}): {proc.stderr[-2000:]}"
-        )
+        raise
     return tmp_path
 
 
