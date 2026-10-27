@@ -10,6 +10,7 @@ import numpy as np
 import pytest
 import soundfile as sf
 
+import modules.transcriber.tempo as tempo_module
 from modules.transcriber.tempo import DEFAULT_BPM, estimate_tempo
 
 
@@ -61,6 +62,25 @@ def test_estimate_tempo_falls_back_to_default_on_decode_failure(tmp_path):
     bpm = estimate_tempo(garbage_path)
 
     assert bpm == DEFAULT_BPM
+
+
+def test_estimate_tempo_rounds_to_nearest_integer(tmp_path, monkeypatch):
+    """Q-40 추가(의뢰인 발견) — librosa가 92.28515625처럼 소수점 긴 값을
+    내더라도, 실제 사람이 보는 bpm 표기(악보·메트로놈)는 항상 정수라
+    반올림해서 반환해야 한다."""
+    monkeypatch.setattr(
+        tempo_module.librosa, "load", lambda *a, **k: (np.zeros(1000, dtype=np.float32), 44100)
+    )
+    monkeypatch.setattr(
+        tempo_module.librosa.beat,
+        "beat_track",
+        lambda *a, **k: (np.array(92.28515625), None),
+    )
+
+    bpm = estimate_tempo(tmp_path / "dummy.wav")
+
+    assert bpm == 92.0
+    assert bpm == round(bpm)
 
 
 def test_estimate_tempo_falls_back_to_default_on_silence(tmp_path):

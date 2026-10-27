@@ -153,8 +153,8 @@ def test_transcribe_handler_re_run_does_not_duplicate_raw_asset(db, monkeypatch)
     )
     assert len(raw) == 1  # 중복 생성 안 됨
     content = file_storage.resolve_asset_path(raw[0].file_path).read_text(encoding="utf-8")
-    # Q-41 반영 — GM 피치 47은 이제 hihat_closed로 매핑됨(모듈 docstring 참고).
-    assert "hihat_closed" in content  # 두 번째(최신) 채보 내용으로 교체됐어야 함
+    # Q-41(T3-44에서 되돌림) — GM 피치 47은 GM 표준 관례대로 tom_mid(모듈 docstring 참고).
+    assert "tom_mid" in content  # 두 번째(최신) 채보 내용으로 교체됐어야 함
 
 
 def test_transcribe_handler_preserves_edited_asset_and_get_prefers_it(db, monkeypatch) -> None:
