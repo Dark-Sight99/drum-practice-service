@@ -46,7 +46,8 @@ import {
   type PlaybackHandle,
   type TrackPlayer,
 } from '../../audio'
-import { fetchPracticeSetting, saveMixerSetting, songAudioUrl } from '../../api/songs'
+import { fetchMixerSetting, saveMixerSetting } from '../../api/auth'
+import { songAudioUrl } from '../../api/songs'
 import type { DrumPiece, DrumScore, Hand } from '../../score/types'
 import { createLaneRenderer, type LaneRenderer } from '../../render/laneRenderer'
 import { KitIllustration } from '../../render/KitIllustration'
@@ -512,12 +513,14 @@ export function PracticeCanvas({
   // 아래 저장 로직이 알아서 서버에 반영함).
   const userHasEditedMixerRef = useRef(false)
 
-  // 마운트 시(=곡 진입 시, 이 컴포넌트는 곡이 바뀌면 통째로 다시 마운트됨)
-  // 저장된 설정을 불러온다 — §4.
+  // T3-28(2026-10-27 의뢰인 요청) — "1번 곡에서 세팅한 믹서값이 2번·3번
+  // 곡으로 가도 유지되도록" — 믹서 설정을 곡별이 아니라 계정 전체로 공유.
+  // 이 컴포넌트는 곡이 바뀌면 통째로 다시 마운트되므로(위 §4 코멘트), 매번
+  // 다시 불러와도 song_id와 무관하게 항상 같은 계정 값이 온다(백엔드:
+  // `/auth/me/mixer-setting`, songId를 전혀 안 받음).
   useEffect(() => {
-    if (songId === undefined) return
     let cancelled = false
-    fetchPracticeSetting(songId)
+    fetchMixerSetting()
       .then(({ volumes }) => {
         if (cancelled || userHasEditedMixerRef.current) return
         if (!volumes) {
@@ -538,25 +541,25 @@ export function PracticeCanvas({
     return () => {
       cancelled = true
     }
-  }, [songId])
+  }, [])
 
-  // 저장 요청 직렬화(모드C 2라운드 지적 반영) — 한 곡에 대해 이 탭에서 PUT이
-  // 클라이언트가 인지하는 한 항상 1개씩만 뜨도록: 진행 중이면 새로 안 보내고
-  // 플래그만 세우고, 끝나면 그 시점의 최신 상태로 한 번만 더 보낸다. 모호한
-  // 네트워크 실패 시의 좁은 순서 역전 잔존 위험은 마스터가 수용한 한계(§마스터
-  // 최종 판단).
+  // 저장 요청 직렬화(모드C 2라운드 지적 반영) — 이 탭에서 PUT이 클라이언트가
+  // 인지하는 한 항상 1개씩만 뜨도록: 진행 중이면 새로 안 보내고 플래그만
+  // 세우고, 끝나면 그 시점의 최신 상태로 한 번만 더 보낸다. 모호한 네트워크
+  // 실패 시의 좁은 순서 역전 잔존 위험은 마스터가 수용한 한계(§마스터 최종
+  // 판단). T3-28에서 계정 전체 공유로 바뀌며 song_id가 더 이상 필요 없어짐.
   const savingRef = useRef(false)
   const pendingSaveRef = useRef(false)
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  async function doSaveMixer(targetSongId: number) {
+  async function doSaveMixer() {
     if (savingRef.current) {
       pendingSaveRef.current = true
       return
     }
     savingRef.current = true
     try {
-      await saveMixerSetting(targetSongId, mixerStateRef.current)
+      await saveMixerSetting(mixerStateRef.current)
     } catch {
       // 실패해도 조용히 넘어감 — 다음 변경 때 다시 저장 시도됨, 믹서 설정
       // 하나가 잠깐 이전 값으로 남는 정도라 치명적이지 않음.
@@ -564,17 +567,16 @@ export function PracticeCanvas({
       savingRef.current = false
       if (pendingSaveRef.current) {
         pendingSaveRef.current = false
-        await doSaveMixer(targetSongId)
+        await doSaveMixer()
       }
     }
   }
 
   function scheduleMixerSave() {
-    if (songId === undefined) return
     if (saveTimerRef.current !== null) clearTimeout(saveTimerRef.current)
     saveTimerRef.current = setTimeout(() => {
       saveTimerRef.current = null
-      void doSaveMixer(songId)
+      void doSaveMixer()
     }, 400)
   }
 
@@ -584,10 +586,10 @@ export function PracticeCanvas({
       if (saveTimerRef.current !== null) {
         clearTimeout(saveTimerRef.current)
         saveTimerRef.current = null
-        if (songId !== undefined) void doSaveMixer(songId)
+        void doSaveMixer()
       }
     }
-  }, [songId])
+  }, [])
 
   function updateChannel(key: ChannelKey, patch: Partial<ChannelState>) {
     userHasEditedMixerRef.current = true

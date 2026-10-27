@@ -248,6 +248,27 @@ class PracticeSetting(Base):
     song: Mapped["Song"] = relationship(back_populates="practice_setting")
 
 
+class UserMixerSetting(Base):
+    """2026-10-27(의뢰인 요청) — 믹서(볼륨/음소거) 설정을 곡별이 아니라 계정
+    전체로 공유한다. "1번 곡에서 맞춘 믹서값이 2번·3번 곡에서도 그대로
+    유지되길" 원함 — 위 PracticeSetting(song_id 유니크)과는 별개로 user_id
+    유니크인 테이블을 새로 둔다. 기존에 이미 곡별로 저장된 값들을 계정
+    하나로 합치려면 "어느 곡 값을 기준으로 할지"가 모호해지므로, 기존
+    테이블·엔드포인트는 그대로 두고(이미 저장된 데이터를 지우거나 재해석
+    하지 않음) 새 테이블로 전환한다(work/T3-28/plan.md §범위경계). 근거:
+    REQ-05."""
+
+    __tablename__ = "user_mixer_settings"
+    __table_args__ = (UniqueConstraint("user_id", name="uq_user_mixer_settings_user_id"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    volumes_json: Mapped[str] = mapped_column(Text, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), onupdate=func.now()
+    )
+
+
 class UserSession(Base):
     """T1-3: HttpOnly 세션 쿠키(intent/03-architecture-stack.md §3). 쿠키엔 무작위 토큰만 담고
     DB엔 그 토큰의 SHA-256 해시만 저장한다(auth/security.py의 hash_session_token)."""

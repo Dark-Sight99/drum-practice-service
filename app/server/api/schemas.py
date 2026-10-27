@@ -117,6 +117,18 @@ class ChannelStateIn(BaseModel):
     solo: bool
 
 
+def _channel_keys_must_match_exactly(
+    value: dict[str, ChannelStateIn],
+) -> dict[str, ChannelStateIn]:
+    """T3-4/T3-28 공용 — 채널 키가 정확히 `MIXER_CHANNEL_KEYS` 6개여야 함
+    (알 수 없는 키나 누락된 키는 프런트 버그일 수 있어 저장 전에 422로
+    거부). 곡별(PracticeSettingIn)·계정별(UserMixerSettingIn) 양쪽이
+    같은 규칙을 공유."""
+    if set(value.keys()) != MIXER_CHANNEL_KEYS:
+        raise ValueError(f"volumes의 키는 정확히 {sorted(MIXER_CHANNEL_KEYS)}여야 합니다")
+    return value
+
+
 class PracticeSettingIn(BaseModel):
     """`PUT /songs/{id}/practice-setting` 요청 본문. 채널 키가 정확히
     `MIXER_CHANNEL_KEYS` 6개여야 함(work/T3-4/plan.md §1 — 알 수 없는 키나
@@ -129,13 +141,32 @@ class PracticeSettingIn(BaseModel):
     def channel_keys_must_match_exactly(
         cls, value: dict[str, ChannelStateIn]
     ) -> dict[str, ChannelStateIn]:
-        if set(value.keys()) != MIXER_CHANNEL_KEYS:
-            raise ValueError(f"volumes의 키는 정확히 {sorted(MIXER_CHANNEL_KEYS)}여야 합니다")
-        return value
+        return _channel_keys_must_match_exactly(value)
 
 
 class PracticeSettingOut(BaseModel):
     """`GET /songs/{id}/practice-setting` 응답. 저장된 게 없으면 `volumes=None`
     — 기본값을 서버가 추측하지 않고 그대로 돌려줌(work/T3-4/plan.md §1)."""
+
+    volumes: dict[str, ChannelStateIn] | None
+
+
+class UserMixerSettingIn(BaseModel):
+    """`PUT /auth/me/mixer-setting` 요청 본문(T3-28, 2026-10-27 의뢰인 요청
+    "믹서값을 계정 기준으로 공유"). 검증 규칙은 PracticeSettingIn과 동일."""
+
+    volumes: dict[str, ChannelStateIn]
+
+    @field_validator("volumes")
+    @classmethod
+    def channel_keys_must_match_exactly(
+        cls, value: dict[str, ChannelStateIn]
+    ) -> dict[str, ChannelStateIn]:
+        return _channel_keys_must_match_exactly(value)
+
+
+class UserMixerSettingOut(BaseModel):
+    """`GET /auth/me/mixer-setting` 응답. 저장된 게 없으면 `volumes=None`
+    (위 PracticeSettingOut과 같은 원칙 — 기본값은 프런트가 채움)."""
 
     volumes: dict[str, ChannelStateIn] | None
