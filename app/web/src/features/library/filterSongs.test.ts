@@ -10,6 +10,7 @@ const songs: SongSummary[] = [
     status: 'completed',
     original_bpm: 120,
     source_type: 'midi',
+    available_audio_kinds: [],
   },
   {
     id: 2,
@@ -18,6 +19,7 @@ const songs: SongSummary[] = [
     status: 'completed',
     original_bpm: 80,
     source_type: 'musicxml',
+    available_audio_kinds: [],
   },
   {
     id: 3,
@@ -26,6 +28,7 @@ const songs: SongSummary[] = [
     status: 'completed',
     original_bpm: 100,
     source_type: 'gp',
+    available_audio_kinds: [],
   },
 ]
 
@@ -72,6 +75,7 @@ describe('filterSongs', () => {
         status: 'completed',
         original_bpm: null,
         source_type: 'audio',
+        available_audio_kinds: [],
       },
     ]
     expect(filterSongs(nfdSongs, '희비')).toEqual(nfdSongs) // 검색어는 일반적인 NFC

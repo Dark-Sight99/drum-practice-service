@@ -14,6 +14,7 @@ const song: SongSummary = {
   status: 'completed',
   original_bpm: 120,
   source_type: 'midi',
+  available_audio_kinds: [],
 }
 
 function makeScore(): DrumScore {
