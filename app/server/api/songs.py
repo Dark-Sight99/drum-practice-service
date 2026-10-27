@@ -372,6 +372,27 @@ def rename_song(
 
 @router.delete("/{song_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_song(song: Song = Depends(get_owned_song), db: Session = Depends(get_db)) -> None:
+    # Codex 모드A 지적(필수, 반영) — Song.jobs에 cascade를 추가(위 모델 변경)한
+    # 뒤로 삭제 자체는 더 이상 실패하지 않지만, 워커가 바로 지금 이 곡의 Job을
+    # PROCESSING 중이면 경합이 생긴다: 워커는 이미 메모리에 들고 있는 Job
+    # 객체로 계속 파일을 쓰고 Asset을 커밋하려 드는데(modules/separator/
+    # handler.py), 그 사이 여기서 DB 행(Song·cascade된 Job)과 파일(아래
+    # delete_song_files)을 먼저 지워버리면 — 핸들러의 커밋이 FK 위반으로
+    # 실패하거나(해롭지 않음, Job.status=FAILED로 넘어감), 더 나쁘게는 방금
+    # 지운 곡 폴더에 핸들러가 파일을 다시 써 넣어(디스크에 고아 파일로 영구
+    # 남음) 버릴 수 있다. QUEUED 작업은 아직 아무도 안 집어서 안전(워커가
+    # 집으려 할 때 이미 없는 행이라 그냥 건너뜀) — PROCESSING만 막는다.
+    has_processing_job = (
+        db.query(Job)
+        .filter(Job.song_id == song.id, Job.status == JobStatus.PROCESSING)
+        .first()
+        is not None
+    )
+    if has_processing_job:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "처리 중인 곡은 삭제할 수 없습니다 — 처리가 끝난 뒤 다시 시도해주세요",
+        )
     song_id = song.id
     db.delete(song)
     db.commit()
