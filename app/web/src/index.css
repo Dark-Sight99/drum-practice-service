@@ -69,6 +69,19 @@ textarea:focus {
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 35%, transparent);
 }
 
+/* 2026-10-27(의뢰인 요청) — "BPM 숫자칸이 재생 중엔(비활성화) 잘 안 보여".
+ * 위 규칙이 글자색을 var(--text)로 정해둬도, 브라우저 기본 disabled
+ * 스타일(흐린 회색)이 그 위에 그대로 덮어써서 어두운 배경과 대비가
+ * 거의 안 남았었다(실측: Chrome 기본 disabled 글자색은 GrayText 계열).
+ * 버튼의 disabled 처리(위 button:disabled, opacity 0.5)와 같은 원칙으로
+ * 명시적으로 재정의 — 숫자는 여전히 읽혀야 하니 0.5보다는 높은 0.75. */
+input:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='file']):disabled,
+select:disabled {
+  opacity: 0.75;
+  -webkit-text-fill-color: var(--text);
+  color: var(--text);
+}
+
 /* 2026-10-26 의뢰인 요청 — 라이브러리 곡 카드. 클릭 가능한(처리 완료) 카드만
  * 호버 시 그림자가 진해지고 살짝 위로 뜬다. */
 .song-card {
