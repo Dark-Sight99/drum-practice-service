@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { useAutoAnimate } from '@formkit/auto-animate/react'
 import {
   deleteSong,
   fetchSongDrumScore,
@@ -74,6 +75,10 @@ export function LibraryScreen({ onOpenSong, onEditSong, onLoggedOut }: LibrarySc
   const [openingId, setOpeningId] = useState<number | null>(null)
   // 2026-10-27(의뢰인 요청) — 삭제 확인을 window.confirm 대신 모달로.
   const [pendingDeleteSong, setPendingDeleteSong] = useState<SongSummary | null>(null)
+  // 2026-10-27(의뢰인 요청) — 곡이 삭제되면 남은 카드들이 빈 자리를 바로
+  // 채우도록(순간 이동 대신) 슬라이드 transition. 목록 div에 ref만 붙이면
+  // 추가/삭제/순서 변경 전부를 라이브러리가 자동으로 감지해 애니메이션한다.
+  const [cardListRef] = useAutoAnimate()
 
   // 모드A 지적(필수, 반영) — 목록 재조회(reload/silentReload)가 여러 개
   // 겹쳐 돌 수 있다(배경 폴링 2초 간격 도중 다른 reload()가 또 불리는 등).
@@ -388,7 +393,10 @@ export function LibraryScreen({ onOpenSong, onEditSong, onLoggedOut }: LibrarySc
         </p>
       )}
 
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
+      <div
+        ref={cardListRef}
+        style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}
+      >
         {visibleSongs.map((song) => {
           const isReady = song.status === 'completed'
           const isRenaming = renamingId === song.id
