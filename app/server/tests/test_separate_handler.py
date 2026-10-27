@@ -61,8 +61,21 @@ def _make_user_song_job(db) -> tuple[User, Song, Job]:
     return user, song, job
 
 
-def _fake_encode_mp3(wav_path: Path) -> bytes:
+def _fake_encode_mp3(wav_path: Path, bitrate_kbps: int = 192, gain_linear: float = 1.0) -> bytes:
     return f"mp3-{wav_path.name}".encode()
+
+
+def _fake_apply_gain(wav_path: Path, gain_linear: float) -> bytes:
+    return wav_path.read_bytes()
+
+
+def _fake_compute_playback_gain(original_path: Path, stem_paths) -> float:
+    # 2026-10-27(T3-38) — 실제 librosa 계산은 test_demucs_separator.py가
+    # 전담(진짜 합성 오디오로 검증). 여기선 핸들러의 배선(게인을 계산해서
+    # apply_gain()/encode_mp3()에 넘기는지)만 보면 되므로, 테스트 픽스처의
+    # 가짜 바이트("fake-audio" 등, 실제 오디오 아님)를 librosa로 읽으려다
+    # 터지지 않게 고정값으로 대체한다.
+    return 1.0
 
 
 def test_separate_handler_success_creates_four_stem_assets(db, monkeypatch, tmp_path) -> None:
@@ -78,6 +91,8 @@ def test_separate_handler_success_creates_four_stem_assets(db, monkeypatch, tmp_
 
     monkeypatch.setattr(handler_module, "separate", fake_separate)
     monkeypatch.setattr(handler_module, "encode_mp3", _fake_encode_mp3)
+    monkeypatch.setattr(handler_module, "apply_gain", _fake_apply_gain)
+    monkeypatch.setattr(handler_module, "compute_playback_gain", _fake_compute_playback_gain)
 
     handler_module.separate_handler(job)
 
@@ -123,6 +138,8 @@ def test_separate_handler_success_queues_transcribe_job(db, monkeypatch) -> None
 
     monkeypatch.setattr(handler_module, "separate", fake_separate)
     monkeypatch.setattr(handler_module, "encode_mp3", _fake_encode_mp3)
+    monkeypatch.setattr(handler_module, "apply_gain", _fake_apply_gain)
+    monkeypatch.setattr(handler_module, "compute_playback_gain", _fake_compute_playback_gain)
 
     handler_module.separate_handler(job)
 
@@ -170,13 +187,17 @@ def test_separate_handler_succeeds_even_if_drums_mp3_sidecar_encode_fails(
             stems[name] = p
         return stems
 
-    def flaky_encode_mp3(wav_path: Path) -> bytes:
+    def flaky_encode_mp3(
+        wav_path: Path, bitrate_kbps: int = 192, gain_linear: float = 1.0
+    ) -> bytes:
         if wav_path.name == "drums.wav":
             raise RuntimeError("ffmpeg 일시 오류 시뮬레이션")
         return _fake_encode_mp3(wav_path)
 
     monkeypatch.setattr(handler_module, "separate", fake_separate)
     monkeypatch.setattr(handler_module, "encode_mp3", flaky_encode_mp3)
+    monkeypatch.setattr(handler_module, "apply_gain", _fake_apply_gain)
+    monkeypatch.setattr(handler_module, "compute_playback_gain", _fake_compute_playback_gain)
 
     handler_module.separate_handler(job)
 
@@ -225,6 +246,8 @@ def test_separate_handler_cleans_up_only_stems_written_this_attempt_on_partial_f
 
     monkeypatch.setattr(handler_module, "separate", fake_separate)
     monkeypatch.setattr(handler_module, "encode_mp3", _fake_encode_mp3)
+    monkeypatch.setattr(handler_module, "apply_gain", _fake_apply_gain)
+    monkeypatch.setattr(handler_module, "compute_playback_gain", _fake_compute_playback_gain)
 
     real_write = file_storage.write_song_file
     call_count = {"n": 0}
@@ -277,3 +300,51 @@ def test_separate_handler_missing_original_asset_fails_cleanly(db) -> None:
 
     db.refresh(song)
     assert song.status == SongStatus.FAILED
+
+
+def test_separate_handler_passes_computed_gain_to_stem_writers(db, monkeypatch) -> None:
+    """T3-38(2026-10-27, 의뢰인 요청) — compute_playback_gain()이 계산한 값이
+    실제로 apply_gain()(drums)·encode_mp3()(bass/other/vocals, 사이드카 포함)
+    전부에 그대로 전달되는지(배선 자체)를 확인한다. 실제 RMS 계산의 정확성은
+    test_demucs_separator.py가 진짜 합성 오디오로 검증 — 여기선 그 결과값이
+    핸들러를 거쳐 어디까지 전파되는지만 본다."""
+    _, song, job = _make_user_song_job(db)
+
+    def fake_separate(input_path: Path, output_dir: Path, device=None):
+        stems = {}
+        for name in ("drums", "bass", "other", "vocals"):
+            p = output_dir / f"{name}.wav"
+            p.write_bytes(f"stem-{name}".encode())
+            stems[name] = p
+        return stems
+
+    FIXED_GAIN = 1.4142
+
+    def fake_compute_gain(original_path, stem_paths) -> float:
+        return FIXED_GAIN
+
+    apply_gain_calls: list[float] = []
+    encode_mp3_calls: list[float] = []
+
+    def spy_apply_gain(wav_path: Path, gain_linear: float) -> bytes:
+        apply_gain_calls.append(gain_linear)
+        return wav_path.read_bytes()
+
+    def spy_encode_mp3(wav_path: Path, bitrate_kbps: int = 192, gain_linear: float = 1.0) -> bytes:
+        encode_mp3_calls.append(gain_linear)
+        return f"mp3-{wav_path.name}".encode()
+
+    monkeypatch.setattr(handler_module, "separate", fake_separate)
+    monkeypatch.setattr(handler_module, "compute_playback_gain", fake_compute_gain)
+    monkeypatch.setattr(handler_module, "apply_gain", spy_apply_gain)
+    monkeypatch.setattr(handler_module, "encode_mp3", spy_encode_mp3)
+
+    handler_module.separate_handler(job)
+
+    db.refresh(song)
+    assert song.status == SongStatus.PROCESSING
+    # drums(WAV) 1번 — apply_gain()
+    assert apply_gain_calls == [FIXED_GAIN]
+    # bass/other/vocals(MP3) 3번 + drums 재생용 MP3 사이드카 1번 = 총 4번,
+    # 전부 같은 게인으로 호출돼야 함.
+    assert encode_mp3_calls == [FIXED_GAIN] * 4
