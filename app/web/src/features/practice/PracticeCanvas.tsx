@@ -31,6 +31,7 @@ import {
   getMasterClock,
   isMusicMuted,
   linearGainToDb,
+  MUSIC_STEM_KEYS,
   musicVolume,
   playDrumScore,
   setMusicMuted,
@@ -569,12 +570,31 @@ export function PracticeCanvas({
     }
   }, [mixerState.synth_drums.volume])
 
-  // T3-4 모드A 1라운드 지적(High) — 불러오기(GET)가 아직 끝나기 전에
-  // 사용자가 믹서를 직접 조작하면, 뒤늦게 도착하는 GET 응답이 그 조작을
-  // 덮어써버릴 수 있었다. 사용자가 한 번이라도 조작했으면 그 이후의 GET
-  // 응답은 무시한다 — 사용자의 지금 조작이 항상 이긴다(그 상태는 어차피
-  // 아래 저장 로직이 알아서 서버에 반영함).
-  const userHasEditedMixerRef = useRef(false)
+  // Codex 모드A 지적(T3-29 2차 리뷰, 필수, 반영) — 계정 전체 공유로 바뀌며
+  // T3-4 모드A 1라운드의 원래 가드("사용자가 한 번이라도 조작했으면 그
+  // 이후의 GET 응답은 통째로 무시")가 새 문제를 만들었다: 로드(GET)가 아직
+  // 안 끝난 사이 아무 채널이나 하나 건드리면, 그 시점의 로컬 상태는
+  // defaultMixerState()이므로 "건드리지 않은 나머지 채널"까지 기본값인
+  // 채로 저장돼, 계정에 이미 저장돼 있던 다른 설정을 덮어써버렸다(곡별일
+  // 땐 "그 곡"의 설정만 영향받아 체감되는 손실이 없었지만, 계정 전체
+  // 공유에서는 실제 데이터 손실). "어느 채널을 사용자가 직접 만졌는지"를
+  // 채널 단위로 기억해뒀다가, GET 응답이 (늦게) 와도 안 버리고 "사용자가
+  // 안 건드린 채널만" 그 값으로 채운다 — 건드린 채널은 사용자의 현재 값을
+  // 그대로 유지(사용자의 지금 조작이 항상 이긴다는 원래 원칙은 채널
+  // 단위로 유지).
+  const userEditedChannelsRef = useRef<Set<ChannelKey>>(new Set())
+  function markChannelsEdited(keys: readonly ChannelKey[]) {
+    for (const key of keys) userEditedChannelsRef.current.add(key)
+  }
+
+  // 같은 지적 — 로드가 끝나기도 전에 첫 조작으로 생긴 저장 요청이 먼저
+  // 나가버리면(디바운스 400ms가 네트워크 왕복보다 빠를 수 있음), 그 PUT은
+  // "방금 머지된 전체 상태"가 아니라 "아직 머지 전(= 대부분 기본값)인
+  // 상태"를 계정에 그대로 박아버릴 수 있다. 로드가 settle(성공/실패 무관)
+  // 되기 전의 저장 요청은 실제로 내보내지 않고 "보류 중"으로만 표시해뒀다가,
+  // 로드가 끝나 머지된 최신 상태가 반영된 뒤에야 내보낸다.
+  const initialMixerLoadSettledRef = useRef(false)
+  const saveWantedBeforeLoadRef = useRef(false)
 
   // T3-28(2026-10-27 의뢰인 요청) — "1번 곡에서 세팅한 믹서값이 2번·3번
   // 곡으로 가도 유지되도록" — 믹서 설정을 곡별이 아니라 계정 전체로 공유.
@@ -583,24 +603,34 @@ export function PracticeCanvas({
   // `/auth/me/mixer-setting`, songId를 전혀 안 받음).
   useEffect(() => {
     let cancelled = false
-    fetchMixerSetting()
-      .then(({ volumes }) => {
-        if (cancelled || userHasEditedMixerRef.current) return
-        if (!volumes) {
-          setMixerState(defaultMixerState())
-          return
-        }
+
+    function settleInitialLoad(loadedVolumes: MixerState | null) {
+      if (cancelled) return
+      setMixerState((prev) => {
         // 모드C 1라운드 C-006 — 알 수 없는/누락된 채널 키는 방어적으로
         // 기본값으로 채움(저장 형식이 나중에 바뀌어도 안 깨지게).
         const merged = defaultMixerState()
-        for (const key of CHANNEL_KEYS) {
-          if (volumes[key]) merged[key] = volumes[key]
+        if (loadedVolumes) {
+          for (const key of CHANNEL_KEYS) {
+            if (loadedVolumes[key]) merged[key] = loadedVolumes[key]
+          }
         }
-        setMixerState(merged)
+        // 로드가 끝나기 전에 사용자가 이미 건드린 채널은 그 값을 유지.
+        for (const key of userEditedChannelsRef.current) {
+          merged[key] = prev[key]
+        }
+        return merged
       })
-      .catch(() => {
-        if (!cancelled && !userHasEditedMixerRef.current) setMixerState(defaultMixerState())
-      })
+      initialMixerLoadSettledRef.current = true
+      if (saveWantedBeforeLoadRef.current) {
+        saveWantedBeforeLoadRef.current = false
+        scheduleMixerSaveGlobal(() => mixerStateRef.current)
+      }
+    }
+
+    fetchMixerSetting()
+      .then(({ volumes }) => settleInitialLoad(volumes))
+      .catch(() => settleInitialLoad(null))
     return () => {
       cancelled = true
     }
@@ -609,7 +639,13 @@ export function PracticeCanvas({
   // 저장 요청 직렬화(모드C 2라운드 지적 반영, T3-29 리뷰 C-001로 모듈
   // 스코프로 승격 — 위 scheduleMixerSaveGlobal 등 코멘트 참고) — 이
   // 컴포넌트 인스턴스는 "지금 저장할 값"을 읽어오는 getter만 등록한다.
+  // 초기 로드가 아직 settle 전이면 실제로 내보내지 않고 보류만 한다(위
+  // initialMixerLoadSettledRef 코멘트).
   function scheduleMixerSave() {
+    if (!initialMixerLoadSettledRef.current) {
+      saveWantedBeforeLoadRef.current = true
+      return
+    }
     scheduleMixerSaveGlobal(() => mixerStateRef.current)
   }
 
@@ -621,13 +657,13 @@ export function PracticeCanvas({
   }, [])
 
   function updateChannel(key: ChannelKey, patch: Partial<ChannelState>) {
-    userHasEditedMixerRef.current = true
+    markChannelsEdited([key])
     setMixerState((prev) => ({ ...prev, [key]: { ...prev[key], ...patch } }))
     scheduleMixerSave()
   }
 
   function applyDrumlessPreset() {
-    userHasEditedMixerRef.current = true
+    markChannelsEdited(['stem_drums', 'synth_drums'])
     setMixerState((prev) => toggleDrumlessPreset(prev, lastSynthDrumsVolumeRef.current))
     scheduleMixerSave()
   }
@@ -639,13 +675,13 @@ export function PracticeCanvas({
   // setMusicVolume/setMusicMuted가 3채널에 같은 값을 쓸 뿐) — 백엔드·
   // effectiveGain() 전부 무수정.
   function updateMusicVolume(volume: number) {
-    userHasEditedMixerRef.current = true
+    markChannelsEdited(MUSIC_STEM_KEYS)
     setMixerState((prev) => setMusicVolume(prev, volume))
     scheduleMixerSave()
   }
 
   function updateMusicMuted(muted: boolean) {
-    userHasEditedMixerRef.current = true
+    markChannelsEdited(MUSIC_STEM_KEYS)
     setMixerState((prev) => setMusicMuted(prev, muted))
     scheduleMixerSave()
   }
