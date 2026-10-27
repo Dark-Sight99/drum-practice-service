@@ -1,7 +1,6 @@
 // 라이브러리(곡 목록/업로드/이름변경/삭제/DrumScore 조회). 백엔드: app/server/api/songs.py.
 // work/T2-5/plan.md §설계 2·3.
 
-import type { MixerState } from '../audio/mixer'
 import type { DrumScore } from '../score/types'
 import { apiFetch, apiFetchJson } from './client'
 
@@ -97,19 +96,8 @@ export async function saveSongDrumScore(id: number, drumScore: DrumScore): Promi
   })
 }
 
-/** T3-4(REQ-05) — 곡별 믹서 설정 조회. 저장된 게 없으면 `volumes: null`
- * (서버가 기본값을 추측하지 않음 — work/T3-4/plan.md §1, 기본값은 호출자가
- * `defaultMixerState()`로 채움). */
-export async function fetchPracticeSetting(id: number): Promise<{ volumes: MixerState | null }> {
-  return apiFetchJson<{ volumes: MixerState | null }>(`/songs/${id}/practice-setting`)
-}
-
-/** T3-4(REQ-05) — 곡별 믹서 설정 저장(volumes_json만 갱신, practice_bpm/루프는
- * 안 건드림). */
-export async function saveMixerSetting(id: number, volumes: MixerState): Promise<void> {
-  await apiFetch(`/songs/${id}/practice-setting`, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ volumes }),
-  })
-}
+// T3-4(REQ-05)의 곡별 믹서 설정(fetchPracticeSetting/saveMixerSetting, 백엔드
+// `/songs/{id}/practice-setting`)은 T3-28(2026-10-27 의뢰인 요청)에서 계정 전체
+// 공유(`api/auth.ts`의 fetchMixerSetting/saveMixerSetting, `/auth/me/mixer-setting`)
+// 로 바뀌며 더 이상 프런트에서 호출하지 않는다. 백엔드 테이블·엔드포인트 자체는
+// 이미 저장된 데이터가 있어 그대로 둔다(work/T3-28/plan.md §범위경계).

@@ -1,12 +1,16 @@
-"""로그인/로그아웃/현재 사용자. 근거: REQ-08, work/T1-3/plan.md."""
+"""로그인/로그아웃/현재 사용자/계정 전체 믹서 설정. 근거: REQ-08, work/T1-3/plan.md,
+REQ-05(T3-28)."""
 
+import json
 from datetime import timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from api.deps import SESSION_COOKIE_NAME, get_current_user, get_db
+from api.schemas import UserMixerSettingIn, UserMixerSettingOut
 from auth.security import (
     generate_session_token,
     hash_password,
@@ -14,7 +18,7 @@ from auth.security import (
     utcnow_naive,
     verify_password,
 )
-from db.models import User, UserSession
+from db.models import User, UserMixerSetting, UserSession
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -91,3 +95,53 @@ def logout(
 @router.get("/me", response_model=UserOut)
 def me(user: User = Depends(get_current_user)) -> User:
     return user
+
+
+def _find_user_mixer_setting(db: Session, user_id: int) -> UserMixerSetting | None:
+    return db.query(UserMixerSetting).filter(UserMixerSetting.user_id == user_id).first()
+
+
+@router.get("/me/mixer-setting", response_model=UserMixerSettingOut)
+def get_my_mixer_setting(
+    user: User = Depends(get_current_user), db: Session = Depends(get_db)
+) -> UserMixerSettingOut:
+    """T3-28(REQ-05, 2026-10-27 의뢰인 요청) — 믹서 설정을 곡별이 아니라
+    계정 전체로 공유. 저장된 게 없으면 `volumes=None`(기본값은 프런트의
+    `defaultMixerState()`가 채움 — 아래 `/songs/{id}/practice-setting`과
+    같은 원칙, work/T3-4/plan.md §1)."""
+    setting = _find_user_mixer_setting(db, user.id)
+    if setting is None:
+        return UserMixerSettingOut(volumes=None)
+    return UserMixerSettingOut(volumes=json.loads(setting.volumes_json))
+
+
+@router.put("/me/mixer-setting", status_code=status.HTTP_204_NO_CONTENT)
+def save_my_mixer_setting(
+    body: UserMixerSettingIn,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> None:
+    """T3-28 — 낙관적 upsert. `api/songs.py`의 `save_practice_setting`과 같은
+    패턴(모드C 1라운드 C-005 근거 재사용) — user_id 유니크 제약 때문에 동시에
+    최초 PUT 2개가 오면 하나는 INSERT가 IntegrityError로 거부될 수 있어,
+    rollback 후 재조회해 UPDATE로 재시도한다."""
+    volumes_json = json.dumps({k: v.model_dump() for k, v in body.volumes.items()})
+
+    existing = _find_user_mixer_setting(db, user.id)
+    if existing is not None:
+        existing.volumes_json = volumes_json
+        db.commit()
+        return
+
+    try:
+        db.add(UserMixerSetting(user_id=user.id, volumes_json=volumes_json))
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        existing = _find_user_mixer_setting(db, user.id)
+        if existing is None:
+            raise HTTPException(
+                status.HTTP_500_INTERNAL_SERVER_ERROR, "저장 처리 중 오류가 발생했습니다"
+            ) from None
+        existing.volumes_json = volumes_json
+        db.commit()
