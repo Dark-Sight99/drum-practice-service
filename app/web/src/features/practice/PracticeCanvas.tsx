@@ -337,7 +337,6 @@ export function PracticeCanvas({
   useEffect(() => {
     playbackBpmRef.current = playbackBpm
   }, [playbackBpm])
-  const bpmPercent = Math.round((playbackBpm / score.meta.bpm) * 100)
 
   // T3-16-feedback-6(네트워크, 2026-10-26, work/T3-16-feedback-6/plan.md) —
   // T3-16-feedback-3(단순 fetch() 프리페치)을 적용한 뒤에도 맥 네트워크
@@ -570,6 +569,17 @@ export function PracticeCanvas({
     }
   }, [mixerState.synth_drums.volume])
 
+  // 2026-10-27(의뢰인 추가 지적) — "원곡 드럼도 100%/0%가 아니라 이전 값으로
+  // 가기로 했잖아" — 위 신스 드럼과 대칭으로, 원곡 드럼이 "켜질" 때도
+  // 마지막으로 0이 아니었던 값으로 복원한다(mixer.ts의 toggleDrumlessPreset
+  // 코멘트 참고).
+  const lastStemDrumsVolumeRef = useRef(mixerState.stem_drums.volume || 1)
+  useEffect(() => {
+    if (mixerState.stem_drums.volume > 0) {
+      lastStemDrumsVolumeRef.current = mixerState.stem_drums.volume
+    }
+  }, [mixerState.stem_drums.volume])
+
   // Codex 모드A 지적(T3-29 2차 리뷰, 필수, 반영) — 계정 전체 공유로 바뀌며
   // T3-4 모드A 1라운드의 원래 가드("사용자가 한 번이라도 조작했으면 그
   // 이후의 GET 응답은 통째로 무시")가 새 문제를 만들었다: 로드(GET)가 아직
@@ -664,7 +674,9 @@ export function PracticeCanvas({
 
   function applyDrumlessPreset() {
     markChannelsEdited(['stem_drums', 'synth_drums'])
-    setMixerState((prev) => toggleDrumlessPreset(prev, lastSynthDrumsVolumeRef.current))
+    setMixerState((prev) =>
+      toggleDrumlessPreset(prev, lastSynthDrumsVolumeRef.current, lastStemDrumsVolumeRef.current),
+    )
     scheduleMixerSave()
   }
 
@@ -1279,28 +1291,15 @@ export function PracticeCanvas({
         }}
       >
         <label style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
-          보이는 마디 수
-          {/* REQ-04 "낙하 속도" — 값이 작을수록 노트 사이 간격이 넓어짐(빠른
-           * 곡의 촘촘한 타격을 구분하기 쉬워짐). 순수 렌더링 설정이라 BPM/루프와
-           * 달리 재생 중에도 바꿀 수 있게 둔다. */}
-          <select
-            value={barsVisible}
-            onChange={(e) => setBarsVisible(Number(e.target.value))}
-          >
-            <option value={1}>1</option>
-            <option value={2}>2</option>
-            <option value={3}>3</option>
-            <option value={4}>4</option>
-          </select>
-        </label>
-
-        <label style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
           BPM
           {/* 재생 시작 시점의 BPM/루프 설정으로 Transport가 이미 스케줄돼 있어,
            * 재생 중 바꿔도 지금 재생엔 반영 안 됨(다음 재생부터 적용) — 혼란을
-           * 막기 위해 재생 중엔 잠금(Codex 모드B 권장 C-002). */}
+           * 막기 위해 재생 중엔 잠금(Codex 모드B 권장 C-002).
+           * 2026-10-27(의뢰인 요청) — 믹서 슬라이더와 같은 모양(얇은 트랙 +
+           * 긴 타원 손잡이, index.css .mixer-slider)으로 통일. */}
           <input
             type="range"
+            className="mixer-slider"
             min={minBpm}
             max={maxBpm}
             value={playbackBpm}
@@ -1329,32 +1328,11 @@ export function PracticeCanvas({
             disabled={isPlaying || isPaused}
             style={{ width: 56 }}
           />
-          <span style={{ color: 'var(--text-muted)' }}>
-            (원곡 {score.meta.bpm}, {bpmPercent}%)
-          </span>
+          {/* 2026-10-27(의뢰인 요청) — "원곡 120, 100%" 대신 악보 빠르기말
+           * 표기(이미지 참고: "♩= 107")처럼 간결하게. */}
+          <span style={{ color: 'var(--text-muted)' }}>♩= {playbackBpm}</span>
         </label>
 
-        {/* 2026-10-27(의뢰인 요청) — "여기서 시작"/"여기까지" 버튼 + A-B 루프
-         * 체크박스 3개를 버튼 하나로 통합. idle("⟲ 루프 시작") → 누르면
-         * 시작점을 찍고 start-marked("⟲ 여기까지")로 → 누르면 끝점을 찍으며
-         * 루프가 켜지고 active("⟲ 루프 진행중")로 → 누르면 루프가 꺼지고 다시
-         * idle로(마이크로 인터랙션 — 전역 button 호버/전환이 이미 200ms라
-         * 상태 전환마다 배경색이 부드럽게 바뀜). active 단계만 재생 중이
-         * 아니어도 항상 눌러서 끌 수 있다(기존 체크박스가 그랬던 것과 동일 —
-         * "루프를 그만 걸고 싶다"는 재생 상태와 무관해야 함). */}
-        <button
-          type="button"
-          onClick={handleLoopButtonClick}
-          disabled={loopPhase !== 'active' && !isPlaying && !isPaused}
-          style={
-            loopPhase === 'active'
-              ? { background: 'var(--warning)', borderColor: 'var(--warning)', color: 'var(--bg)' }
-              : undefined
-          }
-        >
-          <Repeat size={16} aria-hidden="true" style={{ verticalAlign: 'middle', marginRight: 4 }} />
-          {loopPhase === 'idle' ? '루프 시작' : loopPhase === 'start-marked' ? '여기까지' : '루프 진행중'}
-        </button>
         {loopPhase === 'active' && (
           <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
             <span>마디</span>
@@ -1576,6 +1554,30 @@ export function PracticeCanvas({
         >
           <RotateCcw size={20} aria-hidden="true" />
         </button>
+
+        {/* 2026-10-27(의뢰인 요청) — "여기서 시작"/"여기까지" 버튼 + A-B 루프
+         * 체크박스 3개를 버튼 하나로 통합. idle("⟲ 루프 시작") → 누르면
+         * 시작점을 찍고 start-marked("⟲ 여기까지")로 → 누르면 끝점을 찍으며
+         * 루프가 켜지고 active("⟲ 루프 진행중")로 → 누르면 루프가 꺼지고 다시
+         * idle로(마이크로 인터랙션 — 전역 button 호버/전환이 이미 200ms라
+         * 상태 전환마다 배경색이 부드럽게 바뀜). active 단계만 재생 중이
+         * 아니어도 항상 눌러서 끌 수 있다(기존 체크박스가 그랬던 것과 동일 —
+         * "루프를 그만 걸고 싶다"는 재생 상태와 무관해야 함). 2026-10-27
+         * 추가 요청 — 리셋 버튼 우측으로 위치 이동(원래 상단 BPM 옆이었음). */}
+        <button
+          type="button"
+          onClick={handleLoopButtonClick}
+          disabled={loopPhase !== 'active' && !isPlaying && !isPaused}
+          style={{
+            whiteSpace: 'nowrap',
+            ...(loopPhase === 'active'
+              ? { background: 'var(--warning)', borderColor: 'var(--warning)', color: 'var(--bg)' }
+              : undefined),
+          }}
+        >
+          <Repeat size={16} aria-hidden="true" style={{ verticalAlign: 'middle', marginRight: 4 }} />
+          {loopPhase === 'idle' ? '루프 시작' : loopPhase === 'start-marked' ? '여기까지' : '루프 진행중'}
+        </button>
       </div>
 
       {/* T3-4 게이트 피드백 1차(2026-10-25) — 믹서를 페이지 맨 아래 단독 블록
@@ -1648,6 +1650,21 @@ export function PracticeCanvas({
             }
             return rows
           })}
+
+          {/* 2026-10-27(의뢰인 요청) — "보이는 마디 수"를 상단 BPM 옆에서
+           * 믹서 탭 안(메트로놈 아래)으로 이동. 기능은 그대로 — REQ-04
+           * "낙하 속도": 값이 작을수록 노트 사이 간격이 넓어짐(빠른 곡의
+           * 촘촘한 타격을 구분하기 쉬워짐). 순수 렌더링 설정이라 BPM/루프와
+           * 달리 재생 중에도 바꿀 수 있게 둔다. */}
+          <label style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
+            보이는 마디 수
+            <select value={barsVisible} onChange={(e) => setBarsVisible(Number(e.target.value))}>
+              <option value={1}>1</option>
+              <option value={2}>2</option>
+              <option value={3}>3</option>
+              <option value={4}>4</option>
+            </select>
+          </label>
         </div>
       </div>
     </div>

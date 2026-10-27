@@ -106,6 +106,31 @@ describe('toggleDrumlessPreset — T3-8(2026-10-25, 의뢰인 요청): 신스 �
     expect(on.synth_drums.volume).toBe(1)
   })
 
+  it('2026-10-27(의뢰인 추가 지적) — stem_drums도 켜질 때 100%가 아니라 복원 볼륨으로(synth_drums와 대칭)', () => {
+    const state = defaultMixerState()
+    state.stem_drums.volume = 0.6 // 사용자가 전에 직접 맞춰둔 값
+    const off = toggleDrumlessPreset(state, 1, 0.6) // 원곡 드럼 꺼짐 → 0으로(끄기는 항상 0)
+
+    const on = toggleDrumlessPreset(off, 1, 0.6) // 다시 켜짐 → "기억해둔" 0.6으로(1이 아님)
+
+    expect(on.stem_drums.volume).toBe(0.6)
+  })
+
+  it('restoreStemDrumsVolume을 안 넘기면 기존처럼 100%로 복귀(기본값 호환)', () => {
+    const state = defaultMixerState() // stem_drums: 0(기본, 꺼진 상태)
+    const on = toggleDrumlessPreset(state) // 켜짐 — 복원 볼륨 안 넘겼으니 기본값 100%
+    expect(on.stem_drums.volume).toBe(1)
+  })
+
+  it('끄는 방향(원곡 드럼 끄기)은 stem_drums 볼륨을 항상 0으로 — 복원 대상은 켜지는 쪽뿐', () => {
+    const state = defaultMixerState()
+    state.stem_drums.volume = 0.7
+
+    const toggled = toggleDrumlessPreset(state, 1, 0.6) // 복원 볼륨을 넘겨도
+
+    expect(toggled.stem_drums.volume).toBe(0) // 끄는 쪽은 항상 0
+  })
+
   it('모드A 지적 회귀 — 꺼짐→다시 켜짐 복귀 시 미리 음소거해둔 채널도 실제로 들리게 함(muted도 같이 리셋)', () => {
     const state = defaultMixerState()
     state.synth_drums.muted = true // 사용자가 미리 M 체크박스로 음소거해둔 상태

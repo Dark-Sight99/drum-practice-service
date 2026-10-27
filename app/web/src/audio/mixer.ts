@@ -64,6 +64,12 @@ export function effectiveGain(channel: ChannelState): number {
  * `restoreSynthDrumsVolume`로 넘긴다(기본값 1 — 과거 동작·기존 테스트와
  * 호환, PracticeCanvas는 "마지막으로 0이 아니었던 값"을 기억해 넘김).
  * 이 함수 자체는 여전히 순수함수 — "기억"은 호출자(컴포넌트) 책임.
+ * 2026-10-27 추가 지적(의뢰인 — "원곡 드럼도 100%/0%가 아니라 이전 값으로
+ * 가기로 했잖아") — 위 복원 원칙이 synth_drums에만 적용돼 있었음. stem_drums
+ * 쪽(원곡 드럼을 "켜는" 방향)도 같은 원칙으로 대칭 적용 — `restoreStemDrumsVolume`
+ * 로 넘긴 값으로 복원(기본값 1, 과거 동작과 호환). "끄는" 방향은 두 채널
+ * 다 여전히 무조건 0 — 끄기는 "그 채널을 확실히 무음으로"가 목적이라
+ * 복원 대상이 아님(의도적 비대칭, 켜는 쪽만 복원).
  * 모드A 지적(필수, 반영) — `volume`만 바꾸고 `muted`를 그대로 두면,
  * 사용자가 미리 신스 드럼을 M 체크박스로 음소거해둔 상태에서 이 버튼을
  * 눌렀다 다시 누를 때 volume은 복원돼도 `muted`가 여전히 true라
@@ -74,9 +80,10 @@ export function effectiveGain(channel: ChannelState): number {
 export function toggleDrumlessPreset(
   state: MixerState,
   restoreSynthDrumsVolume = 1,
+  restoreStemDrumsVolume = 1,
 ): MixerState {
   const isSilent = state.stem_drums.volume === 0
-  const nextStemDrumsVolume = isSilent ? 1 : 0
+  const nextStemDrumsVolume = isSilent ? restoreStemDrumsVolume : 0
   return {
     ...state,
     stem_drums: { ...state.stem_drums, volume: nextStemDrumsVolume, muted: false },
