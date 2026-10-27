@@ -12,6 +12,7 @@ import type { DrumScore } from '../../score/types'
 import { filterSongs } from './filterSongs'
 import { UploadScreen } from '../upload/UploadScreen'
 import { Toast } from '../../components/Toast'
+import { Modal } from '../../components/Modal'
 import { SongCardSkeleton } from '../../components/Skeleton'
 
 export interface LibraryScreenProps {
@@ -71,6 +72,8 @@ export function LibraryScreen({ onOpenSong, onEditSong, onLoggedOut }: LibrarySc
   const [renamingId, setRenamingId] = useState<number | null>(null)
   const [renameValue, setRenameValue] = useState('')
   const [openingId, setOpeningId] = useState<number | null>(null)
+  // 2026-10-27(의뢰인 요청) — 삭제 확인을 window.confirm 대신 모달로.
+  const [pendingDeleteSong, setPendingDeleteSong] = useState<SongSummary | null>(null)
 
   // 모드A 지적(필수, 반영) — 목록 재조회(reload/silentReload)가 여러 개
   // 겹쳐 돌 수 있다(배경 폴링 2초 간격 도중 다른 reload()가 또 불리는 등).
@@ -287,7 +290,6 @@ export function LibraryScreen({ onOpenSong, onEditSong, onLoggedOut }: LibrarySc
   }
 
   async function handleDelete(song: SongSummary) {
-    if (!window.confirm(`"${song.title}"을(를) 삭제할까요?`)) return
     const mySeq = (songMutationSeqRef.current.get(song.id) ?? 0) + 1
     songMutationSeqRef.current.set(song.id, mySeq)
     songMutationKindRef.current.set(song.id, 'delete')
@@ -311,6 +313,13 @@ export function LibraryScreen({ onOpenSong, onEditSong, onLoggedOut }: LibrarySc
       if (songMutationSeqRef.current.get(song.id) !== mySeq) return
       setError(err instanceof ApiError ? err.message : '삭제에 실패했습니다')
     }
+  }
+
+  async function handleConfirmDelete() {
+    const song = pendingDeleteSong
+    if (!song) return
+    setPendingDeleteSong(null)
+    await handleDelete(song)
   }
 
   async function handleLogout() {
@@ -477,12 +486,33 @@ export function LibraryScreen({ onOpenSong, onEditSong, onLoggedOut }: LibrarySc
                   편집
                 </button>
                 <button onClick={() => startRename(song)}>이름변경</button>
-                <button onClick={() => void handleDelete(song)}>삭제</button>
+                <button onClick={() => setPendingDeleteSong(song)}>삭제</button>
               </div>
             </div>
           )
         })}
       </div>
+
+      <Modal
+        open={pendingDeleteSong !== null}
+        onClose={() => setPendingDeleteSong(null)}
+        title="곡 삭제"
+      >
+        <p>
+          "{pendingDeleteSong?.title}"을(를) 삭제할까요? 이 작업은 되돌릴 수 없습니다.
+        </p>
+        <div
+          style={{
+            display: 'flex',
+            gap: 'var(--space-2)',
+            justifyContent: 'flex-end',
+            marginTop: 'var(--space-4)',
+          }}
+        >
+          <button onClick={() => setPendingDeleteSong(null)}>취소</button>
+          <button onClick={() => void handleConfirmDelete()}>삭제</button>
+        </div>
+      </Modal>
     </main>
   )
 }
