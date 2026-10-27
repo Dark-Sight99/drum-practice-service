@@ -30,30 +30,30 @@ export interface ClickVoice {
   dispose(): void
 }
 
-/** 2026-10-27(의뢰인 요청) — "더 대중적인 메트로놈 소리로". 기존엔
- * MembraneSynth(톰 비슷한 타격음)를 다른 음높이(C3/C2)로 쳐서 강박/약박을
- * 구분했는데, 그 소리 자체가 흔히 아는 "메트로놈 틱" 소리가 아니라는
- * 지적 — 대부분의 디지털 메트로놈·DAW 클릭 트랙은 짧게 필터링한 노이즈
- * 한 번("딱" 소리)으로 클릭을 만든다. 강박은 더 밝은(고역) 대역통과
- * 필터, 약박은 더 어두운(저역) 대역통과 필터로 구분 — 같은 구분 방식
- * (강박만 다르게)은 유지. 재생 중 메트로놈(createMetronome)과 카운트인
- * (scorePlayer.ts)이 똑같은 소리를 쓰도록 공유 팩토리로 뺌. */
+/** 2026-10-27(의뢰인 요청 → 선택) — "소리가 잘 안 들린다. 대중적으로
+ * 많이 쓰이는 메트로놈 소리로 바꾸고 싶다"는 지적에, Claude는 소리를
+ * 직접 들을 수 없어 어떤 게 "대중적"인지 단정할 근거가 없으므로
+ * (CLAUDE.md §1) 합성 방식이 다른 후보 4개(T3-29, qa-evidence/T3-29
+ * 참고)를 만들어 실제 브라우저에서 의뢰인이 듣고 고르게 했다 — "후보 2"
+ * (순음 비프)로 최종 결정. 강박은 높은 음(1760Hz, A6), 약박은 낮은 음
+ * (1320Hz, E6)인 짧은 사인파 비프 — 노이즈가 섞이지 않은 맑은 "삐" 소리.
+ * 재생 중 메트로놈(createMetronome)과 카운트인(scorePlayer.ts)이 같은
+ * 소리·같은 음량 기준을 쓰도록 공유하는 팩토리. */
 export function createClickVoice(volumeDb = -6): ClickVoice {
   const output = new Tone.Volume(volumeDb).toDestination()
-  const accentFilter = new Tone.Filter({ type: 'bandpass', frequency: 3000, Q: 1 }).connect(output)
-  const normalFilter = new Tone.Filter({ type: 'bandpass', frequency: 1200, Q: 1 }).connect(output)
-  const accentSynth = new Tone.NoiseSynth({
-    noise: { type: 'white' },
-    envelope: { attack: 0.001, decay: 0.03, sustain: 0, release: 0.03 },
-  }).connect(accentFilter)
-  const normalSynth = new Tone.NoiseSynth({
-    noise: { type: 'white' },
-    envelope: { attack: 0.001, decay: 0.022, sustain: 0, release: 0.022 },
-  }).connect(normalFilter)
+  const accentSynth = new Tone.Synth({
+    oscillator: { type: 'sine' },
+    envelope: { attack: 0.001, decay: 0.05, sustain: 0, release: 0.02 },
+  }).connect(output)
+  const normalSynth = new Tone.Synth({
+    oscillator: { type: 'sine' },
+    envelope: { attack: 0.001, decay: 0.04, sustain: 0, release: 0.02 },
+  }).connect(output)
 
   return {
     trigger(isAccent, time) {
-      ;(isAccent ? accentSynth : normalSynth).triggerAttackRelease('16n', time)
+      const synth = isAccent ? accentSynth : normalSynth
+      synth.triggerAttackRelease(isAccent ? 1760 : 1320, '32n', time)
     },
     setVolume(nextVolumeDb) {
       output.volume.value = nextVolumeDb
@@ -65,8 +65,6 @@ export function createClickVoice(volumeDb = -6): ClickVoice {
     dispose() {
       accentSynth.dispose()
       normalSynth.dispose()
-      accentFilter.dispose()
-      normalFilter.dispose()
       output.dispose()
     },
   }

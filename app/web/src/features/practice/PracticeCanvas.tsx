@@ -31,6 +31,7 @@ import {
   getMasterClock,
   isMusicMuted,
   linearGainToDb,
+  MUSIC_STEM_KEYS,
   musicVolume,
   playDrumScore,
   setMusicMuted,
@@ -76,7 +77,12 @@ const PRACTICE_LANE_MAX_WIDTH_PX = 400
 // 호버 툴팁)로 쓴다 — 아이콘만으로는 "신스 드럼"처럼 뜻이 안 통하는 채널이
 // 있어 접근성·설명 둘 다 이 문자열이 책임진다.
 const CHANNEL_LABELS: Record<ChannelKey, string> = {
-  stem_drums: '드럼(원곡)',
+  // 2026-10-27(의뢰인 요청) — "신스드럼/원곡 드럼을 처음 접하는 사람은 둘의
+  // 차이를 아이콘만 봐선 구분 못 한다"는 지적에 대한 논의 결과: 아이콘보다
+  // 라벨 문구 자체를 쉽게 — "원곡 드럼(음원 추출)" / "가상 드럼(AI 생성)"
+  // 짝으로 "무엇으로 어떻게 만들어졌는지"를 바로 드러낸다("자동 채보"는
+  // 의뢰인 본인도 "이해 못 할 것 같다"고 한 전문용어라 뺌 — "AI 생성"으로).
+  stem_drums: '원곡 드럼(음원 추출)',
   stem_bass: '베이스',
   stem_vocals: '보컬',
   // T3-4 게이트 피드백 3차(2026-10-25) — "기타 악기"가 "기타(guitar)"로
@@ -84,10 +90,7 @@ const CHANNEL_LABELS: Record<ChannelKey, string> = {
   // Demucs 4-스템 분리는 드럼/베이스/보컬/그 외(멜로디 악기 전부 포함, 더
   // 세분화 불가)로만 나뉜다는 걸 명확히 하려고 "그 외 악기"로 바꿈.
   stem_other: '그 외 악기',
-  // 2026-10-27(의뢰인 요청) — 아이콘만으론 "신스 드럼"이 뭔지 모를 수 있다는
-  // 지적에, 풀어쓴 설명을 title에 쓸 수 있게 라벨 자체에 괄호 설명을 덧붙임
-  // (너무 길면 안 된다고 하셨으니 "자동 채보 기반"처럼 짧게).
-  synth_drums: '신스 드럼(자동 채보 기반)',
+  synth_drums: '가상 드럼(AI 생성)',
   metronome: '메트로놈',
 }
 
@@ -190,6 +193,67 @@ function usePortraitPhoneLayout(): boolean {
     return () => mq.removeEventListener('change', onChange)
   }, [])
   return isPortraitPhone
+}
+
+// Codex 모드A 지적(T3-29 리뷰 C-001, 반영) — T3-28에서 믹서 저장이 곡별이
+// 아니라 계정 전체 자원이 됐는데, 이 저장 파이프라인(아래 scheduleMixerSave
+// 등)은 여전히 컴포넌트 인스턴스별 useRef(savingRef/pendingSaveRef/
+// saveTimerRef)였다. PracticeCanvas는 곡이 바뀌면 통째로 재마운트되므로,
+// 곡 A를 떠나며 언마운트 flush로 보낸 PUT이 아직 응답 전인 채로 곡 B의 새
+// 인스턴스가 또 PUT을 보내면, 둘이 역순으로 도착했을 때(예: 곡 A의 느린
+// 요청이 곡 B의 요청보다 늦게 도착) 곡 B에서 방금 바꾼 최신 값을 곡 A의
+// 낡은 값이 덮어쓸 수 있었다 — 같은 곡의 레코드끼리만 겹치던 예전(곡별)
+// 구조에선 없던 경합. 계정 전체로 공유되는 자원이니 저장 파이프라인도
+// 컴포넌트 수명이 아니라 모듈(앱) 수명 하나로 묶어 직렬화한다 — 디바운스
+// 타이머가 아직 안 끝났어도 "최신으로 알려진 값"(latestMixerValueToSave)은
+// schedule 시점이 아니라 실제로 저장을 실행하는 시점에 넘겨받은 getter로
+// 다시 읽어, 같은 디바운스 창 안에서 여러 번 바뀐 경우에도 항상 "그 순간의
+// 최신 값"을 저장한다(기존 ref 기반 지연읽기와 같은 원리).
+let mixerSaveGetter: (() => MixerState) | null = null
+let mixerSaveTimer: ReturnType<typeof setTimeout> | null = null
+let mixerSaveInFlight = false
+let mixerSavePending = false
+
+async function runMixerSave() {
+  if (mixerSaveInFlight) {
+    mixerSavePending = true
+    return
+  }
+  const getter = mixerSaveGetter
+  if (!getter) return
+  mixerSaveInFlight = true
+  try {
+    await saveMixerSetting(getter())
+  } catch {
+    // 실패해도 조용히 넘어감 — 다음 변경 때 다시 저장 시도됨, 믹서 설정
+    // 하나가 잠깐 이전 값으로 남는 정도라 치명적이지 않음.
+  } finally {
+    mixerSaveInFlight = false
+    if (mixerSavePending) {
+      mixerSavePending = false
+      await runMixerSave()
+    }
+  }
+}
+
+function scheduleMixerSaveGlobal(getter: () => MixerState) {
+  mixerSaveGetter = getter
+  if (mixerSaveTimer !== null) clearTimeout(mixerSaveTimer)
+  mixerSaveTimer = setTimeout(() => {
+    mixerSaveTimer = null
+    void runMixerSave()
+  }, 400)
+}
+
+/** 언마운트(곡 전환 포함) 시 대기 중인 디바운스를 즉시 flush — 모드C
+ * 1라운드 C-002와 같은 이유. 대기 중인 타이머가 없으면(= 이 세션 동안
+ * 아무 변경도 없었으면) 아무 일도 안 함. */
+function flushMixerSaveGlobal(getter: () => MixerState) {
+  if (mixerSaveTimer === null) return
+  clearTimeout(mixerSaveTimer)
+  mixerSaveTimer = null
+  mixerSaveGetter = getter
+  void runMixerSave()
 }
 
 export interface PracticeCanvasProps {
@@ -506,12 +570,31 @@ export function PracticeCanvas({
     }
   }, [mixerState.synth_drums.volume])
 
-  // T3-4 모드A 1라운드 지적(High) — 불러오기(GET)가 아직 끝나기 전에
-  // 사용자가 믹서를 직접 조작하면, 뒤늦게 도착하는 GET 응답이 그 조작을
-  // 덮어써버릴 수 있었다. 사용자가 한 번이라도 조작했으면 그 이후의 GET
-  // 응답은 무시한다 — 사용자의 지금 조작이 항상 이긴다(그 상태는 어차피
-  // 아래 저장 로직이 알아서 서버에 반영함).
-  const userHasEditedMixerRef = useRef(false)
+  // Codex 모드A 지적(T3-29 2차 리뷰, 필수, 반영) — 계정 전체 공유로 바뀌며
+  // T3-4 모드A 1라운드의 원래 가드("사용자가 한 번이라도 조작했으면 그
+  // 이후의 GET 응답은 통째로 무시")가 새 문제를 만들었다: 로드(GET)가 아직
+  // 안 끝난 사이 아무 채널이나 하나 건드리면, 그 시점의 로컬 상태는
+  // defaultMixerState()이므로 "건드리지 않은 나머지 채널"까지 기본값인
+  // 채로 저장돼, 계정에 이미 저장돼 있던 다른 설정을 덮어써버렸다(곡별일
+  // 땐 "그 곡"의 설정만 영향받아 체감되는 손실이 없었지만, 계정 전체
+  // 공유에서는 실제 데이터 손실). "어느 채널을 사용자가 직접 만졌는지"를
+  // 채널 단위로 기억해뒀다가, GET 응답이 (늦게) 와도 안 버리고 "사용자가
+  // 안 건드린 채널만" 그 값으로 채운다 — 건드린 채널은 사용자의 현재 값을
+  // 그대로 유지(사용자의 지금 조작이 항상 이긴다는 원래 원칙은 채널
+  // 단위로 유지).
+  const userEditedChannelsRef = useRef<Set<ChannelKey>>(new Set())
+  function markChannelsEdited(keys: readonly ChannelKey[]) {
+    for (const key of keys) userEditedChannelsRef.current.add(key)
+  }
+
+  // 같은 지적 — 로드가 끝나기도 전에 첫 조작으로 생긴 저장 요청이 먼저
+  // 나가버리면(디바운스 400ms가 네트워크 왕복보다 빠를 수 있음), 그 PUT은
+  // "방금 머지된 전체 상태"가 아니라 "아직 머지 전(= 대부분 기본값)인
+  // 상태"를 계정에 그대로 박아버릴 수 있다. 로드가 settle(성공/실패 무관)
+  // 되기 전의 저장 요청은 실제로 내보내지 않고 "보류 중"으로만 표시해뒀다가,
+  // 로드가 끝나 머지된 최신 상태가 반영된 뒤에야 내보낸다.
+  const initialMixerLoadSettledRef = useRef(false)
+  const saveWantedBeforeLoadRef = useRef(false)
 
   // T3-28(2026-10-27 의뢰인 요청) — "1번 곡에서 세팅한 믹서값이 2번·3번
   // 곡으로 가도 유지되도록" — 믹서 설정을 곡별이 아니라 계정 전체로 공유.
@@ -520,85 +603,67 @@ export function PracticeCanvas({
   // `/auth/me/mixer-setting`, songId를 전혀 안 받음).
   useEffect(() => {
     let cancelled = false
-    fetchMixerSetting()
-      .then(({ volumes }) => {
-        if (cancelled || userHasEditedMixerRef.current) return
-        if (!volumes) {
-          setMixerState(defaultMixerState())
-          return
-        }
+
+    function settleInitialLoad(loadedVolumes: MixerState | null) {
+      if (cancelled) return
+      setMixerState((prev) => {
         // 모드C 1라운드 C-006 — 알 수 없는/누락된 채널 키는 방어적으로
         // 기본값으로 채움(저장 형식이 나중에 바뀌어도 안 깨지게).
         const merged = defaultMixerState()
-        for (const key of CHANNEL_KEYS) {
-          if (volumes[key]) merged[key] = volumes[key]
+        if (loadedVolumes) {
+          for (const key of CHANNEL_KEYS) {
+            if (loadedVolumes[key]) merged[key] = loadedVolumes[key]
+          }
         }
-        setMixerState(merged)
+        // 로드가 끝나기 전에 사용자가 이미 건드린 채널은 그 값을 유지.
+        for (const key of userEditedChannelsRef.current) {
+          merged[key] = prev[key]
+        }
+        return merged
       })
-      .catch(() => {
-        if (!cancelled && !userHasEditedMixerRef.current) setMixerState(defaultMixerState())
-      })
+      initialMixerLoadSettledRef.current = true
+      if (saveWantedBeforeLoadRef.current) {
+        saveWantedBeforeLoadRef.current = false
+        scheduleMixerSaveGlobal(() => mixerStateRef.current)
+      }
+    }
+
+    fetchMixerSetting()
+      .then(({ volumes }) => settleInitialLoad(volumes))
+      .catch(() => settleInitialLoad(null))
     return () => {
       cancelled = true
     }
   }, [])
 
-  // 저장 요청 직렬화(모드C 2라운드 지적 반영) — 이 탭에서 PUT이 클라이언트가
-  // 인지하는 한 항상 1개씩만 뜨도록: 진행 중이면 새로 안 보내고 플래그만
-  // 세우고, 끝나면 그 시점의 최신 상태로 한 번만 더 보낸다. 모호한 네트워크
-  // 실패 시의 좁은 순서 역전 잔존 위험은 마스터가 수용한 한계(§마스터 최종
-  // 판단). T3-28에서 계정 전체 공유로 바뀌며 song_id가 더 이상 필요 없어짐.
-  const savingRef = useRef(false)
-  const pendingSaveRef = useRef(false)
-  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-
-  async function doSaveMixer() {
-    if (savingRef.current) {
-      pendingSaveRef.current = true
+  // 저장 요청 직렬화(모드C 2라운드 지적 반영, T3-29 리뷰 C-001로 모듈
+  // 스코프로 승격 — 위 scheduleMixerSaveGlobal 등 코멘트 참고) — 이
+  // 컴포넌트 인스턴스는 "지금 저장할 값"을 읽어오는 getter만 등록한다.
+  // 초기 로드가 아직 settle 전이면 실제로 내보내지 않고 보류만 한다(위
+  // initialMixerLoadSettledRef 코멘트).
+  function scheduleMixerSave() {
+    if (!initialMixerLoadSettledRef.current) {
+      saveWantedBeforeLoadRef.current = true
       return
     }
-    savingRef.current = true
-    try {
-      await saveMixerSetting(mixerStateRef.current)
-    } catch {
-      // 실패해도 조용히 넘어감 — 다음 변경 때 다시 저장 시도됨, 믹서 설정
-      // 하나가 잠깐 이전 값으로 남는 정도라 치명적이지 않음.
-    } finally {
-      savingRef.current = false
-      if (pendingSaveRef.current) {
-        pendingSaveRef.current = false
-        await doSaveMixer()
-      }
-    }
-  }
-
-  function scheduleMixerSave() {
-    if (saveTimerRef.current !== null) clearTimeout(saveTimerRef.current)
-    saveTimerRef.current = setTimeout(() => {
-      saveTimerRef.current = null
-      void doSaveMixer()
-    }, 400)
+    scheduleMixerSaveGlobal(() => mixerStateRef.current)
   }
 
   // 언마운트·곡 전환 시 대기 중인 디바운스를 즉시 flush(모드C 1라운드 C-002).
   useEffect(() => {
     return () => {
-      if (saveTimerRef.current !== null) {
-        clearTimeout(saveTimerRef.current)
-        saveTimerRef.current = null
-        void doSaveMixer()
-      }
+      flushMixerSaveGlobal(() => mixerStateRef.current)
     }
   }, [])
 
   function updateChannel(key: ChannelKey, patch: Partial<ChannelState>) {
-    userHasEditedMixerRef.current = true
+    markChannelsEdited([key])
     setMixerState((prev) => ({ ...prev, [key]: { ...prev[key], ...patch } }))
     scheduleMixerSave()
   }
 
   function applyDrumlessPreset() {
-    userHasEditedMixerRef.current = true
+    markChannelsEdited(['stem_drums', 'synth_drums'])
     setMixerState((prev) => toggleDrumlessPreset(prev, lastSynthDrumsVolumeRef.current))
     scheduleMixerSave()
   }
@@ -610,13 +675,13 @@ export function PracticeCanvas({
   // setMusicVolume/setMusicMuted가 3채널에 같은 값을 쓸 뿐) — 백엔드·
   // effectiveGain() 전부 무수정.
   function updateMusicVolume(volume: number) {
-    userHasEditedMixerRef.current = true
+    markChannelsEdited(MUSIC_STEM_KEYS)
     setMixerState((prev) => setMusicVolume(prev, volume))
     scheduleMixerSave()
   }
 
   function updateMusicMuted(muted: boolean) {
-    userHasEditedMixerRef.current = true
+    markChannelsEdited(MUSIC_STEM_KEYS)
     setMixerState((prev) => setMusicMuted(prev, muted))
     scheduleMixerSave()
   }
@@ -1550,11 +1615,6 @@ export function PracticeCanvas({
               🥁 원곡 드럼 {mixerState.stem_drums.volume === 0 ? '켜기' : '끄기'}
             </button>
           </div>
-          {/* T3-4 게이트 피드백 2차(2026-10-25) — M 체크박스를 눌러도 화면에서
-           * 티가 잘 안 난다는 지적 → 약어 뜻을 바로 아래에 적어두고, 아래 각
-           * 채널 행에서 음소거 중이면 흐리게 해 즉시 눈에 띄게 한다.
-           * T3-8(2026-10-25, 의뢰인 요청) — 솔로(S) 버튼은 제거("필요없다"). */}
-          <span style={{ color: 'var(--text-muted)', fontSize: '0.85em' }}>M = 음소거</span>
           {MIXER_ROW_KEYS.map((key) => {
             const channel = mixerState[key]
             const rows = [
