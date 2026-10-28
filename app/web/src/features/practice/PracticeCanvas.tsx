@@ -1553,7 +1553,13 @@ export function PracticeCanvas({
         display: 'flex',
         flexDirection: isNarrowSettingsLayout ? 'column' : 'row',
         gap: 'var(--space-4)',
-        alignItems: 'flex-start',
+        // 2026-10-28(의뢰인 요청, 3차) — "박스 치지 말고 좌측 하단까지 쭉
+        // 선 그어서 영역을 구분" — 아래 사이드바의 세로 구분선(borderRight)이
+        // 레인·킷을 포함한 메인 영역과 같은 높이까지 내려가려면 이 행의
+        // 교차축(세로) 정렬이 stretch여야 한다(둘 다 내용 높이만큼만 차지하는
+        // flex-start였던 걸 변경 — 메인 영역은 이미 더 높아 실질적으로
+        // 그대로고, 사이드바만 그 높이로 늘어남).
+        alignItems: isNarrowSettingsLayout ? 'flex-start' : 'stretch',
       }}
     >
       {/* 2026-10-28(의뢰인 요청) — 반응형 설정 패널: 넓은 화면(연습 레인 폭 +
@@ -1563,13 +1569,14 @@ export function PracticeCanvas({
        * 참고). 콘텐츠는 둘 다 settingsPanelContent로 동일 — 레이아웃만
        * 다르다.
        * 2026-10-28(의뢰인 요청, 2차) — "내가 직접 만질 수 있는 영역(설정)과
-       * 연주하는 영역을 색으로 구분해달라" — Drawer와 같은 --surface 카드
-       * 배경·테두리·둥근 모서리를 사이드바에도 둬서, 레인·킷처럼 --bg 배경
-       * 그대로인 연주 영역과 한눈에 구분되게 한다. "믹서" 버튼이 너무
-       * 투박해 보인다는 지적엔 테두리 없는 .settings-trigger 스타일로,
-       * 아이콘도 톱니바퀴(Settings)만 남기고 라벨을 "설정"에서 "믹서"로
-       * 바꿈(실제로 여는 게 믹서를 포함한 패널이라 더 직관적 — 아래 Drawer
-       * title도 통일). */}
+       * 연주하는 영역을 색으로 구분해달라".
+       * 2026-10-28(의뢰인 요청, 3차) — 2차에서 만든 카드(배경·4면 테두리·
+       * 패딩) 모양이 "박스 친 것처럼 보인다"는 지적 — 대신 세로 구분선
+       * (연주 영역 쪽 테두리) 하나로 바꾸고, "믹서" 제목은 그 선 밖(왼쪽
+       * 끝, 들여쓰기 없이)에 둔다. "믹서" 트리거 버튼은 여전히 테두리 없는
+       * .settings-trigger 스타일, 아이콘은 톱니바퀴(Settings), 라벨은
+       * "설정"→"믹서"(실제로 여는 게 믹서를 포함한 패널이라 더 직관적 —
+       * 아래 Drawer title도 통일). */}
       {isNarrowSettingsLayout ? (
         <>
           <button
@@ -1595,24 +1602,35 @@ export function PracticeCanvas({
           </Drawer>
         </>
       ) : (
+        // 2026-10-28(의뢰인 요청, 3차) — 폭을 260→320으로 늘림: 260에선
+        // 채널 볼륨 행(아이콘+슬라이더+퍼센트+Mute 버튼)이 패딩을 빼면
+        // 228px밖에 못 써서 Mute 버튼이 오른쪽으로 삐져나갔음(최소 필요
+        // 폭 약 282px 실측) — 킷 그림과 같은 320px로 맞춰 여유 확보.
         <div
           style={{
-            width: 260,
+            width: 320,
             flexShrink: 0,
             display: 'flex',
             flexDirection: 'column',
             gap: 'var(--space-4)',
-            background: 'var(--surface)',
-            border: '1px solid var(--border)',
-            borderRadius: 'var(--radius-control)',
-            padding: 'var(--space-4)',
           }}
         >
           <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
             <Settings size={16} aria-hidden="true" />
             <strong>믹서</strong>
           </div>
-          {settingsPanelContent}
+          <div
+            style={{
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 'var(--space-4)',
+              flex: 1,
+              borderRight: '1px solid var(--border)',
+              paddingRight: 'var(--space-4)',
+            }}
+          >
+            {settingsPanelContent}
+          </div>
         </div>
       )}
 
@@ -1936,10 +1954,12 @@ export function PracticeCanvas({
          * 접속할 때마다 다시 알아야 하는 정보라 상시 노출이 맞다고 판단).
          * 2026-10-28(의뢰인 요청, 2차) — 오디오 지연 보정 기능이 생겼으니
          * "스피커·유선을 쓰라"는 회피 안내보다 "믹서에서 직접 보정할 수
-         * 있다"는 해결 안내를 먼저 준다(스피커·유선은 그래도 더 정확하니
-         * 보조 설명으로 남김). 레인과 같은 중앙 정렬(아래 maxWidth+margin
-         * auto, 레인 박스와 동일한 폭 — 의뢰인 지적: "드럼+문구랑 레인이랑
-         * 정렬이 안 맞는다"). */}
+         * 있다"는 해결 안내를 먼저 준다. 레인과 같은 중앙 정렬(아래
+         * maxWidth+margin auto, 레인 박스와 동일한 폭 — 의뢰인 지적:
+         * "드럼+문구랑 레인이랑 정렬이 안 맞는다").
+         * 2026-10-28(의뢰인 요청, 3차) — "말이 너무 길다" 지적 — 스피커·유선
+         * 보조 설명(괄호 문장)을 빼고 핵심(블루투스 지연·믹서에서 보정)만
+         * 남겨 절반 가까이 줄임. */}
         <p
           style={{
             color: 'var(--text-muted)',
@@ -1949,8 +1969,7 @@ export function PracticeCanvas({
             textAlign: 'center',
           }}
         >
-          🎧 블루투스 이어폰은 싱크가 밀릴 수 있어요 — 왼쪽 믹서의 "오디오 지연 보정"으로 맞출 수
-          있습니다(스피커·유선 이어폰은 지연이 적어 더 정확해요).
+          🎧 블루투스 이어폰은 싱크가 밀릴 수 있어요 — 왼쪽 믹서의 오디오 지연 보정으로 맞춰보세요.
         </p>
 
         {/* 2026-10-28(의뢰인 요청) — 오디오 지연 보정·믹서·보이는 마디 수는 위
