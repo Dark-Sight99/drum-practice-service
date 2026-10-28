@@ -93,5 +93,17 @@ T3-48(레인 좌측·킷 우측 배치, 레인 높이 600px 고정) 병합 직�
    진행바 `2.14%`, 분초 `0:05 / 4:00` 정상 갱신, 리셋 버튼으로 정상 복귀 —
    T3-49에서 만든 기능이 이번 레이아웃 변경에도 깨지지 않음을 확인.
 
+## Codex 모드A 검수
+1차 `task-mvs7dhev-g30d82` — **REQUEST_CHANGES**(P2): 메인 열
+(main-column, `PracticeCanvas.tsx`)이 세로 축에서도 flex 아이템인데
+`minHeight`가 없어 기본값 `min-height:auto`가 "내용이 필요로 하는 최소
+높이"를 보존해버릴 수 있음 — 아래 레인 행의 `minHeight:0`만으로는
+부족하고, 체인의 중간 링크인 이 요소 자체도 줄어들 수 있어야 함.
+**반영**: 해당 div에 `minHeight: 0` 추가. 그 외 항목(킷
+`alignSelf:'center'`가 stretch를 올바르게 상쇄, viewBox 여유가 kick
+6.75·tom_floor 7.75로 충분, 300px 바닥이 `<main>`의 overflow:auto로
+도달 가능)은 전부 "문제 없음"으로 확인됨. 수정 후 1366×768 재측정 —
+`overflow: 0`, 레인 높이 490 그대로 유지(회귀 없음).
+
 ## 남은 작업
-- Codex 모드A 검수 요청 예정 → APPROVE 후 `main` 병합.
+- (완료) Codex 모드A 지적 반영 → 재검수 요청.
