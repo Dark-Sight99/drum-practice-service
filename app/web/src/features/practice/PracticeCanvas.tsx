@@ -9,6 +9,7 @@ import {
   Repeat,
   Rewind,
   RotateCcw,
+  Settings,
   Timer,
   Volume2,
   VolumeX,
@@ -52,6 +53,7 @@ import { songAudioUrl } from '../../api/songs'
 import type { DrumPiece, DrumScore, Hand } from '../../score/types'
 import { createLaneRenderer, type LaneRenderer } from '../../render/laneRenderer'
 import { KitIllustration } from '../../render/KitIllustration'
+import { Drawer } from '../../components/Drawer'
 
 // 연습 화면의 레인+킷 렌더러 + BPM 변경·A-B 루프(T2-4, REQ-04) 컨트롤을 실제로
 // 돌려보는 데모 컴포넌트. 라이브러리 연동(T2-5)은 범위 밖(work/T2-4/plan.md §범위).
@@ -66,6 +68,33 @@ const COUNT_IN_BARS = 1
 // "루프 경계 같은 큰 점프"만 잡고 고정 지연 수준은 상시 보정하지 않게 한다.
 const TRACK_RESYNC_INTERVAL_MS = 750
 const TRACK_RESYNC_THRESHOLD_SECONDS = 0.1
+
+// 2026-10-28(의뢰인 요청) — 블루투스 이어폰 등 출력 장치 자체의 물리적 지연
+// (보통 100~300ms, 기기·코덱마다 다름)을 보정하는 값. 기기별 특성이라
+// 계정 전체 설정(T3-28 믹서 설정처럼 서버에 저장)이 아니라 **이 브라우저/기기
+// 에서만** 적용되는 값으로 둔다 — localStorage(이 화면 첫 localStorage 사용).
+// 다른 기기로 접속하면(폰↔PC 등) 각자 따로 맞춰야 하는 게 맞는 동작(기기마다
+// 출력 장치·지연이 다르므로).
+const AUDIO_LATENCY_COMPENSATION_STORAGE_KEY = 'drumPractice.audioLatencyCompensationMs'
+const AUDIO_LATENCY_COMPENSATION_MIN_MS = -500
+const AUDIO_LATENCY_COMPENSATION_MAX_MS = 500
+
+function loadStoredAudioLatencyCompensationMs(): number {
+  try {
+    const raw = window.localStorage.getItem(AUDIO_LATENCY_COMPENSATION_STORAGE_KEY)
+    if (raw === null) return 0
+    const parsed = Number(raw)
+    if (!Number.isFinite(parsed)) return 0
+    return Math.min(
+      AUDIO_LATENCY_COMPENSATION_MAX_MS,
+      Math.max(AUDIO_LATENCY_COMPENSATION_MIN_MS, parsed),
+    )
+  } catch {
+    // localStorage가 막혀있는 환경(사생활 보호 모드 등)에서도 화면 자체는
+    // 정상 동작해야 함 — 그냥 보정 없음(0)으로 시작.
+    return 0
+  }
+}
 
 // 2026-10-25(의뢰인 요청) — "노트가 떨어지는 크기는 고정"(아래 <canvas> 참고).
 // T3-11 게이트 피드백 3차(2026-10-25, 의뢰인 "폭을 조금 더 줄여도 될거 같아") —
@@ -127,7 +156,14 @@ interface MixerRowProps {
  * 2026-10-27(의뢰인 요청) — 글자 라벨 대신 아이콘(title로 설명 유지),
  * 슬라이더는 얇은 트랙 + 긴 타원 손잡이(index.css .mixer-slider), M
  * 체크박스는 Mute 버튼으로(켜짐/꺼짐 시각을 아이콘·색으로 다르게). */
-function MixerRow({ label, icon: Icon, volume, muted, onVolumeChange, onMutedChange }: MixerRowProps) {
+function MixerRow({
+  label,
+  icon: Icon,
+  volume,
+  muted,
+  onVolumeChange,
+  onMutedChange,
+}: MixerRowProps) {
   return (
     <div
       style={{
@@ -158,7 +194,11 @@ function MixerRow({ label, icon: Icon, volume, muted, onVolumeChange, onMutedCha
         title={muted ? `${label} 음소거 해제` : `${label} 음소거`}
         onClick={() => onMutedChange(!muted)}
       >
-        {muted ? <VolumeX size={14} aria-hidden="true" /> : <Volume2 size={14} aria-hidden="true" />}
+        {muted ? (
+          <VolumeX size={14} aria-hidden="true" />
+        ) : (
+          <Volume2 size={14} aria-hidden="true" />
+        )}
         Mute
       </button>
     </div>
@@ -193,6 +233,29 @@ function usePortraitPhoneLayout(): boolean {
     return () => mq.removeEventListener('change', onChange)
   }, [])
   return isPortraitPhone
+}
+
+const SETTINGS_SIDEBAR_BREAKPOINT_QUERY = '(max-width: 900px)'
+
+/** 2026-10-28(의뢰인 요청) — "설정하는 부분(BPM·오디오 지연 보정·믹서·보이는
+ * 마디 수)을 왼쪽에 다 몰아넣고, 화면이 좁아지면 설정 버튼을 눌러야 Drawer로
+ * 튀어나오게" — 반응형 분기 기준. `usePortraitPhoneLayout`(폰 세로 전용,
+ * 600px)과는 목적이 달라 별도 훅으로 둔다: 이건 "레인+킷 보여줄 공간이
+ * 충분한가"가 기준이라 가로/세로 구분 없이 폭만 본다. 900px은 레인 고정폭
+ * (PRACTICE_LANE_MAX_WIDTH_PX, 아래 참고) + 사이드바 폭(260px)이 겹치지 않고
+ * 나란히 들어가는 최소 폭 기준 어림값(정밀 임계값은 Q-29와 같은 성격의
+ * 추정치 — 실기기 QA로 재확인 예정, intent/07-open-questions.md에 기록). */
+function useNarrowSettingsLayout(): boolean {
+  const [isNarrow, setIsNarrow] = useState(
+    () => window.matchMedia(SETTINGS_SIDEBAR_BREAKPOINT_QUERY).matches,
+  )
+  useEffect(() => {
+    const mq = window.matchMedia(SETTINGS_SIDEBAR_BREAKPOINT_QUERY)
+    const onChange = () => setIsNarrow(mq.matches)
+    mq.addEventListener('change', onChange)
+    return () => mq.removeEventListener('change', onChange)
+  }, [])
+  return isNarrow
 }
 
 // Codex 모드A 지적(T3-29 리뷰 C-001, 반영) — T3-28에서 믹서 저장이 곡별이
@@ -279,7 +342,9 @@ export function PracticeCanvas({
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const rendererRef = useRef<LaneRenderer | null>(null)
   const rafIdRef = useRef<number | null>(null)
-  const [activeHandByPiece, setActiveHandByPiece] = useState<ReadonlyMap<DrumPiece, Hand>>(new Map())
+  const [activeHandByPiece, setActiveHandByPiece] = useState<ReadonlyMap<DrumPiece, Hand>>(
+    new Map(),
+  )
   const [isPlaying, setIsPlaying] = useState(false)
   // T3-6(REQ-04) — "일시정지": isPlaying과 별개 상태(최소 침습, 3상태 union으로
   // 안 바꿈). isPlaying && isPaused가 동시에 true인 경우는 없음(전이는 아래
@@ -296,6 +361,11 @@ export function PracticeCanvas({
   const isStartingRef = useRef(false)
   const [isStarting, setIsStarting] = useState(false)
   const isPortraitPhone = usePortraitPhoneLayout()
+  // 2026-10-28(의뢰인 요청) — 설정 패널 반응형 분기(위 useNarrowSettingsLayout
+  // 코멘트 참고). 좁은 화면에서만 쓰는 열림 상태라 넓은 화면(사이드바 항상
+  // 표시)에선 참조되지 않음.
+  const isNarrowSettingsLayout = useNarrowSettingsLayout()
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false)
   // 재생 중인 핸들·보이스를 들고 있다가 정지/언마운트 시 반드시 정리한다 —
   // 안 그러면 Transport에 예약된 이벤트가 남아 있다가 재생을 다시 시작했을 때
   // 이미 폐기된(또는 아직 로드 전인) 버퍼로 Player.start()를 호출해 실제로
@@ -337,6 +407,26 @@ export function PracticeCanvas({
   useEffect(() => {
     playbackBpmRef.current = playbackBpm
   }, [playbackBpm])
+
+  // --- 오디오 지연 보정(2026-10-28, 의뢰인 요청 — 블루투스 이어폰 싱크 밀림) ---
+  const [audioLatencyCompensationMs, setAudioLatencyCompensationMs] = useState(
+    loadStoredAudioLatencyCompensationMs,
+  )
+  const audioLatencyCompensationMsRef = useRef(audioLatencyCompensationMs)
+  useEffect(() => {
+    audioLatencyCompensationMsRef.current = audioLatencyCompensationMs
+    try {
+      window.localStorage.setItem(
+        AUDIO_LATENCY_COMPENSATION_STORAGE_KEY,
+        String(audioLatencyCompensationMs),
+      )
+    } catch {
+      // 저장 실패해도(사생활 보호 모드 등) 이번 세션 동작엔 지장 없음 — 무시.
+    }
+  }, [audioLatencyCompensationMs])
+  const [latencyDraft, setLatencyDraft] = useState('')
+  const [isEditingLatency, setIsEditingLatency] = useState(false)
+  const latencyFieldValue = isEditingLatency ? latencyDraft : String(audioLatencyCompensationMs)
 
   // T3-16-feedback-6(네트워크, 2026-10-26, work/T3-16-feedback-6/plan.md) —
   // T3-16-feedback-3(단순 fetch() 프리페치)을 적용한 뒤에도 맥 네트워크
@@ -511,7 +601,10 @@ export function PracticeCanvas({
       // 위함 — handlePlay()가 재생을 "루프 없이" 시작하면 이미 타이머가
       // 걸려있을 테니 보통은 이 분기가 아무 일도 안 함(이미 null이 아님).
       if (autoStopRemainingMsRef.current === null) {
-        const remainingMs = Math.max(0, (songEndPositionSeconds() - clock.getPositionSeconds()) * 1000)
+        const remainingMs = Math.max(
+          0,
+          (songEndPositionSeconds() - clock.getPositionSeconds()) * 1000,
+        )
         autoStopRemainingMsRef.current = remainingMs
         if (!isPaused) {
           autoStopScheduledAtRef.current = performance.now()
@@ -732,7 +825,9 @@ export function PracticeCanvas({
       hitLineColor: getComputedStyle(document.documentElement)
         .getPropertyValue('--hit-line')
         .trim(),
-      stickingTextColor: getComputedStyle(document.documentElement).getPropertyValue('--text').trim(),
+      stickingTextColor: getComputedStyle(document.documentElement)
+        .getPropertyValue('--text')
+        .trim(),
       laneHeaderBackgroundColor: getComputedStyle(document.documentElement)
         .getPropertyValue('--bg')
         .trim(),
@@ -803,11 +898,14 @@ export function PracticeCanvas({
         if (now - lastTrackResyncAtRef.current >= TRACK_RESYNC_INTERVAL_MS) {
           lastTrackResyncAtRef.current = now
           const playbackRate = playbackBpmRef.current / score.meta.bpm
-          const expectedSongPositionSeconds = audioTrackPositionSeconds(
-            positionSeconds,
-            songStartSeconds,
-            playbackRate,
-          )
+          // 2026-10-28 — 트랙이 audioLatencyCompensationMs만큼 "일찍" 틀어지기
+          // 시작했으므로(scorePlayer.ts), 정상 상태에서의 currentTime도 그만큼
+          // 앞서 있는 게 맞다 — 이 보정을 빼먹으면 resync()가 보정 자체를
+          // "어긋남"으로 오인해 매 750ms마다 되돌려버려 보정이 무력화된다.
+          const latencyCompensationSeconds = audioLatencyCompensationMsRef.current / 1000
+          const expectedSongPositionSeconds =
+            audioTrackPositionSeconds(positionSeconds, songStartSeconds, playbackRate) +
+            latencyCompensationSeconds * playbackRate
           tracks.resync(expectedSongPositionSeconds, TRACK_RESYNC_THRESHOLD_SECONDS)
         }
       }
@@ -1110,9 +1208,7 @@ export function PracticeCanvas({
       // 같은 이유로 try 안으로 이동(여기서 던지면 isStarting이 안 풀리는
       // 문제가 똑같이 생김). voices는 바로 위에서 성공적으로 대입됐으므로
       // 이 시점엔 항상 값이 있음(DrumVoiceMap | undefined가 아님).
-      loop = loopEnabled
-        ? { startBar: loopStartBar1 - 1, endBar: loopEndBar1 }
-        : undefined
+      loop = loopEnabled ? { startBar: loopStartBar1 - 1, endBar: loopEndBar1 } : undefined
       handle = playDrumScore(score, voices, {
         countInBars: COUNT_IN_BARS,
         playbackBpm,
@@ -1123,6 +1219,7 @@ export function PracticeCanvas({
         // 불편의 원인이었다 — 재생 시작 시점의 메트로놈 게인을 그대로 넘겨
         // 아래(재생 중 본체 메트로놈에 적용하는 것)와 같은 기준을 쓰게 한다.
         countInVolumeDb: metronomeGainToDb(effectiveGain(mixerStateRef.current.metronome)),
+        audioLatencyCompensationMs: audioLatencyCompensationMsRef.current,
       })
       playbackRef.current = { handle, voices, tracks, synthGain, limiter, metronome }
       isStartingRef.current = false
@@ -1189,7 +1286,12 @@ export function PracticeCanvas({
     const tracks = session.tracks
     if (tracks) {
       const playbackRate = playbackBpm / score.meta.bpm
-      const positionInTrackSeconds = audioTrackPositionSeconds(target, songStartSeconds, playbackRate)
+      // 2026-10-28 — 재생 중 seek도 오디오 지연 보정 적용(§resync 주석과 같은
+      // 이유 — 보정 없이 두면 바로 다음 resync()가 "어긋났다"며 되돌려버림).
+      const latencyCompensationSeconds = audioLatencyCompensationMsRef.current / 1000
+      const positionInTrackSeconds =
+        audioTrackPositionSeconds(target, songStartSeconds, playbackRate) +
+        latencyCompensationSeconds * playbackRate
       // 모드C 3라운드 C-008 반영 — 일시정지 중엔 재생을 시작하면 안 되므로
       // seekTo()(위치만 이동)를, 재생 중엔 기존 playFrom()(위치 이동 + 재생)을.
       if (isPaused) {
@@ -1275,401 +1377,529 @@ export function PracticeCanvas({
   // 컴포넌트가 사라질 때(곡 전환, 화면 이탈)도 재생 중이었다면 정리.
   useEffect(() => stopPlayback, [])
 
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
-      {/* 2026-10-27 의뢰인 요청 — "보이는 마디 수" 옆에 BPM·루프 버튼도 같이
-       * 둔다(전부 재생과 관련된 설정이니 한 줄에). 재생 컨트롤(10초전/재생/
-       * 10초후/리셋)만 레인 아래, 가운데 정렬로 따로 둔다(표준 미디어
-       * 플레이어처럼). 레이아웃만 바뀌고 동작은 그대로라 위험 작업 아님
-       * (T3-4 게이트 피드백 1차와 같은 기준). */}
-      <div
-        style={{
-          display: 'flex',
-          flexWrap: 'wrap',
-          alignItems: 'center',
-          gap: 'var(--space-4)',
-        }}
-      >
-        <label style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
-          BPM
-          {/* 재생 시작 시점의 BPM/루프 설정으로 Transport가 이미 스케줄돼 있어,
-           * 재생 중 바꿔도 지금 재생엔 반영 안 됨(다음 재생부터 적용) — 혼란을
-           * 막기 위해 재생 중엔 잠금(Codex 모드B 권장 C-002).
-           * 2026-10-27(의뢰인 요청) — 믹서 슬라이더와 같은 모양(얇은 트랙 +
-           * 긴 타원 손잡이, index.css .mixer-slider)으로 통일. */}
-          <input
-            type="range"
-            className="mixer-slider"
-            min={minBpm}
-            max={maxBpm}
-            value={playbackBpm}
-            onChange={(e) => setPlaybackBpm(clampBpm(Number(e.target.value)))}
-            disabled={isPlaying || isPaused}
-          />
-          <input
-            type="number"
-            min={minBpm}
-            max={maxBpm}
-            value={bpmFieldValue}
-            onFocus={() => {
-              setBpmDraft(String(playbackBpm))
-              setIsEditingBpm(true)
-            }}
-            onChange={(e) => setBpmDraft(e.target.value)}
-            onBlur={(e) => {
-              setPlaybackBpm(clampBpm(Number(e.target.value)))
-              setIsEditingBpm(false)
-            }}
-            // 의뢰인 피드백(2026-10-25) — 엔터를 눌러도 바로 반영되게. blur()를
-            // 호출해 위 onBlur의 커밋 로직을 그대로 재사용(로직 중복 없음).
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') e.currentTarget.blur()
-            }}
-            disabled={isPlaying || isPaused}
-            style={{ width: 56 }}
-          />
-          {/* 2026-10-27(의뢰인 요청) — "원곡 120, 100%" 대신 악보 빠르기말
-           * 표기(이미지 참고: "♩= 107")처럼 간결하게. */}
-          <span style={{ color: 'var(--text-muted)' }}>♩= {playbackBpm}</span>
-        </label>
+  // 2026-10-28(의뢰인 요청) — "설정하는 부분(BPM·오디오 지연 보정·믹서·보이는
+  // 마디 수)은 왼쪽에 다 몰아넣고 수정할 수 있게, 화면이 좁아지면 설정 버튼을
+  // 눌러야 Drawer로 튀어나오게" — 넓은 화면/좁은 화면 둘 다에서 같은 콘텐츠를
+  // 쓰므로(사이드바냐 Drawer 안이냐만 다름) JSX를 변수로 한 번만 작성해
+  // 재사용한다(중복 방지).
+  const settingsPanelContent = (
+    <>
+      <label style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
+        BPM
+        {/* 재생 시작 시점의 BPM/루프 설정으로 Transport가 이미 스케줄돼 있어,
+         * 재생 중 바꿔도 지금 재생엔 반영 안 됨(다음 재생부터 적용) — 혼란을
+         * 막기 위해 재생 중엔 잠금(Codex 모드B 권장 C-002).
+         * 2026-10-27(의뢰인 요청) — 믹서 슬라이더와 같은 모양(얇은 트랙 +
+         * 긴 타원 손잡이, index.css .mixer-slider)으로 통일. */}
+        <input
+          type="range"
+          className="mixer-slider"
+          min={minBpm}
+          max={maxBpm}
+          value={playbackBpm}
+          onChange={(e) => setPlaybackBpm(clampBpm(Number(e.target.value)))}
+          disabled={isPlaying || isPaused}
+        />
+        <input
+          type="number"
+          min={minBpm}
+          max={maxBpm}
+          value={bpmFieldValue}
+          onFocus={() => {
+            setBpmDraft(String(playbackBpm))
+            setIsEditingBpm(true)
+          }}
+          onChange={(e) => setBpmDraft(e.target.value)}
+          onBlur={(e) => {
+            setPlaybackBpm(clampBpm(Number(e.target.value)))
+            setIsEditingBpm(false)
+          }}
+          // 의뢰인 피드백(2026-10-25) — 엔터를 눌러도 바로 반영되게. blur()를
+          // 호출해 위 onBlur의 커밋 로직을 그대로 재사용(로직 중복 없음).
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') e.currentTarget.blur()
+          }}
+          disabled={isPlaying || isPaused}
+          style={{ width: 56 }}
+        />
+        {/* 2026-10-27(의뢰인 요청) — "원곡 120, 100%" 대신 악보 빠르기말
+         * 표기(이미지 참고: "♩= 107")처럼 간결하게. */}
+        <span style={{ color: 'var(--text-muted)' }}>♩= {playbackBpm}</span>
+      </label>
 
-        {loopPhase === 'active' && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
-            <span>마디</span>
-            <input
-              type="number"
-              min={1}
-              max={totalBars}
-              value={loopStartFieldValue}
-              onFocus={() => {
-                setLoopStartDraft(String(loopStartBar1))
-                setIsEditingLoopStart(true)
-              }}
-              onChange={(e) => setLoopStartDraft(e.target.value)}
-              onBlur={(e) => {
-                const next = clampLoopStart(Number(e.target.value))
-                setLoopStartBar1(next)
-                if (next >= loopEndBar1) setLoopEndBar1(Math.min(totalBars, next + 1))
-                setIsEditingLoopStart(false)
-              }}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') e.currentTarget.blur()
-              }}
-              disabled={isPlaying || isPaused}
-              style={{ width: 48 }}
-            />
-            <span>~</span>
-            <input
-              type="number"
-              min={1}
-              max={totalBars}
-              value={loopEndFieldValue}
-              onFocus={() => {
-                setLoopEndDraft(String(loopEndBar1))
-                setIsEditingLoopEnd(true)
-              }}
-              onChange={(e) => setLoopEndDraft(e.target.value)}
-              onBlur={(e) => {
-                const next = clampLoopEnd(Number(e.target.value))
-                setLoopEndBar1(next)
-                if (next <= loopStartBar1) setLoopStartBar1(Math.max(1, next - 1))
-                setIsEditingLoopEnd(false)
-              }}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') e.currentTarget.blur()
-              }}
-              disabled={isPlaying || isPaused}
-              style={{ width: 48 }}
-            />
-          </div>
-        )}
-        {loopPhase === 'active' && (
-          <span style={{ color: 'var(--text-muted)', fontSize: '0.9em' }}>
-            ⟲ 마디 {loopStartBar1}~{loopEndBar1} 반복 중 — 레인 오른쪽 진행바는 이 구간 안에서의 위치
-          </span>
-        )}
-      </div>
+      {/* 2026-10-28(의뢰인 요청) — 오디오 지연 보정: 사용자가 자기 출력 장치의
+       * 지연값(ms)을 직접 입력 — scorePlayer.ts의 audioLatencyCompensationMs로
+       * 전달돼 "소리만" 그만큼 일찍 내보낸다(화면은 그대로). 기기별 특성이라
+       * 이 브라우저에만 저장(localStorage, 위 상수 설명 참고) — 재생 중엔
+       * BPM과 같은 이유로 잠금(이미 스케줄된 재생엔 반영 안 되므로 다음
+       * 재생부터 적용됨을 혼동하지 않게). */}
+      <label style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
+        오디오 지연 보정
+        <input
+          type="number"
+          min={AUDIO_LATENCY_COMPENSATION_MIN_MS}
+          max={AUDIO_LATENCY_COMPENSATION_MAX_MS}
+          step={10}
+          value={latencyFieldValue}
+          onFocus={() => {
+            setLatencyDraft(String(audioLatencyCompensationMs))
+            setIsEditingLatency(true)
+          }}
+          onChange={(e) => setLatencyDraft(e.target.value)}
+          onBlur={(e) => {
+            const parsed = Number(e.target.value)
+            setAudioLatencyCompensationMs(
+              Number.isFinite(parsed)
+                ? Math.min(
+                    AUDIO_LATENCY_COMPENSATION_MAX_MS,
+                    Math.max(AUDIO_LATENCY_COMPENSATION_MIN_MS, parsed),
+                  )
+                : 0,
+            )
+            setIsEditingLatency(false)
+          }}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') e.currentTarget.blur()
+          }}
+          disabled={isPlaying || isPaused}
+          style={{ width: 64 }}
+        />
+        <span style={{ color: 'var(--text-muted)' }}>ms</span>
+      </label>
 
-      {/* 레인 폭 고정(2026-10-25, 의뢰인 요청) — "화면을 넓게 쓰더라도 노트가
-       * 떨어지는 크기는 고정하고 그 외 여백은 배경으로 채우고 싶다"는 요청.
-       * `maxWidth`로 좁은 화면(모바일)에서는 기존처럼 꽉 채우고, 넓은
-       * 화면에서는 그 이상 넓어지지 않고 중앙 정렬 + 좌우는 `<main>`의
-       * 배경색(--bg)이 그대로 보이게 둔다(laneRenderer.ts가 매 프레임
-       * canvas.clientWidth를 읽어 내부 해상도를 맞추므로 렌더러 쪽 변경
-       * 불필요). 구체 px 값(추정치, intent/07-open-questions.md Q-29)은
-       * 위 상수 선언부 참고. T3-11 게이트 피드백 3차(2026-10-25, 의뢰인
-       * "레인도 외곽을 선으로 감싸서 레인크기를 보고 싶어...") — 캔버스
-       * 폭을 줄이고 나니 좌우 여백과 레인 배경이 같은 색이라 경계가 안
-       * 보였음. 노트 halo(밝은 대비색)와 달리 이건 "크기가 어디서
-       * 끝나는지"만 보여주면 되므로 이미 쓰던 차분한 `--border` 색으로 테두리.
-       * 2026-10-27(의뢰인 요청) — 진행바를 레인 아래 가로 막대에서 레인
-       * 오른쪽의 세로 막대로 옮긴다. 레인+진행바를 한 플렉스 행으로 묶고
-       * 그 행 전체를 가운데 정렬(캔버스 단독으로 margin:auto 하던 걸,
-       * 바로 옆에 진행바가 붙으므로 둘을 같이 중앙에 놓도록 바꿈). 기능은
-       * 그대로 — 0%일 때 바닥, 100%일 때 꼭대기까지 찬다(실제 height는
-       * 위 progressBarRef가 매 프레임 직접 씀 — 아래 style엔 일부러
-       * height를 안 둔다: 여기 두면 다른 이유로 리렌더될 때마다 React가
-       * ref가 써둔 값을 이 값으로 되돌려버린다). */}
-      <div
-        style={{
-          display: 'flex',
-          gap: 'var(--space-2)',
-          maxWidth: PRACTICE_LANE_MAX_WIDTH_PX + 20,
-          margin: '0 auto',
-        }}
-      >
-        <div style={{ position: 'relative', flex: 1, minWidth: 0 }}>
-          <canvas
-            ref={canvasRef}
-            style={{
-              display: 'block',
-              width: '100%',
-              height: 400,
-              background: 'var(--bg)',
-              border: '1px solid var(--border)',
-            }}
-          />
-          {/* T3-14(진단용 임시, 원인 특정되면 제거) — 실기기 FPS를 화면에 바로
-           * 보여줘 영상 녹화 없이도 숫자로 바로 보고 가능하게. */}
-          {fpsDisplay !== null && (
-            <div
-              style={{
-                position: 'absolute',
-                top: 4,
-                left: 4,
-                padding: '2px 6px',
-                background: 'rgba(0,0,0,0.6)',
-                color: fpsDisplay >= 50 ? 'var(--success)' : fpsDisplay >= 30 ? 'var(--warning)' : 'var(--danger)',
-                fontSize: '0.8em',
-                fontFamily: 'monospace',
-                borderRadius: 4,
-                pointerEvents: 'none',
-              }}
-            >
-              FPS: {fpsDisplay}
-            </div>
-          )}
+      {/* T3-4 게이트 피드백 1차(2026-10-25)로 믹서를 킷 그림 옆에 뒀던 것을
+       * 2026-10-28(의뢰인 요청)로 설정 패널 쪽으로 다시 옮긴다 — 킷 그림은
+       * "지금 쳐야 할 위치"를 보여주는 항상-표시 정보라 설정이 아니지만,
+       * 믹서·보이는 마디 수는 "한 번 맞춰두고 계속 쓰는" 설정이라 BPM·오디오
+       * 지연 보정과 같은 묶음이 더 맞다는 판단(의뢰인 지시). */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)' }}>
+          <strong>믹서</strong>
+          <button onClick={applyDrumlessPreset}>
+            🥁 원곡 드럼 {mixerState.stem_drums.volume === 0 ? '켜기' : '끄기'}
+          </button>
         </div>
+        {MIXER_ROW_KEYS.map((key) => {
+          const channel = mixerState[key]
+          const rows = [
+            <MixerRow
+              key={key}
+              label={CHANNEL_LABELS[key]}
+              icon={MIXER_ROW_ICONS[key]}
+              volume={channel.volume}
+              muted={channel.muted}
+              onVolumeChange={(volume) => updateChannel(key, { volume })}
+              onMutedChange={(muted) => updateChannel(key, { muted })}
+            />,
+          ]
+          // T3-4 게이트 피드백 3차(2026-10-25, 의뢰인 요청) — "원곡 음악이
+          // 드럼보다 너무 크다"는 지적에, 베이스·보컬·기타 악기 3채널을
+          // 원래 위치(드럼(원곡) 바로 다음)에 슬라이더·M 하나로 묶어
+          // 보여준다. 저장 구조는 그대로(mixer.ts의 setMusicVolume 등이
+          // 3채널에 같은 값을 쓸 뿐) — 순수 UI 묶음.
+          if (key === 'stem_drums') {
+            rows.push(
+              <MixerRow
+                key="music"
+                label="음악(베이스·보컬·그 외)"
+                icon={Music2}
+                volume={musicVolume(mixerState)}
+                muted={isMusicMuted(mixerState)}
+                onVolumeChange={updateMusicVolume}
+                onMutedChange={updateMusicMuted}
+              />,
+            )
+          }
+          return rows
+        })}
+
+        {/* 2026-10-27(의뢰인 요청) — "보이는 마디 수"를 상단 BPM 옆에서
+         * 믹서 탭 안(메트로놈 아래)으로 이동. 기능은 그대로 — REQ-04
+         * "낙하 속도": 값이 작을수록 노트 사이 간격이 넓어짐(빠른 곡의
+         * 촘촘한 타격을 구분하기 쉬워짐). 순수 렌더링 설정이라 BPM/루프와
+         * 달리 재생 중에도 바꿀 수 있게 둔다. */}
+        <label style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
+          보이는 마디 수
+          <select value={barsVisible} onChange={(e) => setBarsVisible(Number(e.target.value))}>
+            <option value={1}>1</option>
+            <option value={2}>2</option>
+            <option value={3}>3</option>
+            <option value={4}>4</option>
+          </select>
+        </label>
+      </div>
+    </>
+  )
+
+  return (
+    <div
+      style={{
+        display: 'flex',
+        flexDirection: isNarrowSettingsLayout ? 'column' : 'row',
+        gap: 'var(--space-4)',
+        alignItems: 'flex-start',
+      }}
+    >
+      {/* 2026-10-28(의뢰인 요청) — 반응형 설정 패널: 넓은 화면(연습 레인 폭 +
+       * 사이드바가 같이 들어갈 공간이 있을 때)은 왼쪽에 사이드바로 항상
+       * 펼쳐두고, 좁은 화면은 평소엔 숨겨뒀다가 이 버튼으로 왼쪽에서
+       * 슬라이드로 열리는 Drawer를 쓴다(위 useNarrowSettingsLayout 코멘트
+       * 참고). 콘텐츠는 둘 다 settingsPanelContent로 동일 — 레이아웃만
+       * 다르다. */}
+      {isNarrowSettingsLayout ? (
+        <>
+          <button
+            type="button"
+            onClick={() => setIsSettingsOpen(true)}
+            style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}
+            aria-label="설정 열기"
+            title="설정"
+          >
+            <Settings size={16} aria-hidden="true" />
+            설정
+          </button>
+          <Drawer
+            open={isSettingsOpen}
+            onClose={() => setIsSettingsOpen(false)}
+            title="설정"
+            side="left"
+          >
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
+              {settingsPanelContent}
+            </div>
+          </Drawer>
+        </>
+      ) : (
         <div
           style={{
-            width: 14,
+            width: 260,
             flexShrink: 0,
-            position: 'relative',
-            borderRadius: 7,
-            background: 'var(--surface-2)',
-            overflow: 'hidden',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 'var(--space-4)',
           }}
         >
-          <div
-            ref={progressBarRef}
-            style={{
-              position: 'absolute',
-              bottom: 0,
-              left: 0,
-              right: 0,
-              background: loopEnabled ? 'var(--warning)' : 'var(--accent)',
-            }}
-          />
+          {settingsPanelContent}
         </div>
-      </div>
+      )}
 
-      {/* 2026-10-27 의뢰인 요청 — 재생 컨트롤(10초전/재생/10초후/리셋)을
-       * 레인 아래, 가운데 정렬로. 버튼을 딱딱한 사각형 대신 둥근 아이콘
-       * (도형)으로(index.css .transport-btn) — 재생/일시정지는 더 크고
-       * 포인트색으로 채워 중심을 잡는다(이미지 레퍼런스 스타일). */}
       <div
         style={{
           display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          gap: 'var(--space-3)',
+          flexDirection: 'column',
+          gap: 'var(--space-4)',
+          flex: 1,
+          minWidth: 0,
         }}
       >
-        {/* T3-13(2026-10-25, 의뢰인 요청 — 이미지 첨부) — 재생/일시정지를
-         * 토글 버튼 하나로 합치고(표준 미디어 플레이어 패턴), 양옆에 ±10초
-         * 탐색 버튼을 둔다. "정지"는 "리셋"으로 이름만 바꿔(동작은 기존
-         * handleStop 그대로 — 처음으로 되돌아감) 옆에 유지. 토글 버튼은
-         * 정지/일시정지 상태면 handlePlay()(새 세션 시작, 또는 isPaused
-         * 분기로 재개), 재생 중이면 handlePause() — 기존 로직 무변경, 버튼
-         * 묶음만 재구성. "▶ 재생" 쪽만 `isStarting`일 때 비활성화(모드A
-         * 지적 — handlePlay()의 새 세션 경로가 비동기라 연타하면 세션
-         * 생성이 겹쳐 돈다, 위 isStartingRef 선언부 참고). T3-16-feedback-7 —
-         * `audioTracksLoading`도 같이 막음(오디오 스템 전체 다운로드가 아직
-         * 안 끝남). 일시정지→재개 경로는 이미 한 번 성공적으로 시작된
-         * 세션이라 그 시점엔 로딩이 이미 끝나 있었을 수밖에 없어 안전. */}
-        <button
-          type="button"
-          className="transport-btn"
-          style={{ width: 44, height: 44 }}
-          title="10초 되감기"
-          aria-label="10초 되감기"
-          onClick={() => handleSeek(-10)}
-          disabled={!isPlaying && !isPaused}
-        >
-          <Rewind size={20} aria-hidden="true" />
-        </button>
-        {isPlaying ? (
-          <button
-            type="button"
-            className="transport-btn transport-btn--play"
-            style={{ width: 50, height: 50 }}
-            title="일시정지"
-            aria-label="일시정지"
-            onClick={handlePause}
-          >
-            <Pause size={22} aria-hidden="true" />
-          </button>
-        ) : (
-          <button
-            type="button"
-            className="transport-btn transport-btn--play"
-            style={{ width: 50, height: 50 }}
-            title={audioTracksLoading ? '음원 불러오는 중…' : '재생'}
-            aria-label={audioTracksLoading ? '음원 불러오는 중' : '재생'}
-            onClick={handlePlay}
-            disabled={isStarting || audioTracksLoading}
-          >
-            <Play size={22} aria-hidden="true" style={{ marginLeft: 2 }} />
-          </button>
-        )}
-        <button
-          type="button"
-          className="transport-btn"
-          style={{ width: 44, height: 44 }}
-          title="10초 빨리감기"
-          aria-label="10초 빨리감기"
-          onClick={() => handleSeek(10)}
-          disabled={!isPlaying && !isPaused}
-        >
-          <FastForward size={20} aria-hidden="true" />
-        </button>
-        <button
-          type="button"
-          className="transport-btn"
-          style={{ width: 44, height: 44 }}
-          title="처음으로 리셋"
-          aria-label="처음으로 리셋"
-          onClick={handleStop}
-          disabled={!isPlaying && !isPaused}
-        >
-          <RotateCcw size={20} aria-hidden="true" />
-        </button>
-
-        {/* 2026-10-27(의뢰인 요청) — "여기서 시작"/"여기까지" 버튼 + A-B 루프
-         * 체크박스 3개를 버튼 하나로 통합. idle("⟲ 루프 시작") → 누르면
-         * 시작점을 찍고 start-marked("⟲ 여기까지")로 → 누르면 끝점을 찍으며
-         * 루프가 켜지고 active("⟲ 루프 진행중")로 → 누르면 루프가 꺼지고 다시
-         * idle로(마이크로 인터랙션 — 전역 button 호버/전환이 이미 200ms라
-         * 상태 전환마다 배경색이 부드럽게 바뀜). active 단계만 재생 중이
-         * 아니어도 항상 눌러서 끌 수 있다(기존 체크박스가 그랬던 것과 동일 —
-         * "루프를 그만 걸고 싶다"는 재생 상태와 무관해야 함). 2026-10-27
-         * 추가 요청 — 리셋 버튼 우측으로 위치 이동(원래 상단 BPM 옆이었음). */}
-        {/* 2026-10-27(의뢰인 요청) — "재생 버튼·루프 시작 버튼이 과하게
-         * 크다" 지적 — 패딩·글자 크기를 줄여 옆의 작은 아이콘 버튼들과
-         * 어울리는 크기로(텍스트는 이미 짧아 더 줄이기보단 크기만 축소). */}
-        <button
-          type="button"
-          onClick={handleLoopButtonClick}
-          disabled={loopPhase !== 'active' && !isPlaying && !isPaused}
+        {/* 2026-10-27 의뢰인 요청 — A-B 루프 상태(구간 입력·안내 문구)만 남은
+         * 줄(BPM은 위 설정 패널로 이동, 2026-10-28). loopPhase가
+         * 'active'가 아니면 아무것도 안 그려 빈 줄이 되는데, 레이아웃에
+         * 영향 없는 높이 0 요소라 굳이 조건부로 줄 자체를 없애지 않음. */}
+        <div
           style={{
-            whiteSpace: 'nowrap',
-            padding: '6px 10px',
-            fontSize: '0.85em',
-            ...(loopPhase === 'active'
-              ? { background: 'var(--warning)', borderColor: 'var(--warning)', color: 'var(--bg)' }
-              : undefined),
+            display: 'flex',
+            flexWrap: 'wrap',
+            alignItems: 'center',
+            gap: 'var(--space-4)',
           }}
         >
-          <Repeat size={14} aria-hidden="true" style={{ verticalAlign: 'middle', marginRight: 4 }} />
-          {loopPhase === 'idle' ? '루프 시작' : loopPhase === 'start-marked' ? '여기까지' : '루프 진행중'}
-        </button>
-      </div>
+          {loopPhase === 'active' && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
+              <span>마디</span>
+              <input
+                type="number"
+                min={1}
+                max={totalBars}
+                value={loopStartFieldValue}
+                onFocus={() => {
+                  setLoopStartDraft(String(loopStartBar1))
+                  setIsEditingLoopStart(true)
+                }}
+                onChange={(e) => setLoopStartDraft(e.target.value)}
+                onBlur={(e) => {
+                  const next = clampLoopStart(Number(e.target.value))
+                  setLoopStartBar1(next)
+                  if (next >= loopEndBar1) setLoopEndBar1(Math.min(totalBars, next + 1))
+                  setIsEditingLoopStart(false)
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') e.currentTarget.blur()
+                }}
+                disabled={isPlaying || isPaused}
+                style={{ width: 48 }}
+              />
+              <span>~</span>
+              <input
+                type="number"
+                min={1}
+                max={totalBars}
+                value={loopEndFieldValue}
+                onFocus={() => {
+                  setLoopEndDraft(String(loopEndBar1))
+                  setIsEditingLoopEnd(true)
+                }}
+                onChange={(e) => setLoopEndDraft(e.target.value)}
+                onBlur={(e) => {
+                  const next = clampLoopEnd(Number(e.target.value))
+                  setLoopEndBar1(next)
+                  if (next <= loopStartBar1) setLoopStartBar1(Math.max(1, next - 1))
+                  setIsEditingLoopEnd(false)
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') e.currentTarget.blur()
+                }}
+                disabled={isPlaying || isPaused}
+                style={{ width: 48 }}
+              />
+            </div>
+          )}
+          {loopPhase === 'active' && (
+            <span style={{ color: 'var(--text-muted)', fontSize: '0.9em' }}>
+              ⟲ 마디 {loopStartBar1}~{loopEndBar1} 반복 중 — 레인 오른쪽 진행바는 이 구간 안에서의
+              위치
+            </span>
+          )}
+        </div>
 
-      {/* T3-4 게이트 피드백 1차(2026-10-25) — 믹서를 페이지 맨 아래 단독 블록
-       * 대신 드럼킷 그림 옆 빈 공간에 둔다. 넓은 화면에서 킷 그림이 320px로
-       * 고정폭이라 그 오른쪽이 항상 비어 있던 걸 의뢰인이 직접 지적 —
-       * `intent/04-ui-ux.md` §3 와이어프레임의 "믹서 열기" 의도(하단에 큰
-       * 블록으로 항상 펼쳐두지 않음)에도 더 가까워짐. 세로 폰은 킷을 320px
-       * 그대로 두면 너무 커 믹서가 한참 아래로 밀리므로 레이아웃만 세로로
-       * 바꿔 믹서가 캔버스+킷 아래 전체 폭으로 내려온다 — 레이아웃만 바뀌고
-       * 동작은 그대로라 위험 작업 아님(T3-2-feedback-1 "보이는 마디 수"와
-       * 같은 기준).
-       * T3-11(2026-10-25, 의뢰인 피드백 "폰 세로에서 드럼킷이 안 보여") —
-       * 원래 `intent/04-ui-ux.md` §3 반응형 규칙이 "폰 세로 = 레인만(킷은
-       * 축소 아이콘)"이었는데, 구현(T2-3~T3-4)은 "축소 아이콘"을 빠뜨리고
-       * 아예 숨겨버렸던 것을 뒤늦게 발견 — `!isPortraitPhone` 조건을 없애고
-       * 항상 그리되, 세로 폰에서는 폭만 축소(아래 160px, 넓은 화면의 320px
-       * 대비)해 문서가 원래 의도했던 "축소 아이콘"에 가깝게 맞춘다. */}
-      <div
-        style={{
-          display: 'flex',
-          flexDirection: isPortraitPhone ? 'column' : 'row',
-          gap: 'var(--space-4)',
-          alignItems: 'flex-start',
-        }}
-      >
+        {/* 레인 폭 고정(2026-10-25, 의뢰인 요청) — "화면을 넓게 쓰더라도 노트가
+         * 떨어지는 크기는 고정하고 그 외 여백은 배경으로 채우고 싶다"는 요청.
+         * `maxWidth`로 좁은 화면(모바일)에서는 기존처럼 꽉 채우고, 넓은
+         * 화면에서는 그 이상 넓어지지 않고 중앙 정렬 + 좌우는 `<main>`의
+         * 배경색(--bg)이 그대로 보이게 둔다(laneRenderer.ts가 매 프레임
+         * canvas.clientWidth를 읽어 내부 해상도를 맞추므로 렌더러 쪽 변경
+         * 불필요). 구체 px 값(추정치, intent/07-open-questions.md Q-29)은
+         * 위 상수 선언부 참고. T3-11 게이트 피드백 3차(2026-10-25, 의뢰인
+         * "레인도 외곽을 선으로 감싸서 레인크기를 보고 싶어...") — 캔버스
+         * 폭을 줄이고 나니 좌우 여백과 레인 배경이 같은 색이라 경계가 안
+         * 보였음. 노트 halo(밝은 대비색)와 달리 이건 "크기가 어디서
+         * 끝나는지"만 보여주면 되므로 이미 쓰던 차분한 `--border` 색으로 테두리.
+         * 2026-10-27(의뢰인 요청) — 진행바를 레인 아래 가로 막대에서 레인
+         * 오른쪽의 세로 막대로 옮긴다. 레인+진행바를 한 플렉스 행으로 묶고
+         * 그 행 전체를 가운데 정렬(캔버스 단독으로 margin:auto 하던 걸,
+         * 바로 옆에 진행바가 붙으므로 둘을 같이 중앙에 놓도록 바꿈). 기능은
+         * 그대로 — 0%일 때 바닥, 100%일 때 꼭대기까지 찬다(실제 height는
+         * 위 progressBarRef가 매 프레임 직접 씀 — 아래 style엔 일부러
+         * height를 안 둔다: 여기 두면 다른 이유로 리렌더될 때마다 React가
+         * ref가 써둔 값을 이 값으로 되돌려버린다). */}
+        <div
+          style={{
+            display: 'flex',
+            gap: 'var(--space-2)',
+            maxWidth: PRACTICE_LANE_MAX_WIDTH_PX + 20,
+            margin: '0 auto',
+          }}
+        >
+          <div style={{ position: 'relative', flex: 1, minWidth: 0 }}>
+            <canvas
+              ref={canvasRef}
+              style={{
+                display: 'block',
+                width: '100%',
+                height: 400,
+                background: 'var(--bg)',
+                border: '1px solid var(--border)',
+              }}
+            />
+            {/* T3-14(진단용 임시, 원인 특정되면 제거) — 실기기 FPS를 화면에 바로
+             * 보여줘 영상 녹화 없이도 숫자로 바로 보고 가능하게. */}
+            {fpsDisplay !== null && (
+              <div
+                style={{
+                  position: 'absolute',
+                  top: 4,
+                  left: 4,
+                  padding: '2px 6px',
+                  background: 'rgba(0,0,0,0.6)',
+                  color:
+                    fpsDisplay >= 50
+                      ? 'var(--success)'
+                      : fpsDisplay >= 30
+                        ? 'var(--warning)'
+                        : 'var(--danger)',
+                  fontSize: '0.8em',
+                  fontFamily: 'monospace',
+                  borderRadius: 4,
+                  pointerEvents: 'none',
+                }}
+              >
+                FPS: {fpsDisplay}
+              </div>
+            )}
+          </div>
+          <div
+            style={{
+              width: 14,
+              flexShrink: 0,
+              position: 'relative',
+              borderRadius: 7,
+              background: 'var(--surface-2)',
+              overflow: 'hidden',
+            }}
+          >
+            <div
+              ref={progressBarRef}
+              style={{
+                position: 'absolute',
+                bottom: 0,
+                left: 0,
+                right: 0,
+                background: loopEnabled ? 'var(--warning)' : 'var(--accent)',
+              }}
+            />
+          </div>
+        </div>
+
+        {/* 2026-10-27 의뢰인 요청 — 재생 컨트롤(10초전/재생/10초후/리셋)을
+         * 레인 아래, 가운데 정렬로. 버튼을 딱딱한 사각형 대신 둥근 아이콘
+         * (도형)으로(index.css .transport-btn) — 재생/일시정지는 더 크고
+         * 포인트색으로 채워 중심을 잡는다(이미지 레퍼런스 스타일). */}
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 'var(--space-3)',
+          }}
+        >
+          {/* T3-13(2026-10-25, 의뢰인 요청 — 이미지 첨부) — 재생/일시정지를
+           * 토글 버튼 하나로 합치고(표준 미디어 플레이어 패턴), 양옆에 ±10초
+           * 탐색 버튼을 둔다. "정지"는 "리셋"으로 이름만 바꿔(동작은 기존
+           * handleStop 그대로 — 처음으로 되돌아감) 옆에 유지. 토글 버튼은
+           * 정지/일시정지 상태면 handlePlay()(새 세션 시작, 또는 isPaused
+           * 분기로 재개), 재생 중이면 handlePause() — 기존 로직 무변경, 버튼
+           * 묶음만 재구성. "▶ 재생" 쪽만 `isStarting`일 때 비활성화(모드A
+           * 지적 — handlePlay()의 새 세션 경로가 비동기라 연타하면 세션
+           * 생성이 겹쳐 돈다, 위 isStartingRef 선언부 참고). T3-16-feedback-7 —
+           * `audioTracksLoading`도 같이 막음(오디오 스템 전체 다운로드가 아직
+           * 안 끝남). 일시정지→재개 경로는 이미 한 번 성공적으로 시작된
+           * 세션이라 그 시점엔 로딩이 이미 끝나 있었을 수밖에 없어 안전. */}
+          <button
+            type="button"
+            className="transport-btn"
+            style={{ width: 44, height: 44 }}
+            title="10초 되감기"
+            aria-label="10초 되감기"
+            onClick={() => handleSeek(-10)}
+            disabled={!isPlaying && !isPaused}
+          >
+            <Rewind size={20} aria-hidden="true" />
+          </button>
+          {isPlaying ? (
+            <button
+              type="button"
+              className="transport-btn transport-btn--play"
+              style={{ width: 50, height: 50 }}
+              title="일시정지"
+              aria-label="일시정지"
+              onClick={handlePause}
+            >
+              <Pause size={22} aria-hidden="true" />
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="transport-btn transport-btn--play"
+              style={{ width: 50, height: 50 }}
+              title={audioTracksLoading ? '음원 불러오는 중…' : '재생'}
+              aria-label={audioTracksLoading ? '음원 불러오는 중' : '재생'}
+              onClick={handlePlay}
+              disabled={isStarting || audioTracksLoading}
+            >
+              <Play size={22} aria-hidden="true" style={{ marginLeft: 2 }} />
+            </button>
+          )}
+          <button
+            type="button"
+            className="transport-btn"
+            style={{ width: 44, height: 44 }}
+            title="10초 빨리감기"
+            aria-label="10초 빨리감기"
+            onClick={() => handleSeek(10)}
+            disabled={!isPlaying && !isPaused}
+          >
+            <FastForward size={20} aria-hidden="true" />
+          </button>
+          <button
+            type="button"
+            className="transport-btn"
+            style={{ width: 44, height: 44 }}
+            title="처음으로 리셋"
+            aria-label="처음으로 리셋"
+            onClick={handleStop}
+            disabled={!isPlaying && !isPaused}
+          >
+            <RotateCcw size={20} aria-hidden="true" />
+          </button>
+
+          {/* 2026-10-27(의뢰인 요청) — "여기서 시작"/"여기까지" 버튼 + A-B 루프
+           * 체크박스 3개를 버튼 하나로 통합. idle("⟲ 루프 시작") → 누르면
+           * 시작점을 찍고 start-marked("⟲ 여기까지")로 → 누르면 끝점을 찍으며
+           * 루프가 켜지고 active("⟲ 루프 진행중")로 → 누르면 루프가 꺼지고 다시
+           * idle로(마이크로 인터랙션 — 전역 button 호버/전환이 이미 200ms라
+           * 상태 전환마다 배경색이 부드럽게 바뀜). active 단계만 재생 중이
+           * 아니어도 항상 눌러서 끌 수 있다(기존 체크박스가 그랬던 것과 동일 —
+           * "루프를 그만 걸고 싶다"는 재생 상태와 무관해야 함). 2026-10-27
+           * 추가 요청 — 리셋 버튼 우측으로 위치 이동(원래 상단 BPM 옆이었음). */}
+          {/* 2026-10-27(의뢰인 요청) — "재생 버튼·루프 시작 버튼이 과하게
+           * 크다" 지적 — 패딩·글자 크기를 줄여 옆의 작은 아이콘 버튼들과
+           * 어울리는 크기로(텍스트는 이미 짧아 더 줄이기보단 크기만 축소). */}
+          <button
+            type="button"
+            onClick={handleLoopButtonClick}
+            disabled={loopPhase !== 'active' && !isPlaying && !isPaused}
+            style={{
+              whiteSpace: 'nowrap',
+              padding: '6px 10px',
+              fontSize: '0.85em',
+              ...(loopPhase === 'active'
+                ? {
+                    background: 'var(--warning)',
+                    borderColor: 'var(--warning)',
+                    color: 'var(--bg)',
+                  }
+                : undefined),
+            }}
+          >
+            <Repeat
+              size={14}
+              aria-hidden="true"
+              style={{ verticalAlign: 'middle', marginRight: 4 }}
+            />
+            {loopPhase === 'idle'
+              ? '루프 시작'
+              : loopPhase === 'start-marked'
+                ? '여기까지'
+                : '루프 진행중'}
+          </button>
+        </div>
+
+        {/* 2026-10-28(의뢰인 요청) — 블루투스 이어폰의 물리적 지연(보통
+         * 100~300ms) 때문에 "노트가 지나간 뒤에 소리가 들린다"는 문의가 있었음
+         * (YOASOBI 곡 재현, qa-evidence/T3-46/result.md) — 저희 쪽 버그가
+         * 아니라 출력 장치 자체의 특성이라 코드로 "고칠" 수는 없고, 상시 노출
+         * 안내문 + 수동 보정값(아래)으로 대응. 재생 버튼 바로 아래, 상시 노출
+         * (모달/토스트로 한 번만 보여주면 나중에 다시 못 봄 — 기기를 바꿔
+         * 접속할 때마다 다시 알아야 하는 정보라 상시 노출이 맞다고 판단). */}
+        <p style={{ color: 'var(--text-muted)', fontSize: '0.85em', margin: 0 }}>
+          🎧 블루투스 이어폰은 싱크가 밀릴 수 있습니다. 가능하면 스피커나 유선 이어폰을
+          사용해주세요.
+        </p>
+
+        {/* 2026-10-28(의뢰인 요청) — 오디오 지연 보정·믹서·보이는 마디 수는 위
+         * settingsPanelContent(왼쪽 사이드바/Drawer)로 이동 — 킷 그림만 여기
+         * 메인 영역에 남긴다. 킷 그림은 "지금 쳐야 할 위치"를 실시간으로
+         * 보여주는 항상-표시 정보라 설정이 아님(의뢰인이 설정으로 꼽은 건
+         * BPM·오디오 지연 보정·믹서·보이는 마디 수뿐 — 위 목록 참고).
+         * T3-11(2026-10-25, 의뢰인 피드백 "폰 세로에서 드럼킷이 안 보여") —
+         * 세로 폰에서는 폭만 축소(160px, 넓은 화면은 320px)해 "축소 아이콘"에
+         * 가깝게 맞춘다(원래 의도, intent/04-ui-ux.md §3). */}
         <div style={{ maxWidth: isPortraitPhone ? 160 : 320 }}>
           <KitIllustration
             activeHandByPiece={activeHandByPiece}
             showSticking={false}
             pieceColor={readPieceColor}
           />
-        </div>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)', flex: 1 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)' }}>
-            <strong>믹서</strong>
-            <button onClick={applyDrumlessPreset}>
-              🥁 원곡 드럼 {mixerState.stem_drums.volume === 0 ? '켜기' : '끄기'}
-            </button>
-          </div>
-          {MIXER_ROW_KEYS.map((key) => {
-            const channel = mixerState[key]
-            const rows = [
-              <MixerRow
-                key={key}
-                label={CHANNEL_LABELS[key]}
-                icon={MIXER_ROW_ICONS[key]}
-                volume={channel.volume}
-                muted={channel.muted}
-                onVolumeChange={(volume) => updateChannel(key, { volume })}
-                onMutedChange={(muted) => updateChannel(key, { muted })}
-              />,
-            ]
-            // T3-4 게이트 피드백 3차(2026-10-25, 의뢰인 요청) — "원곡 음악이
-            // 드럼보다 너무 크다"는 지적에, 베이스·보컬·기타 악기 3채널을
-            // 원래 위치(드럼(원곡) 바로 다음)에 슬라이더·M 하나로 묶어
-            // 보여준다. 저장 구조는 그대로(mixer.ts의 setMusicVolume 등이
-            // 3채널에 같은 값을 쓸 뿐) — 순수 UI 묶음.
-            if (key === 'stem_drums') {
-              rows.push(
-                <MixerRow
-                  key="music"
-                  label="음악(베이스·보컬·그 외)"
-                  icon={Music2}
-                  volume={musicVolume(mixerState)}
-                  muted={isMusicMuted(mixerState)}
-                  onVolumeChange={updateMusicVolume}
-                  onMutedChange={updateMusicMuted}
-                />,
-              )
-            }
-            return rows
-          })}
-
-          {/* 2026-10-27(의뢰인 요청) — "보이는 마디 수"를 상단 BPM 옆에서
-           * 믹서 탭 안(메트로놈 아래)으로 이동. 기능은 그대로 — REQ-04
-           * "낙하 속도": 값이 작을수록 노트 사이 간격이 넓어짐(빠른 곡의
-           * 촘촘한 타격을 구분하기 쉬워짐). 순수 렌더링 설정이라 BPM/루프와
-           * 달리 재생 중에도 바꿀 수 있게 둔다. */}
-          <label style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
-            보이는 마디 수
-            <select value={barsVisible} onChange={(e) => setBarsVisible(Number(e.target.value))}>
-              <option value={1}>1</option>
-              <option value={2}>2</option>
-              <option value={3}>3</option>
-              <option value={4}>4</option>
-            </select>
-          </label>
         </div>
       </div>
     </div>

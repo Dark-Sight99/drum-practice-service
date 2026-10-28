@@ -40,6 +40,19 @@ export interface PlayDrumScoreOptions {
    * 넘긴다(재생 중 메트로놈 본체에 적용하는 것과 같은 변환). 안 넘기면
    * createClickVoice의 기본값(-6dB)을 그대로 씀. */
   countInVolumeDb?: number
+  /** 2026-10-28(의뢰인 요청) — 블루투스 이어폰 등 출력 장치 자체의 물리적 지연
+   * (보통 100~300ms)을 보정하기 위한 값(ms). "장치가 소리를 늦게 낸다"는 걸
+   * 상쇄하려면 반대로 **소리를 그만큼 일찍 내보내야** 한다 — 화면(노트 위치,
+   * `laneRenderer.ts`의 `noteTimeOf`)은 전혀 안 건드리고, 소리를 트리거하는
+   * 시각만 당긴다. 노트 데이터(화면 기준 "진짜" 시각)와 오디오 트랙의 재생
+   * 위치(`audioTrackPositionSeconds`로 구하는 "파일 안에서 어디를 재생할지")는
+   * 그대로 두고, 그 트리거를 "언제 쏠지"만 당기는 것 — 연속 재생되는 오디오
+   * 트랙은 이렇게 하면 실제 장치가 그 지연만큼 늦게 내보내도 결과적으로 원래
+   * 의도한 시각에 들리게 된다(한 번 당겨서 틀기 시작하면 그 뒤로는 그냥
+   * 흘러가는 연속 재생이라, "몇 초를 재생할지" 위치 자체는 바뀌면 안 됨).
+   * 기본 0(보정 없음). 음수를 주면 반대로 늦출 수도 있음(유선인데 화면이
+   * 오히려 늦는 특이 환경 대비, 제한은 안 둠). */
+  audioLatencyCompensationMs?: number
 }
 
 /** DrumScore를 재생한다: 마스터 클록(Transport)에 BPM/박자표를 맞추고, 카운트인
@@ -93,12 +106,15 @@ export function playDrumScore(
   const countInClick = createClickVoice(options.countInVolumeDb)
 
   const scheduledIds: number[] = []
+  // 2026-10-28 — 보정값만큼 "소리를 트리거하는 시각"을 당긴다(위 옵션 설명 참고).
+  // 화면 쪽(laneRenderer.ts)은 이 값을 전혀 모름 — 노트의 "진짜" 시각은 안 바뀜.
+  const latencyCompensationSeconds = (options.audioLatencyCompensationMs ?? 0) / 1000
 
   for (const click of countInClicks) {
     scheduledIds.push(
       transport.schedule((time) => {
         countInClick.trigger(click.accent, time)
-      }, click.timeSeconds),
+      }, Math.max(0, click.timeSeconds - latencyCompensationSeconds)),
     )
   }
 
@@ -113,7 +129,7 @@ export function playDrumScore(
     scheduledIds.push(
       transport.schedule((time) => {
         voices[note.piece].trigger(time, note.velocity / 127)
-      }, timeSeconds),
+      }, Math.max(0, timeSeconds - latencyCompensationSeconds)),
     )
   }
 
@@ -136,13 +152,16 @@ export function playDrumScore(
     const audioStartSeconds = schedule.loopStartSeconds ?? schedule.songStartSeconds
     scheduledIds.push(
       transport.schedule(() => {
+        // 재생 위치(파일 안 어디서부터 틀지)는 항상 "진짜" audioStartSeconds
+        // 기준 — 트리거만 당겨지고 내용 자체는 안 당겨져야 연속 재생이 맞다
+        // (위 audioLatencyCompensationMs 옵션 설명 참고).
         const positionSeconds = audioTrackPositionSeconds(
           audioStartSeconds,
           schedule.songStartSeconds,
           playbackRate,
         )
         tracks.playFrom(positionSeconds, playbackRate)
-      }, audioStartSeconds),
+      }, Math.max(0, audioStartSeconds - latencyCompensationSeconds)),
     )
   }
 
