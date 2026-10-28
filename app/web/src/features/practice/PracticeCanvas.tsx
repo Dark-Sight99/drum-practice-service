@@ -369,7 +369,15 @@ export function PracticeCanvas({
   // 어렵다는 재지적. T3-2 게이트 피드백 1차(실제 음원 QA)에서 이미 "1마디로
   // 하면 개별 타격이 또렷이 분리된다"고 확인된 적이 있어, 그 결론대로 기본값을
   // 1로 바꿈(조절 가능한 컨트롤 자체는 그대로 유지 — intent/04-ui-ux.md 참고).
-  barsVisible: initialBarsVisible = 1,
+  // 2026-10-28(의뢰인 요청, 6차) — "화면이 넓어서 레인이 길게 보이면 기본
+  // 2마디, 좁아서(드럼이 아래로) 레인이 짧아지면 기본 1마디로" — 위 1마디
+  // 결론은 "레인이 짧을 때"의 가독성 기준이었으므로 여전히 좁은 화면
+  // 기본값으로 유지하고, 넓은 화면(레인이 훨씬 길어짐, 아래 isKitStacked)
+  // 에서만 2로 올린다. 호출부가 명시적으로 값을 넘기면(현재는 없음) 그
+  // 값을 그대로 쓰고, 안 넘겼을 때만(undefined) 이 화면-기반 기본값을
+  // 쓴다 — 기본 매개변수 `= 1`을 없애 "명시적으로 안 넘김"을 구분 가능하게
+  // 함(아래 useState 초기화 참고).
+  barsVisible: initialBarsVisible,
   songId,
   availableAudioKinds = [],
 }: PracticeCanvasProps) {
@@ -566,7 +574,11 @@ export function PracticeCanvas({
   // 보이는 문제는 BPM이 아니라 이 값으로만 풀린다 — 의뢰인이 직접 겪은 문제라
   // 재생 중에도 즉시 바꿀 수 있게 둔다(BPM/루프와 달리 Transport 스케줄에
   // 영향 없는 순수 렌더링 파라미터이므로 재생 중 잠글 이유가 없음).
-  const [barsVisible, setBarsVisible] = useState(initialBarsVisible)
+  // 2026-10-28(의뢰인 요청, 6차) — 위 destructuring 코멘트 참고. 호출부가
+  // barsVisible을 명시적으로 넘겼으면 그 값, 안 넘겼으면(undefined) 현재
+  // 레이아웃(isKitStacked)에 따라 2(넓은 화면, 레인 김) 또는 1(좁은 화면,
+  // 레인 짧음)을 기본값으로 — useState 초기화 함수라 마운트 시 1회만 평가.
+  const [barsVisible, setBarsVisible] = useState(() => initialBarsVisible ?? (isKitStacked ? 1 : 2))
 
   // --- A-B 루프(REQ-04, 마디 단위, 1-기준으로 표시·내부는 0-기준) ---
   const totalBars = useMemo(() => {
@@ -1742,26 +1754,16 @@ export function PracticeCanvas({
             // !isKitStacked(좌우 배치)에서도 stretch로 바꿔(교차축=세로)
             // leftStack이 이 행의 전체 높이를 받게 한다 — 그래야 아래
             // leftStack 안의 레인이 "남는 높이만큼" 늘어날 수 있다(의뢰인
-            // 요청 — 스크롤 없이 한 화면에 다 보이게). 킷은 그 높이만큼
-            // 같이 늘어나면 안 되므로 킷 wrapper에 alignSelf:'center'로
-            // 개별 예외를 둔다(아래).
+            // 요청 — 스크롤 없이 한 화면에 다 보이게).
             alignItems: 'stretch',
-            // 2026-10-28(의뢰인 요청, 5차) — "드럼이 너무 우측 끝에 붙어있다,
-            // 노트에 가까워지게" 지적 — 원인은 바로 아래 leftStack이
-            // flex:1로 남는 폭을 전부 먹은 뒤 그 "안에서" 레인을 가운데
-            // 정렬했기 때문(레인 자체는 가운데인데, leftStack의 테두리가
-            // 화면 끝까지라 킷은 그 테두리 바로 옆 = 화면 맨 끝에 붙음).
-            // leftStack 폭을 레인 폭으로 고정하고(아래), 이 행 자체를
-            // 가운데 정렬해 {레인 열 + 킷}을 한 덩어리로 묶어 중앙에 둔다.
-            justifyContent: isKitStacked ? undefined : 'center',
             gap: 'var(--space-4)',
-            // 2026-10-28(의뢰인 요청, 5차) — main-column(위)이 App.tsx가 준
-            // 남는 뷰포트 높이로 stretch돼 있으므로, 이 행도 flex:1로 그
-            // 높이를 그대로 받아야 아래 레인까지 전달된다. isKitStacked
-            // (세로 쌓기, 좁은 화면)에서는 안 건드림 — 그 화면들은 원래부터
-            // 자연스러운 세로 스크롤이 문제된 적이 없어 범위 밖으로 둔다.
-            flex: isKitStacked ? undefined : 1,
-            minHeight: isKitStacked ? undefined : 0,
+            // 2026-10-28(의뢰인 요청, 6차) — "레인 위로 빈 공간이 있다,
+            // 드럼이 아래로 내려간 좁은 화면에서도(안 보이더라도) 레인
+            // 자체를 더 키우고 싶다" — 5차 때는 !isKitStacked(좌우 배치)만
+            // 높이를 채웠는데, 이번엔 isKitStacked(세로 쌓기, 좁은 화면)도
+            // 똑같이 남는 높이를 받게 한다(둘 다 무조건 적용).
+            flex: 1,
+            minHeight: 0,
           }}
         >
           <div
@@ -1770,11 +1772,16 @@ export function PracticeCanvas({
               flexDirection: 'column',
               gap: 'var(--space-4)',
               // flex:1 대신 레인 폭(PRACTICE_LANE_MAX_WIDTH_PX+20)으로 고정 —
-              // 바로 위 코멘트 참고.
-              flexGrow: isKitStacked ? undefined : 0,
+              // 바로 위 코멘트 참고. 2026-10-28(의뢰인 요청, 6차) —
+              // isKitStacked(세로 쌓기)에서는 이 flexGrow가 "세로" 축이라
+              // (flexDirection:column) 1이어야 leftStack이 위 행의 남는
+              // 높이를 실제로 가져간다(가로 폭은 원래부터 이 div가 아니라
+              // 안쪽 레인 요소들의 maxWidth+margin:auto가 담당).
+              flexGrow: isKitStacked ? 1 : 0,
               flexShrink: isKitStacked ? undefined : 0,
               width: isKitStacked ? undefined : PRACTICE_LANE_MAX_WIDTH_PX + 20,
               minWidth: 0,
+              minHeight: 0,
             }}
           >
             {/* 2026-10-27 의뢰인 요청 — A-B 루프 상태(구간 입력·안내 문구)만 남은
@@ -1873,12 +1880,13 @@ export function PracticeCanvas({
                 gap: 'var(--space-2)',
                 maxWidth: PRACTICE_LANE_MAX_WIDTH_PX + 20,
                 margin: '0 auto',
-                // 2026-10-28(의뢰인 요청, 5차) — leftStack이 받은 "남는 높이"를
-                // 이 행이 flex:1로 가져가야, 그 안의 캔버스(아래 height:'100%')가
-                // 실제로 그만큼 늘어난다. 좁은 화면(킷 아래 스택)은 범위 밖 —
-                // 고정 400px 그대로.
-                flex: isKitStacked ? undefined : 1,
-                minHeight: isKitStacked ? undefined : 0,
+                // 2026-10-28(의뢰인 요청, 5·6차) — leftStack이 받은 "남는
+                // 높이"를 이 행이 flex:1로 가져가야, 그 안의 캔버스(아래
+                // height:'100%')가 실제로 그만큼 늘어난다. 6차부터는 좁은
+                // 화면(킷 아래 스택)도 포함(무조건 적용) — "레인 위 빈
+                // 공간만큼 레인을 더 키우고 싶다"는 요청.
+                flex: 1,
+                minHeight: 0,
               }}
             >
               <div style={{ position: 'relative', flex: 1, minWidth: 0 }}>
@@ -1890,13 +1898,14 @@ export function PracticeCanvas({
                     // 2026-10-28(의뢰인 요청) — 킷을 레인 아래가 아니라 옆(우측)에
                     // 두는 넓은 화면에서는 그만큼 생긴 세로 공간을 레인 자체를
                     // 더 길게(더 먼 미리보기) 만드는 데 쓴다.
-                    // 2026-10-28(의뢰인 요청, 5차) — "스크롤 없이 한 화면에"
-                    // 지적 — 600 고정값 대신 남는 높이를 그대로 채우도록
-                    // height:'100%'로 바꾸고(위 flex 체인 전체가 이 값을
+                    // 2026-10-28(의뢰인 요청, 5·6차) — "스크롤 없이 한 화면에",
+                    // "레인 위 빈 공간만큼 더 키우고 싶다(드럼이 안 보여도
+                    // 괜찮다)" — 600/400 고정값 대신 둘 다 남는 높이를 그대로
+                    // 채우도록 height:'100%'(위 flex 체인 전체가 이 값을
                     // 뷰포트 높이에서 역산해 전달), 극단적으로 짧은 창에서도
                     // 레인이 너무 쪼그라들지 않게 최소 300px은 보장.
-                    height: isKitStacked ? 400 : '100%',
-                    minHeight: isKitStacked ? undefined : 300,
+                    height: '100%',
+                    minHeight: 300,
                     background: 'var(--bg)',
                     border: '1px solid var(--border)',
                   }}
@@ -2153,24 +2162,40 @@ export function PracticeCanvas({
            * 맞는다" 지적 — margin:auto로 레인과 같은 중심에 오게.
            * 2026-10-28(의뢰인 요청, 4차) — 넓은 화면에서는 레인 좌측·킷 우측
            * 배치라 margin:auto(가운데 정렬) 대신 flexShrink:0(고정폭 유지)만
-           * 필요 — 세로 중앙 정렬은 위 행의 alignItems:center가 담당. */}
+           * 필요 — 세로 중앙 정렬은 위 행의 alignItems:center가 담당.
+           * 2026-10-28(의뢰인 요청, 6차) — "드럼 위치를 레인 옆 빈공간
+           * 기준으로 가운데에 두고 싶다" — 4·5차 때는 레인 열(고정폭) 바로
+           * 옆에 킷을 붙이고 그 {레인+킷} 묶음 전체를 가운데 정렬했는데,
+           * 그러면 킷이 "레인 열 바로 옆"에 붙을 뿐 "레인 오른쪽 남는
+           * 공간 전체의 가운데"는 아니었다. 레인 열(고정폭, 위)과 분리된
+           * "킷 영역" wrapper를 하나 더 둬 그 영역이 남는 폭 전부
+           * (flex:1)를 차지하고, 그 안에서 킷을 가로·세로 모두 가운데
+           * 정렬한다 — 좁은 화면(isKitStacked)에서는 이 wrapper가
+           * display:'contents'로 레이아웃에서 사라져(자식인 킷 div가 바로
+           * 위 행의 직계 자식처럼 동작) 기존 동작(레인 아래 스택)에
+           * 영향 없음. */}
           <div
             style={{
-              maxWidth: isPortraitPhone ? 160 : 320,
-              margin: isKitStacked ? '0 auto' : undefined,
-              flexShrink: 0,
-              // 2026-10-28(의뢰인 요청, 5차) — 위 행이 이제 항상 stretch라
-              // (레인 열에 전체 높이를 주기 위해) 킷도 같이 늘어나려 하는데,
-              // 킷은 정사각形 그림이라 늘어나면 안 됨 — 개별적으로 'center'로
-              // 되돌려 원래 의도(레인 열 높이 안에서 세로 중앙)를 유지한다.
-              alignSelf: isKitStacked ? undefined : 'center',
+              display: isKitStacked ? 'contents' : 'flex',
+              flex: isKitStacked ? undefined : 1,
+              minWidth: 0,
+              alignItems: isKitStacked ? undefined : 'center',
+              justifyContent: isKitStacked ? undefined : 'center',
             }}
           >
-            <KitIllustration
-              activeHandByPiece={activeHandByPiece}
-              showSticking={false}
-              pieceColor={readPieceColor}
-            />
+            <div
+              style={{
+                maxWidth: isPortraitPhone ? 160 : 320,
+                margin: isKitStacked ? '0 auto' : undefined,
+                flexShrink: 0,
+              }}
+            >
+              <KitIllustration
+                activeHandByPiece={activeHandByPiece}
+                showSticking={false}
+                pieceColor={readPieceColor}
+              />
+            </div>
           </div>
         </div>
       </div>

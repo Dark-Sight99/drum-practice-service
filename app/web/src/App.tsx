@@ -101,7 +101,14 @@ function App() {
           overflow: 'auto',
         }}
       >
-        <button style={{ flexShrink: 0 }} onClick={() => setScreen('library')}>
+        {/* 2026-10-28(의뢰인 요청, 6차) — flex column으로 바꾸면서 버튼이
+         * 기본 alignItems:stretch 때문에 가로 전체 폭으로 늘어나 버렸다
+         * ("라이브러리 버튼을 한 줄 꽉 차게 해달라는 게 아니었다" 지적) —
+         * alignSelf:flex-start로 원래 내용 크기만큼으로 되돌림. */}
+        <button
+          style={{ flexShrink: 0, alignSelf: 'flex-start' }}
+          onClick={() => setScreen('library')}
+        >
           ← 라이브러리
         </button>
         <h1 style={{ fontSize: '1.3rem', flexShrink: 0, margin: 0 }}>
