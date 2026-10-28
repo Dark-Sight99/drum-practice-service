@@ -1,0 +1,41 @@
+﻿
+=== official_video_mp3(?몃?洹쇨굅 184) ===
+  n_beats: 496
+  n_downbeats: 140
+  overall_bpm_from_beats: 90.90909090909138
+  overall_bpm_from_downbeats(x4 if 4/4): 23.076923076923066
+  early_30s_local_bpm: 90.90909090909089
+  late_30s_local_bpm: 115.38461538461311
+  drift_early_vs_late_bpm: 24.47552447552222
+  librosa_beat_track_bpm(start_bpm=100): 92.21311475409836
+  beat_vs_kick_alignment_rms_ms: 203.49053782819735
+  downbeat_vs_kick_alignment_rms_ms: 832.6223288248466
+  n_kick_onsets_used: 321
+
+=== recorded_ver(李멸퀬?? ===
+  n_beats: 493
+  n_downbeats: 127
+  overall_bpm_from_beats: 90.90909090909138
+  overall_bpm_from_downbeats(x4 if 4/4): 23.076923076923002
+  early_30s_local_bpm: 90.90909090909116
+  late_30s_local_bpm: 93.750000000002
+  drift_early_vs_late_bpm: 2.8409090909108414
+  librosa_beat_track_bpm(start_bpm=100): 92.21311475409836
+  beat_vs_kick_alignment_rms_ms: 205.7646351979369
+  downbeat_vs_kick_alignment_rms_ms: 831.0658168378244
+  n_kick_onsets_used: 320
+
+=== original_mp4(T3-42 洹쇨굅 92) ===
+  n_beats: 485
+  n_downbeats: 129
+  overall_bpm_from_beats: 90.90909090909138
+  overall_bpm_from_downbeats(x4 if 4/4): 23.076923076923002
+  early_30s_local_bpm: 90.90909090909089
+  late_30s_local_bpm: 93.74999999999784
+  drift_early_vs_late_bpm: 2.8409090909069477
+  librosa_beat_track_bpm(start_bpm=100): 92.21311475409836
+  beat_vs_kick_alignment_rms_ms: 204.82189538932147
+  downbeat_vs_kick_alignment_rms_ms: 817.3279060616578
+  n_kick_onsets_used: 321
+
+[done] C:\Users\Jaewoo\?쒕읆?곗뒿?쒕퉬??work\T3-45-hihat-detection-experiment\beat_this_vs_librosa_result.json
