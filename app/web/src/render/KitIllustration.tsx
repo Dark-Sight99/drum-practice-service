@@ -41,10 +41,20 @@ function isDashedHand(hand: Hand): boolean {
 }
 
 /** 판정선에 도달한 피스를 짧게 밝힌다(intent/08-design.md §6 "약 120ms"). */
-export function KitIllustration({ activeHandByPiece, showSticking, pieceColor }: KitIllustrationProps) {
+export function KitIllustration({
+  activeHandByPiece,
+  showSticking,
+  pieceColor,
+}: KitIllustrationProps) {
   return (
     <svg
-      viewBox="0 0 100 100"
+      // 2026-10-28(의뢰인 요청) — "드럼도 좀 짤리는 부분이 있는거 같은데" 지적—
+      // 실측해보니 사실이었다: kick(cy=82,r=18)·tom_floor(cy=82,r=17)는 각각
+      // 아래쪽 경계가 100/99이고, 점등 시 strokeWidth가 2.5라 그 절반(1.25)만큼
+      // 테두리가 viewBox 바깥으로 나가 SVG 기본 동작(overflow:hidden에 해당)으로
+      // 잘려 보였다. viewBox를 사방으로 살짝 넓혀 모든 피스에 여유를 둔다(특정
+      // 두 피스만 좌표를 조정하는 대신 — 레이아웃 §5 "원래 의도된 배치" 보존).
+      viewBox="-4 -4 108 108"
       role="img"
       aria-label="드럼킷"
       style={{ width: '100%', height: 'auto' }}

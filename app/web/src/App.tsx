@@ -78,21 +78,52 @@ function App() {
 
   if (screen === 'practice' && practiceSong) {
     return (
+      // 2026-10-28(의뢰인 요청) — "휠로 내리지 않으면 아래 문구까지 안 보인다,
+      // 드래그 없이 한 페이지에 다 보이게 노트 위치를 좀 올려도 되지 않을까" —
+      // 넓은 화면(레인/킷 좌우 배치, PracticeCanvas.tsx의 isKitStacked)에서
+      // 레인 높이를 600px 고정값으로 두니 실측 결과(1366×768처럼 흔한 노트북
+      // 해상도) 스크롤이 실제로 필요했다. 뷰포트 높이를 그대로 쓰는 대신
+      // (고정 600이 화면마다 맞거나 안 맞거나 하므로) `<main>`을 정확히
+      // 100vh로 고정하고 flex:1로 남는 높이를 PracticeCanvas에 그대로
+      // 넘겨, 그 안의 레인이 "남는 높이만큼" 스스로 늘어나게 한다 — 화면이
+      // 크면 더 길게, 작으면 그만큼 줄어들어 항상 한 화면에 맞는다.
+      // `overflow: auto`는 그래도 안 맞는 극단적으로 작은 창(레인
+      // 최소높이보다 작은 경우)의 안전망일 뿐, 평소엔 스크롤바가 안 생긴다.
       <main
-        style={{ background: 'var(--bg)', color: 'var(--text)', minHeight: '100vh', padding: 16 }}
+        style={{
+          background: 'var(--bg)',
+          color: 'var(--text)',
+          height: '100vh',
+          padding: 16,
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 'var(--space-2)',
+          overflow: 'auto',
+        }}
       >
-        <button onClick={() => setScreen('library')}>← 라이브러리</button>
-        <h1 style={{ fontSize: '1.3rem' }}>
+        {/* 2026-10-28(의뢰인 요청, 6차) — flex column으로 바꾸면서 버튼이
+         * 기본 alignItems:stretch 때문에 가로 전체 폭으로 늘어나 버렸다
+         * ("라이브러리 버튼을 한 줄 꽉 차게 해달라는 게 아니었다" 지적) —
+         * alignSelf:flex-start로 원래 내용 크기만큼으로 되돌림. */}
+        <button
+          style={{ flexShrink: 0, alignSelf: 'flex-start' }}
+          onClick={() => setScreen('library')}
+        >
+          ← 라이브러리
+        </button>
+        <h1 style={{ fontSize: '1.3rem', flexShrink: 0, margin: 0 }}>
           {practiceSong.song.title}
           {practiceSong.song.artist && (
             <span style={{ color: 'var(--text-muted)' }}> — {practiceSong.song.artist}</span>
           )}
         </h1>
-        <PracticeCanvas
-          score={practiceSong.drumScore}
-          songId={practiceSong.song.id}
-          availableAudioKinds={practiceSong.song.available_audio_kinds}
-        />
+        <div style={{ flex: 1, minHeight: 0 }}>
+          <PracticeCanvas
+            score={practiceSong.drumScore}
+            songId={practiceSong.song.id}
+            availableAudioKinds={practiceSong.song.available_audio_kinds}
+          />
+        </div>
       </main>
     )
   }

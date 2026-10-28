@@ -229,21 +229,12 @@ function formatMmSs(totalSeconds: number): string {
   return `${minutes}:${String(seconds).padStart(2, '0')}`
 }
 
-/** 폰 세로 화면 판별 — intent/04-ui-ux.md §3 "폰 세로 = 레인만(킷은 축소 아이콘)".
- * 폭<높이(세로 방향) AND 폭이 좁음(태블릿보다 작음)을 기준으로 함 — 구체 임계값은
- * work/T2-3/plan.md §가정, qa-evidence/T2-3/result.md에서 실기기로 재확인 예정. */
-function usePortraitPhoneLayout(): boolean {
-  const [isPortraitPhone, setIsPortraitPhone] = useState(
-    () => window.matchMedia('(max-width: 600px) and (orientation: portrait)').matches,
-  )
-  useEffect(() => {
-    const mq = window.matchMedia('(max-width: 600px) and (orientation: portrait)')
-    const onChange = () => setIsPortraitPhone(mq.matches)
-    mq.addEventListener('change', onChange)
-    return () => mq.removeEventListener('change', onChange)
-  }, [])
-  return isPortraitPhone
-}
+// 2026-10-28(의뢰인 요청, 7차) — 예전엔 폰 세로 화면(intent/04-ui-ux.md §3
+// "폰 세로 = 레인만, 킷은 축소 아이콘")만 킷을 작게 줄였는데, 이번 요청으로
+// "레인·킷이 나란히 들어갈 공간이 없는 화면(isKitStacked) 전부"에서 킷을
+// 메인 영역이 아니라 설정 패널(믹서 아래)로 옮기는 것으로 범위가 넓어져(아래
+// settingsPanelContent 참고), 세로/가로 방향을 따로 구분하던
+// usePortraitPhoneLayout() 훅은 더 이상 쓰이는 곳이 없어졌다 — 삭제.
 
 const SETTINGS_SIDEBAR_BREAKPOINT_QUERY = '(max-width: 900px)'
 
@@ -369,7 +360,15 @@ export function PracticeCanvas({
   // 어렵다는 재지적. T3-2 게이트 피드백 1차(실제 음원 QA)에서 이미 "1마디로
   // 하면 개별 타격이 또렷이 분리된다"고 확인된 적이 있어, 그 결론대로 기본값을
   // 1로 바꿈(조절 가능한 컨트롤 자체는 그대로 유지 — intent/04-ui-ux.md 참고).
-  barsVisible: initialBarsVisible = 1,
+  // 2026-10-28(의뢰인 요청, 6차) — "화면이 넓어서 레인이 길게 보이면 기본
+  // 2마디, 좁아서(드럼이 아래로) 레인이 짧아지면 기본 1마디로" — 위 1마디
+  // 결론은 "레인이 짧을 때"의 가독성 기준이었으므로 여전히 좁은 화면
+  // 기본값으로 유지하고, 넓은 화면(레인이 훨씬 길어짐, 아래 isKitStacked)
+  // 에서만 2로 올린다. 호출부가 명시적으로 값을 넘기면(현재는 없음) 그
+  // 값을 그대로 쓰고, 안 넘겼을 때만(undefined) 이 화면-기반 기본값을
+  // 쓴다 — 기본 매개변수 `= 1`을 없애 "명시적으로 안 넘김"을 구분 가능하게
+  // 함(아래 useState 초기화 참고).
+  barsVisible: initialBarsVisible,
   songId,
   availableAudioKinds = [],
 }: PracticeCanvasProps) {
@@ -394,7 +393,6 @@ export function PracticeCanvas({
   // 전에 즉시 막기 위함(동기 가드), state는 버튼 disabled 표시용.
   const isStartingRef = useRef(false)
   const [isStarting, setIsStarting] = useState(false)
-  const isPortraitPhone = usePortraitPhoneLayout()
   // 2026-10-28(의뢰인 요청) — 설정 패널 반응형 분기(위 useNarrowSettingsLayout
   // 코멘트 참고). 좁은 화면에서만 쓰는 열림 상태라 넓은 화면(사이드바 항상
   // 표시)에선 참조되지 않음.
@@ -566,7 +564,11 @@ export function PracticeCanvas({
   // 보이는 문제는 BPM이 아니라 이 값으로만 풀린다 — 의뢰인이 직접 겪은 문제라
   // 재생 중에도 즉시 바꿀 수 있게 둔다(BPM/루프와 달리 Transport 스케줄에
   // 영향 없는 순수 렌더링 파라미터이므로 재생 중 잠글 이유가 없음).
-  const [barsVisible, setBarsVisible] = useState(initialBarsVisible)
+  // 2026-10-28(의뢰인 요청, 6차) — 위 destructuring 코멘트 참고. 호출부가
+  // barsVisible을 명시적으로 넘겼으면 그 값, 안 넘겼으면(undefined) 현재
+  // 레이아웃(isKitStacked)에 따라 2(넓은 화면, 레인 김) 또는 1(좁은 화면,
+  // 레인 짧음)을 기본값으로 — useState 초기화 함수라 마운트 시 1회만 평가.
+  const [barsVisible, setBarsVisible] = useState(() => initialBarsVisible ?? (isKitStacked ? 1 : 2))
 
   // --- A-B 루프(REQ-04, 마디 단위, 1-기준으로 표시·내부는 0-기준) ---
   const totalBars = useMemo(() => {
@@ -1557,8 +1559,31 @@ export function PracticeCanvas({
        * 지연 보정과 같은 묶음이 더 맞다는 판단(의뢰인 지시).
        * 2026-10-28(의뢰인 요청, 2차) — 패널(Drawer/사이드바) 자체 제목이
        * "믹서"가 되면서 이 채널 볼륨 소제목과 글자가 겹쳐 "채널 볼륨"으로
-       * 구분(기능은 그대로). */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
+       * 구분(기능은 그대로).
+       * 2026-10-28(의뢰인 요청, 9차) — "드럼이 위로 너무 붙었다, 빈
+       * 공간 기준으로 중앙정렬" — 아래 킷 wrapper에 flex:1을 줘도, 그
+       * wrapper의 실제 부모가 (BPM·지연보정과 달리) 이 div라서 이 div
+       * 자체가 바깥 사이드바의 남는 높이를 받지 못하면 소용없었다
+       * (channel 볼륨+보이는 마디 수+킷을 묶어온 기존 구조). 이 div에도
+       * flex:1을 줘 바깥 사이드바(넓은 화면에서는 레인과 같은 높이로
+       * 늘어나 있음)의 남는 높이를 그대로 받고, 그 안에서 킷 wrapper의
+       * flex:1이 "채널 볼륨+보이는 마디 수를 뺀 나머지 전부"를 가져가
+       * 가운데 정렬되게 한다.
+       * Codex 모드A 지적(P3, 반영, qa-evidence/T3-50) — 이 flex:1은
+       * `!isKitStacked`(넓은 화면, 킷이 이 패널 안에 안 그려짐)에서도
+       * 똑같이 적용돼 믹서 컨트롤 아래 불필요한 빈 공간을 만들고
+       * 있었다(시각적으로 눈에 띄는 문제는 아니었지만 — 이 div엔 배경·
+       * 테두리가 없고 바깥 사이드바의 구분선만 원래부터 늘 꽉 차 있었음
+       * — 그래도 "킷이 없을 땐 늘어날 이유가 없다"는 지적이 맞아 반영).
+       * `isKitStacked`일 때만 적용. */}
+      <div
+        style={{
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 'var(--space-2)',
+          flex: isKitStacked ? 1 : undefined,
+        }}
+      >
         <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)' }}>
           <strong>채널 볼륨</strong>
           <button onClick={applyDrumlessPreset}>
@@ -1613,6 +1638,47 @@ export function PracticeCanvas({
             <option value={4}>4</option>
           </select>
         </label>
+
+        {/* 2026-10-28(의뢰인 요청, 7차) — "화면이 줄어들기 시작하면 레인이
+         * 너무 작다, 차라리 드럼을 믹서 아래 부분에 넣고 레인을 남은
+         * 공간에 가운데 정렬하면 어떨까", "믹서가 모달로 나와야 하는
+         * 화면부터는 드럼이 잘 안 보여도 된다 — 1순위는 레인" — 레인·킷이
+         * 나란히 놓일 공간이 없는 화면(isKitStacked)에서는 킷을 메인
+         * 영역(레인 아래)이 아니라 여기 설정 패널(믹서 아래)로 옮긴다.
+         * 메인 영역은 레인 하나만 남아 남는 폭·높이에 그대로 가운데
+         * 정렬되고(아래 메인 영역 JSX 참고), 넓은 사이드바에서는 항상
+         * 보이지만 Drawer로 접히는 화면(≤900px)에서는 믹서를 열어야만
+         * 보여서 "드럼이 안 보여도 된다"는 우선순위와도 자연히 맞는다. */}
+        {isKitStacked && (
+          // 2026-10-28(의뢰인 요청, 8차) — "드럼 크기를 더 키워 기존 넓은
+          // 화면에 있을 때 크기처럼, 꽉 차게" — maxWidth를 160(아이콘
+          // 수준의 작은 고정값)에서 패널 자체 너비를 그대로 채우도록
+          // width:'100%'로.
+          // 2026-10-28(의뢰인 요청, 9차) — "드럼이 위로 너무 붙었다, 빈
+          // 공간 기준으로 중앙정렬" — 넓은 사이드바는 메인 영역(레인)과
+          // 같은 높이로 늘어나 있어 믹서 컨트롤 아래 빈 공간이 꽤 남는데,
+          // 킷이 그 공간 맨 위에 붙어 있었다. 이 wrapper를 flex:1로 바꿔
+          // "보이는 마디 수" 아래 남는 세로 공간 전부를 차지하게 하고,
+          // 그 안에서 킷을 가운데(세로·가로 모두) 정렬한다. Drawer
+          // 모드에서는 이 wrapper의 부모(Drawer 내부 column)가 내용
+          // 높이만큼만 차지해 "남는 공간" 자체가 없으므로 flex:1이 할
+          // 일이 없어 기존과 동일하게 동작(회귀 없음).
+          <div
+            style={{
+              width: '100%',
+              flex: 1,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+          >
+            <KitIllustration
+              activeHandByPiece={activeHandByPiece}
+              showSticking={false}
+              pieceColor={readPieceColor}
+            />
+          </div>
+        )}
       </div>
     </>
   )
@@ -1629,7 +1695,23 @@ export function PracticeCanvas({
         // 교차축(세로) 정렬이 stretch여야 한다(둘 다 내용 높이만큼만 차지하는
         // flex-start였던 걸 변경 — 메인 영역은 이미 더 높아 실질적으로
         // 그대로고, 사이드바만 그 높이로 늘어남).
-        alignItems: isNarrowSettingsLayout ? 'flex-start' : 'stretch',
+        // 2026-10-28(의뢰인 요청, 8차) — 좁은 화면(Drawer 모드)에서
+        // "레인만 남았을 때 가운데 정렬이 안 된다" 지적 — 원인은 바로 이
+        // flex-start였다: isNarrowSettingsLayout일 때 이 루트가
+        // flexDirection:column이라 alignItems는 "가로" 축인데,
+        // flex-start면 main-column(레인을 담은 쪽)이 내용 너비만큼만
+        // 차지하고 화면 좌측에 붙어버려 레인의 margin:auto 중앙정렬이
+        // "main-column 안에서"만 의미 없이 적용됐다(main-column 자체가
+        // 이미 레인 폭만큼만이라 가운데 정렬할 여백이 없었음). 이제 항상
+        // stretch — main-column은 항상 전체 폭을 받고, "믹서" 트리거
+        // 버튼만 개별적으로 alignSelf:flex-start로 원래 크기 유지(아래).
+        alignItems: 'stretch',
+        // 2026-10-28(의뢰인 요청, 5차) — App.tsx가 이 컴포넌트를 담는
+        // wrapper를 `flex:1, minHeight:0`(남는 뷰포트 높이 전부)로 주므로,
+        // 이 루트도 그 높이를 그대로 받아야 아래 레인이 "남는 높이만큼"
+        // 늘어나는 계산이 가능하다. 좁은 화면(킷 아래로 스택)에서는 이
+        // 높이를 쓰는 자식이 없어(레인 고정 400px 그대로) 사실상 영향 없음.
+        height: '100%',
       }}
     >
       {/* 2026-10-28(의뢰인 요청) — 반응형 설정 패널: 넓은 화면(연습 레인 폭 +
@@ -1653,7 +1735,16 @@ export function PracticeCanvas({
             type="button"
             className="settings-trigger"
             onClick={() => setIsSettingsOpen(true)}
-            style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}
+            // 2026-10-28(의뢰인 요청, 8차) — 위 루트가 이제 항상 stretch라
+            // (main-column이 전체 폭을 받게 하려고) 이 버튼도 같이
+            // 늘어나려 하는데, 트리거 버튼은 원래 내용 크기만큼만이어야
+            // 함 — alignSelf로 개별 예외.
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 'var(--space-2)',
+              alignSelf: 'flex-start',
+            }}
             aria-label="믹서·설정 열기"
             title="믹서"
           >
@@ -1711,6 +1802,14 @@ export function PracticeCanvas({
           gap: 'var(--space-4)',
           flex: 1,
           minWidth: 0,
+          // Codex 모드A 지적(P2, 반영, qa-evidence/T3-50) — 이 메인 열은
+          // (넓은 화면에서) 세로로도 flex 아이템인데 minHeight가 없으면
+          // 기본값 min-height:auto가 "내용이 필요로 하는 최소 높이"를
+          // 보존해버려, 부모가 준 높이가 그보다 작아도 줄어들지 않고
+          // 넘칠 수 있다(아래 레인 행의 minHeight:0만으로는 부족 — 그
+          // 체인의 "중간 링크"인 이 요소 자체가 먼저 줄어들 수 있어야
+          // 함). 0으로 둬 부모가 준 높이만큼만 차지하게 한다.
+          minHeight: 0,
         }}
       >
         {/* 2026-10-28(의뢰인 요청) — "레인은 좌측, 드럼킷은 우측에 두면 레인을
@@ -1723,8 +1822,31 @@ export function PracticeCanvas({
           style={{
             display: 'flex',
             flexDirection: isKitStacked ? 'column' : 'row',
-            alignItems: isKitStacked ? 'stretch' : 'center',
+            // 2026-10-28(의뢰인 요청, 5차) — 항상 stretch. isKitStacked(세로
+            // 쌓기)에서는 원래부터 stretch(교차축=가로, 사이드바 구분선용).
+            // !isKitStacked(좌우 배치)에서도 stretch로 바꿔(교차축=세로)
+            // leftStack이 이 행의 전체 높이를 받게 한다 — 그래야 아래
+            // leftStack 안의 레인이 "남는 높이만큼" 늘어날 수 있다(의뢰인
+            // 요청 — 스크롤 없이 한 화면에 다 보이게).
+            alignItems: 'stretch',
+            // 2026-10-28(의뢰인 요청, 7차) — "화면이 넓어질수록 레인·킷이
+            // 동떨어지게 된다, 보이지 않는 하나의 박스에 담겼다 생각하고
+            // 같이 가운데로" — 6차의 "킷을 레인 오른쪽 남는 공간의
+            // 가운데에" 방식은 초광폭 화면에서 그 "남는 공간"이 커질수록
+            // 간격도 같이 벌어지는 부작용이 있었다. {레인, 킷}을 고정
+            // 간격(gap)으로 묶어 그 묶음 전체를 가운데 정렬하는 방식으로
+            // 되돌린다 — 화면이 아무리 넓어져도 레인-킷 간격은 항상
+            // 일정(이번엔 isKitStacked에서 킷 자체를 메인 영역에 안 그려서
+            // 그쪽엔 justifyContent가 영향 없음).
+            justifyContent: isKitStacked ? undefined : 'center',
             gap: 'var(--space-4)',
+            // 2026-10-28(의뢰인 요청, 6차) — "레인 위로 빈 공간이 있다,
+            // 드럼이 아래로 내려간 좁은 화면에서도(안 보이더라도) 레인
+            // 자체를 더 키우고 싶다" — 5차 때는 !isKitStacked(좌우 배치)만
+            // 높이를 채웠는데, 이번엔 isKitStacked(세로 쌓기, 좁은 화면)도
+            // 똑같이 남는 높이를 받게 한다(둘 다 무조건 적용).
+            flex: 1,
+            minHeight: 0,
           }}
         >
           <div
@@ -1732,8 +1854,17 @@ export function PracticeCanvas({
               display: 'flex',
               flexDirection: 'column',
               gap: 'var(--space-4)',
-              flex: isKitStacked ? undefined : 1,
+              // flex:1 대신 레인 폭(PRACTICE_LANE_MAX_WIDTH_PX+20)으로 고정 —
+              // 바로 위 코멘트 참고. 2026-10-28(의뢰인 요청, 6차) —
+              // isKitStacked(세로 쌓기)에서는 이 flexGrow가 "세로" 축이라
+              // (flexDirection:column) 1이어야 leftStack이 위 행의 남는
+              // 높이를 실제로 가져간다(가로 폭은 원래부터 이 div가 아니라
+              // 안쪽 레인 요소들의 maxWidth+margin:auto가 담당).
+              flexGrow: isKitStacked ? 1 : 0,
+              flexShrink: isKitStacked ? undefined : 0,
+              width: isKitStacked ? undefined : PRACTICE_LANE_MAX_WIDTH_PX + 20,
               minWidth: 0,
+              minHeight: 0,
             }}
           >
             {/* 2026-10-27 의뢰인 요청 — A-B 루프 상태(구간 입력·안내 문구)만 남은
@@ -1832,6 +1963,13 @@ export function PracticeCanvas({
                 gap: 'var(--space-2)',
                 maxWidth: PRACTICE_LANE_MAX_WIDTH_PX + 20,
                 margin: '0 auto',
+                // 2026-10-28(의뢰인 요청, 5·6차) — leftStack이 받은 "남는
+                // 높이"를 이 행이 flex:1로 가져가야, 그 안의 캔버스(아래
+                // height:'100%')가 실제로 그만큼 늘어난다. 6차부터는 좁은
+                // 화면(킷 아래 스택)도 포함(무조건 적용) — "레인 위 빈
+                // 공간만큼 레인을 더 키우고 싶다"는 요청.
+                flex: 1,
+                minHeight: 0,
               }}
             >
               <div style={{ position: 'relative', flex: 1, minWidth: 0 }}>
@@ -1843,7 +1981,14 @@ export function PracticeCanvas({
                     // 2026-10-28(의뢰인 요청) — 킷을 레인 아래가 아니라 옆(우측)에
                     // 두는 넓은 화면에서는 그만큼 생긴 세로 공간을 레인 자체를
                     // 더 길게(더 먼 미리보기) 만드는 데 쓴다.
-                    height: isKitStacked ? 400 : 600,
+                    // 2026-10-28(의뢰인 요청, 5·6차) — "스크롤 없이 한 화면에",
+                    // "레인 위 빈 공간만큼 더 키우고 싶다(드럼이 안 보여도
+                    // 괜찮다)" — 600/400 고정값 대신 둘 다 남는 높이를 그대로
+                    // 채우도록 height:'100%'(위 flex 체인 전체가 이 값을
+                    // 뷰포트 높이에서 역산해 전달), 극단적으로 짧은 창에서도
+                    // 레인이 너무 쪼그라들지 않게 최소 300px은 보장.
+                    height: '100%',
+                    minHeight: 300,
                     background: 'var(--bg)',
                     border: '1px solid var(--border)',
                   }}
@@ -1979,7 +2124,13 @@ export function PracticeCanvas({
                   aria-label="일시정지"
                   onClick={handlePause}
                 >
-                  <Pause size={22} aria-hidden="true" />
+                  {/* 2026-10-28(의뢰인 요청, 8차) — "재생·일시정지 버튼
+                   * 내부색도 검은색으로, 지금은 외곽만 검은색" — lucide
+                   * 아이콘은 기본이 stroke(윤곽선)만 그려 속이 비어
+                   * 보였다. fill="currentColor"로 아이콘 색(이 버튼의
+                   * color: var(--bg), 어두운 톤)을 채우기 색으로도 써서
+                   * 꽉 찬 모양으로. */}
+                  <Pause size={22} aria-hidden="true" fill="currentColor" />
                 </button>
               ) : (
                 <button
@@ -1991,7 +2142,12 @@ export function PracticeCanvas({
                   onClick={handlePlay}
                   disabled={isStarting || audioTracksLoading}
                 >
-                  <Play size={22} aria-hidden="true" style={{ marginLeft: 2 }} />
+                  <Play
+                    size={22}
+                    aria-hidden="true"
+                    fill="currentColor"
+                    style={{ marginLeft: 2 }}
+                  />
                 </button>
               )}
               <button
@@ -2083,37 +2239,47 @@ export function PracticeCanvas({
                 textAlign: 'center',
               }}
             >
-              🎧 블루투스 이어폰은 싱크가 밀릴 수 있어요 — 왼쪽 믹서의 오디오 지연 보정으로
-              맞춰보세요.
+              {/* 2026-10-28(의뢰인 요청, 9차) — "두 줄로 나누자" — 기존엔
+               * em dash로 한 문장처럼 이어 쓰고 줄바꿈은 폭에 따라
+               * 자동으로 맡겼는데, 명시적으로 두 문장을 분리해 달라는
+               * 요청 — <br />로 항상 이 지점에서 줄바꿈. */}
+              🎧 블루투스 이어폰은 싱크가 밀릴 수 있어요
+              <br />
+              왼쪽 믹서의 오디오 지연 보정으로 맞춰보세요.
             </p>
           </div>
 
-          {/* 2026-10-28(의뢰인 요청) — 오디오 지연 보정·믹서·보이는 마디 수는 위
-           * settingsPanelContent(왼쪽 사이드바/Drawer)로 이동 — 킷 그림만 여기
-           * 메인 영역에 남긴다. 킷 그림은 "지금 쳐야 할 위치"를 실시간으로
-           * 보여주는 항상-표시 정보라 설정이 아님(의뢰인이 설정으로 꼽은 건
-           * BPM·오디오 지연 보정·믹서·보이는 마디 수뿐 — 위 목록 참고).
-           * T3-11(2026-10-25, 의뢰인 피드백 "폰 세로에서 드럼킷이 안 보여") —
-           * 세로 폰에서는 폭만 축소(160px, 넓은 화면은 320px)해 "축소 아이콘"에
-           * 가깝게 맞춘다(원래 의도, intent/04-ui-ux.md §3).
-           * 2026-10-28(의뢰인 요청, 2차) — "드럼+문구랑 레인이랑 정렬이 안
-           * 맞는다" 지적 — margin:auto로 레인과 같은 중심에 오게.
-           * 2026-10-28(의뢰인 요청, 4차) — 넓은 화면에서는 레인 좌측·킷 우측
-           * 배치라 margin:auto(가운데 정렬) 대신 flexShrink:0(고정폭 유지)만
-           * 필요 — 세로 중앙 정렬은 위 행의 alignItems:center가 담당. */}
-          <div
-            style={{
-              maxWidth: isPortraitPhone ? 160 : 320,
-              margin: isKitStacked ? '0 auto' : undefined,
-              flexShrink: 0,
-            }}
-          >
-            <KitIllustration
-              activeHandByPiece={activeHandByPiece}
-              showSticking={false}
-              pieceColor={readPieceColor}
-            />
-          </div>
+          {/* 2026-10-28(의뢰인 요청, 7차) — "믹서가 모달로 나와야 하는
+           * 화면부터는 드럼이 잘 안 보여도 된다, 1순위는 레인" — 킷을
+           * 메인 영역에 그리는 건 레인·킷이 나란히 들어갈 공간이 있는
+           * 넓은 화면(!isKitStacked)에서만. 좁은 화면(isKitStacked)에서는
+           * 아예 여기서 그리지 않는다 — 대신 위
+           * settingsPanelContent(믹서 아래)로 옮겨졌다(그쪽 코멘트 참고).
+           * 그 결과 메인 영역엔 레인만 남아 남는 폭·높이 전부를 레인이
+           * 쓰며 자연히 가운데 정렬된다("레인을 남는 공간에 가운데
+           * 정렬로" 요청 그대로).
+           * (이전 이력) T3-11(2026-10-25) 세로 폰 축소(160px)/넓은 화면
+           * 320px, 2026-10-28 2차 margin:auto 중앙정렬, 4차 좌우 배치
+           * 전환 시 flexShrink:0 — 전부 이 조건부 렌더링 안으로 유지.
+           * 2026-10-28(의뢰인 요청, 7차) — alignSelf:'center'로 위 행의
+           * stretch를 상쇄해 레인 열 높이 안에서 세로 중앙(round 5와 동일
+           * 방식으로 복귀 — round 6의 "남는 공간 전체의 가운데" 방식은
+           * 초광폭 화면에서 레인과 너무 멀어진다는 재지적으로 되돌림). */}
+          {!isKitStacked && (
+            <div
+              style={{
+                maxWidth: 320,
+                flexShrink: 0,
+                alignSelf: 'center',
+              }}
+            >
+              <KitIllustration
+                activeHandByPiece={activeHandByPiece}
+                showSticking={false}
+                pieceColor={readPieceColor}
+              />
+            </div>
+          )}
         </div>
       </div>
     </div>
