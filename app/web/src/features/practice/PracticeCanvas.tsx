@@ -1627,7 +1627,11 @@ export function PracticeCanvas({
          * 보이지만 Drawer로 접히는 화면(≤900px)에서는 믹서를 열어야만
          * 보여서 "드럼이 안 보여도 된다"는 우선순위와도 자연히 맞는다. */}
         {isKitStacked && (
-          <div style={{ maxWidth: 160, margin: '0 auto' }}>
+          // 2026-10-28(의뢰인 요청, 8차) — "드럼 크기를 더 키워 기존 넓은
+          // 화면에 있을 때 크기처럼, 꽉 차게" — maxWidth를 160(아이콘
+          // 수준의 작은 고정값)에서 패널 자체 너비를 그대로 채우도록
+          // width:'100%'로.
+          <div style={{ width: '100%' }}>
             <KitIllustration
               activeHandByPiece={activeHandByPiece}
               showSticking={false}
@@ -1651,7 +1655,17 @@ export function PracticeCanvas({
         // 교차축(세로) 정렬이 stretch여야 한다(둘 다 내용 높이만큼만 차지하는
         // flex-start였던 걸 변경 — 메인 영역은 이미 더 높아 실질적으로
         // 그대로고, 사이드바만 그 높이로 늘어남).
-        alignItems: isNarrowSettingsLayout ? 'flex-start' : 'stretch',
+        // 2026-10-28(의뢰인 요청, 8차) — 좁은 화면(Drawer 모드)에서
+        // "레인만 남았을 때 가운데 정렬이 안 된다" 지적 — 원인은 바로 이
+        // flex-start였다: isNarrowSettingsLayout일 때 이 루트가
+        // flexDirection:column이라 alignItems는 "가로" 축인데,
+        // flex-start면 main-column(레인을 담은 쪽)이 내용 너비만큼만
+        // 차지하고 화면 좌측에 붙어버려 레인의 margin:auto 중앙정렬이
+        // "main-column 안에서"만 의미 없이 적용됐다(main-column 자체가
+        // 이미 레인 폭만큼만이라 가운데 정렬할 여백이 없었음). 이제 항상
+        // stretch — main-column은 항상 전체 폭을 받고, "믹서" 트리거
+        // 버튼만 개별적으로 alignSelf:flex-start로 원래 크기 유지(아래).
+        alignItems: 'stretch',
         // 2026-10-28(의뢰인 요청, 5차) — App.tsx가 이 컴포넌트를 담는
         // wrapper를 `flex:1, minHeight:0`(남는 뷰포트 높이 전부)로 주므로,
         // 이 루트도 그 높이를 그대로 받아야 아래 레인이 "남는 높이만큼"
@@ -1681,7 +1695,16 @@ export function PracticeCanvas({
             type="button"
             className="settings-trigger"
             onClick={() => setIsSettingsOpen(true)}
-            style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}
+            // 2026-10-28(의뢰인 요청, 8차) — 위 루트가 이제 항상 stretch라
+            // (main-column이 전체 폭을 받게 하려고) 이 버튼도 같이
+            // 늘어나려 하는데, 트리거 버튼은 원래 내용 크기만큼만이어야
+            // 함 — alignSelf로 개별 예외.
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 'var(--space-2)',
+              alignSelf: 'flex-start',
+            }}
             aria-label="믹서·설정 열기"
             title="믹서"
           >
@@ -2061,7 +2084,13 @@ export function PracticeCanvas({
                   aria-label="일시정지"
                   onClick={handlePause}
                 >
-                  <Pause size={22} aria-hidden="true" />
+                  {/* 2026-10-28(의뢰인 요청, 8차) — "재생·일시정지 버튼
+                   * 내부색도 검은색으로, 지금은 외곽만 검은색" — lucide
+                   * 아이콘은 기본이 stroke(윤곽선)만 그려 속이 비어
+                   * 보였다. fill="currentColor"로 아이콘 색(이 버튼의
+                   * color: var(--bg), 어두운 톤)을 채우기 색으로도 써서
+                   * 꽉 찬 모양으로. */}
+                  <Pause size={22} aria-hidden="true" fill="currentColor" />
                 </button>
               ) : (
                 <button
@@ -2073,7 +2102,12 @@ export function PracticeCanvas({
                   onClick={handlePlay}
                   disabled={isStarting || audioTracksLoading}
                 >
-                  <Play size={22} aria-hidden="true" style={{ marginLeft: 2 }} />
+                  <Play
+                    size={22}
+                    aria-hidden="true"
+                    fill="currentColor"
+                    style={{ marginLeft: 2 }}
+                  />
                 </button>
               )}
               <button
