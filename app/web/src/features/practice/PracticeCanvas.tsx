@@ -1422,9 +1422,6 @@ export function PracticeCanvas({
           disabled={isPlaying || isPaused}
           style={{ width: 56 }}
         />
-        {/* 2026-10-27(의뢰인 요청) — "원곡 120, 100%" 대신 악보 빠르기말
-         * 표기(이미지 참고: "♩= 107")처럼 간결하게. */}
-        <span style={{ color: 'var(--text-muted)' }}>♩= {playbackBpm}</span>
       </label>
 
       {/* 2026-10-28(의뢰인 요청) — 오디오 지연 보정: 사용자가 자기 출력 장치의
@@ -1471,10 +1468,13 @@ export function PracticeCanvas({
        * 2026-10-28(의뢰인 요청)로 설정 패널 쪽으로 다시 옮긴다 — 킷 그림은
        * "지금 쳐야 할 위치"를 보여주는 항상-표시 정보라 설정이 아니지만,
        * 믹서·보이는 마디 수는 "한 번 맞춰두고 계속 쓰는" 설정이라 BPM·오디오
-       * 지연 보정과 같은 묶음이 더 맞다는 판단(의뢰인 지시). */}
+       * 지연 보정과 같은 묶음이 더 맞다는 판단(의뢰인 지시).
+       * 2026-10-28(의뢰인 요청, 2차) — 패널(Drawer/사이드바) 자체 제목이
+       * "믹서"가 되면서 이 채널 볼륨 소제목과 글자가 겹쳐 "채널 볼륨"으로
+       * 구분(기능은 그대로). */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)' }}>
-          <strong>믹서</strong>
+          <strong>채널 볼륨</strong>
           <button onClick={applyDrumlessPreset}>
             🥁 원곡 드럼 {mixerState.stem_drums.volume === 0 ? '켜기' : '끄기'}
           </button>
@@ -1545,23 +1545,32 @@ export function PracticeCanvas({
        * 펼쳐두고, 좁은 화면은 평소엔 숨겨뒀다가 이 버튼으로 왼쪽에서
        * 슬라이드로 열리는 Drawer를 쓴다(위 useNarrowSettingsLayout 코멘트
        * 참고). 콘텐츠는 둘 다 settingsPanelContent로 동일 — 레이아웃만
-       * 다르다. */}
+       * 다르다.
+       * 2026-10-28(의뢰인 요청, 2차) — "내가 직접 만질 수 있는 영역(설정)과
+       * 연주하는 영역을 색으로 구분해달라" — Drawer와 같은 --surface 카드
+       * 배경·테두리·둥근 모서리를 사이드바에도 둬서, 레인·킷처럼 --bg 배경
+       * 그대로인 연주 영역과 한눈에 구분되게 한다. "믹서" 버튼이 너무
+       * 투박해 보인다는 지적엔 테두리 없는 .settings-trigger 스타일로,
+       * 아이콘도 톱니바퀴(Settings)만 남기고 라벨을 "설정"에서 "믹서"로
+       * 바꿈(실제로 여는 게 믹서를 포함한 패널이라 더 직관적 — 아래 Drawer
+       * title도 통일). */}
       {isNarrowSettingsLayout ? (
         <>
           <button
             type="button"
+            className="settings-trigger"
             onClick={() => setIsSettingsOpen(true)}
             style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}
-            aria-label="설정 열기"
-            title="설정"
+            aria-label="믹서·설정 열기"
+            title="믹서"
           >
             <Settings size={16} aria-hidden="true" />
-            설정
+            믹서
           </button>
           <Drawer
             open={isSettingsOpen}
             onClose={() => setIsSettingsOpen(false)}
-            title="설정"
+            title="믹서"
             side="left"
           >
             <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
@@ -1577,8 +1586,16 @@ export function PracticeCanvas({
             display: 'flex',
             flexDirection: 'column',
             gap: 'var(--space-4)',
+            background: 'var(--surface)',
+            border: '1px solid var(--border)',
+            borderRadius: 'var(--radius-control)',
+            padding: 'var(--space-4)',
           }}
         >
+          <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
+            <Settings size={16} aria-hidden="true" />
+            <strong>믹서</strong>
+          </div>
           {settingsPanelContent}
         </div>
       )}
@@ -1701,14 +1718,34 @@ export function PracticeCanvas({
                 border: '1px solid var(--border)',
               }}
             />
+            {/* 2026-10-28(의뢰인 요청) — 악보 빠르기말 표기(이미지 참고: 악보
+             * 좌측 상단의 "♩=184")처럼, BPM을 레인 좌측 상단에 표시 — 그 전엔
+             * 설정 패널의 BPM 입력 옆에만 있던 걸 레인 쪽으로 옮김(같은
+             * playbackBpm을 읽으므로 설정에서 BPM을 바꾸면 그대로 반영됨). */}
+            <div
+              style={{
+                position: 'absolute',
+                top: 4,
+                left: 4,
+                padding: '2px 6px',
+                background: 'rgba(0,0,0,0.6)',
+                color: 'var(--text)',
+                fontSize: '0.85em',
+                borderRadius: 4,
+                pointerEvents: 'none',
+              }}
+            >
+              ♩= {playbackBpm}
+            </div>
             {/* T3-14(진단용 임시, 원인 특정되면 제거) — 실기기 FPS를 화면에 바로
-             * 보여줘 영상 녹화 없이도 숫자로 바로 보고 가능하게. */}
+             * 보여줘 영상 녹화 없이도 숫자로 바로 보고 가능하게. 위 BPM
+             * 표시(2026-10-28 추가)와 겹치지 않게 오른쪽 상단으로. */}
             {fpsDisplay !== null && (
               <div
                 style={{
                   position: 'absolute',
                   top: 4,
-                  left: 4,
+                  right: 4,
                   padding: '2px 6px',
                   background: 'rgba(0,0,0,0.6)',
                   color:
@@ -1880,10 +1917,24 @@ export function PracticeCanvas({
          * 아니라 출력 장치 자체의 특성이라 코드로 "고칠" 수는 없고, 상시 노출
          * 안내문 + 수동 보정값(아래)으로 대응. 재생 버튼 바로 아래, 상시 노출
          * (모달/토스트로 한 번만 보여주면 나중에 다시 못 봄 — 기기를 바꿔
-         * 접속할 때마다 다시 알아야 하는 정보라 상시 노출이 맞다고 판단). */}
-        <p style={{ color: 'var(--text-muted)', fontSize: '0.85em', margin: 0 }}>
-          🎧 블루투스 이어폰은 싱크가 밀릴 수 있습니다. 가능하면 스피커나 유선 이어폰을
-          사용해주세요.
+         * 접속할 때마다 다시 알아야 하는 정보라 상시 노출이 맞다고 판단).
+         * 2026-10-28(의뢰인 요청, 2차) — 오디오 지연 보정 기능이 생겼으니
+         * "스피커·유선을 쓰라"는 회피 안내보다 "믹서에서 직접 보정할 수
+         * 있다"는 해결 안내를 먼저 준다(스피커·유선은 그래도 더 정확하니
+         * 보조 설명으로 남김). 레인과 같은 중앙 정렬(아래 maxWidth+margin
+         * auto, 레인 박스와 동일한 폭 — 의뢰인 지적: "드럼+문구랑 레인이랑
+         * 정렬이 안 맞는다"). */}
+        <p
+          style={{
+            color: 'var(--text-muted)',
+            fontSize: '0.85em',
+            margin: '0 auto',
+            maxWidth: PRACTICE_LANE_MAX_WIDTH_PX + 20,
+            textAlign: 'center',
+          }}
+        >
+          🎧 블루투스 이어폰은 싱크가 밀릴 수 있어요 — 왼쪽 믹서의 "오디오 지연 보정"으로 맞출 수
+          있습니다(스피커·유선 이어폰은 지연이 적어 더 정확해요).
         </p>
 
         {/* 2026-10-28(의뢰인 요청) — 오디오 지연 보정·믹서·보이는 마디 수는 위
@@ -1893,8 +1944,10 @@ export function PracticeCanvas({
          * BPM·오디오 지연 보정·믹서·보이는 마디 수뿐 — 위 목록 참고).
          * T3-11(2026-10-25, 의뢰인 피드백 "폰 세로에서 드럼킷이 안 보여") —
          * 세로 폰에서는 폭만 축소(160px, 넓은 화면은 320px)해 "축소 아이콘"에
-         * 가깝게 맞춘다(원래 의도, intent/04-ui-ux.md §3). */}
-        <div style={{ maxWidth: isPortraitPhone ? 160 : 320 }}>
+         * 가깝게 맞춘다(원래 의도, intent/04-ui-ux.md §3).
+         * 2026-10-28(의뢰인 요청, 2차) — "드럼+문구랑 레인이랑 정렬이 안
+         * 맞는다" 지적 — margin:auto로 레인과 같은 중심에 오게. */}
+        <div style={{ maxWidth: isPortraitPhone ? 160 : 320, margin: '0 auto' }}>
           <KitIllustration
             activeHandByPiece={activeHandByPiece}
             showSticking={false}

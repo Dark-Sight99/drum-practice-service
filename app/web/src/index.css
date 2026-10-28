@@ -44,6 +44,23 @@ button:disabled {
   opacity: 0.5;
 }
 
+/* 2026-10-28(의뢰인 요청) — "설정 버튼이 너무 투박해 보인다" 지적 — 연습 화면의
+ * 믹서/설정 패널을 여는 트리거(톱니바퀴 아이콘 + "믹서")는 위 전역 button
+ * 테두리·배경을 지우고 아이콘+글자만 남긴다(버튼처럼 안 보이되 클릭은 그대로
+ * 되는 <button>). */
+.settings-trigger {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--text-muted);
+  transition: color 200ms ease;
+}
+.settings-trigger:hover:not(:disabled) {
+  background: none;
+  border-color: transparent;
+  color: var(--text);
+}
+
 /* 체크박스·라디오·range 슬라이더·file은 네이티브 모양을 그대로 둔다(둘러싼
  * 라벨/트랙 쪽에서 이미 따로 간격을 잡고 있어 텍스트 입력창처럼 박스를
  * 씌우면 오히려 깨져 보임). */
