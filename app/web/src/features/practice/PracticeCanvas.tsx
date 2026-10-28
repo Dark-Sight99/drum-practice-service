@@ -1394,6 +1394,55 @@ export function PracticeCanvas({
     }
   }
 
+  // 2026-10-29(의뢰인 요청) — 키보드 단축키: 스페이스바로 재생/일시정지
+  // 토글, 좌/우 화살표로 10초 되감기/빨리감기(위 버튼들과 동일한 동작을
+  // 그대로 호출 — handlePause()/handleSeek()는 세션이 없으면 내부에서
+  // 조용히 무시하므로 버튼의 disabled 조건과 자연히 맞음). BPM·오디오
+  // 지연 보정 등 입력 요소에 포커스가 있을 때는 가로채지 않는다 —
+  // 안 그러면 스페이스바가 입력칸에 공백을 못 치거나, 화살표가 그 입력
+  // 요소의 기본 동작(예: 숫자칸 커서 이동)과 충돌한다.
+  useEffect(() => {
+    function handleKeyDown(e: KeyboardEvent) {
+      const target = e.target
+      if (
+        target instanceof HTMLElement &&
+        (target.tagName === 'INPUT' ||
+          target.tagName === 'SELECT' ||
+          target.tagName === 'TEXTAREA' ||
+          target.isContentEditable)
+      ) {
+        return
+      }
+      if (e.code === 'Space') {
+        e.preventDefault() // 기본 동작(페이지 스크롤) 방지
+        if (isPlaying) {
+          handlePause()
+        } else if (!isStarting && !audioTracksLoading) {
+          // 재생 버튼의 disabled 조건(isStarting || audioTracksLoading)과
+          // 동일하게 가드 — 세션 시작 중이거나 오디오 트랙을 아직 불러오는
+          // 중이면 스페이스바로도 새 재생을 시작하지 않는다.
+          void handlePlay()
+        }
+      } else if (e.code === 'ArrowLeft') {
+        e.preventDefault()
+        handleSeek(-10)
+      } else if (e.code === 'ArrowRight') {
+        e.preventDefault()
+        handleSeek(10)
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+    // oxlint(exhaustive-deps)가 handlePlay/handlePause/handleSeek를
+    // "매 렌더 바뀜"으로 경고하는데, 이 셋은 useCallback 없이 매 렌더
+    // 새로 만들어지는 평범한 함수라 실제로 맞는 지적이다 — 하지만 뺐을 때
+    // 더 나쁘다: handleSeek()는 playbackBpm 등 state를 클로저로 직접 읽는데
+    // (ref가 아님), 의존성 배열에서 빼면 effect가 재구독을 안 해 키보드
+    // 단축키가 그 state의 구 버전을 계속 참조하는 stale closure 버그가
+    // 생긴다. 셋 다 포함해 매 렌더 리스너를 다시 거는 쪽을 택함 — 키보드
+    // 리스너 재등록은 가벼운 연산이라 성능상 문제 없음.
+  }, [isPlaying, isStarting, audioTracksLoading, handlePlay, handlePause, handleSeek])
+
   // T3-9(REQ-04, 의뢰인 피드백) — "여기서 시작"/"여기까지": 악보 없이
   // 귀로만 들으며 A-B 루프를 지정할 수 있게, 지금 재생 위치를 가장 가까운
   // 마디로 변환해 바로 loopStartBar1/loopEndBar1에 반영한다. 숫자 입력칸과
