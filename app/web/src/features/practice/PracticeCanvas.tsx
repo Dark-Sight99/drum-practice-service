@@ -1568,8 +1568,22 @@ export function PracticeCanvas({
        * flex:1을 줘 바깥 사이드바(넓은 화면에서는 레인과 같은 높이로
        * 늘어나 있음)의 남는 높이를 그대로 받고, 그 안에서 킷 wrapper의
        * flex:1이 "채널 볼륨+보이는 마디 수를 뺀 나머지 전부"를 가져가
-       * 가운데 정렬되게 한다. */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)', flex: 1 }}>
+       * 가운데 정렬되게 한다.
+       * Codex 모드A 지적(P3, 반영, qa-evidence/T3-50) — 이 flex:1은
+       * `!isKitStacked`(넓은 화면, 킷이 이 패널 안에 안 그려짐)에서도
+       * 똑같이 적용돼 믹서 컨트롤 아래 불필요한 빈 공간을 만들고
+       * 있었다(시각적으로 눈에 띄는 문제는 아니었지만 — 이 div엔 배경·
+       * 테두리가 없고 바깥 사이드바의 구분선만 원래부터 늘 꽉 차 있었음
+       * — 그래도 "킷이 없을 땐 늘어날 이유가 없다"는 지적이 맞아 반영).
+       * `isKitStacked`일 때만 적용. */}
+      <div
+        style={{
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 'var(--space-2)',
+          flex: isKitStacked ? 1 : undefined,
+        }}
+      >
         <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)' }}>
           <strong>채널 볼륨</strong>
           <button onClick={applyDrumlessPreset}>
