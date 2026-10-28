@@ -1,0 +1,52 @@
+2026-10-28 10:21:42 Extracting staffline and symbols
+
+A module that was compiled using NumPy 1.x cannot be run in
+NumPy 2.5.4 as it may crash. To support both 1.x and 2.x
+versions of NumPy, modules must be compiled with NumPy 2.0.
+Some module may need to rebuild instead e.g. with 'pybind11>=2.12'.
+
+If you are a user of the module, the easiest solution will be to
+downgrade to 'numpy<2' or try to upgrade the affected module.
+We expect that some modules will need time to support NumPy 2.
+
+Traceback (most recent call last):  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "C:\Users\Jaewoo\드럼연습서비스\app\server\.venv\Scripts\oemer.exe\__main__.py", line 5, in <module>
+    sys.exit(main())
+  File "C:\Users\Jaewoo\드럼연습서비스\app\server\.venv\Lib\site-packages\oemer\ete.py", line 287, in main
+    mxl_path = extract(args)
+  File "C:\Users\Jaewoo\드럼연습서비스\app\server\.venv\Lib\site-packages\oemer\ete.py", line 131, in extract
+    staff, symbols, stems_rests, notehead, clefs_keys = generate_pred(str(img_path), use_tf=args.use_tf)
+  File "C:\Users\Jaewoo\드럼연습서비스\app\server\.venv\Lib\site-packages\oemer\ete.py", line 51, in generate_pred
+    staff_symbols_map, _ = inference(
+  File "C:\Users\Jaewoo\드럼연습서비스\app\server\.venv\Lib\site-packages\oemer\inference.py", line 48, in inference
+    import onnxruntime as rt
+  File "C:\Users\Jaewoo\드럼연습서비스\app\server\.venv\Lib\site-packages\onnxruntime\__init__.py", line 23, in <module>
+    from onnxruntime.capi._pybind_state import ExecutionMode  # noqa: F401
+  File "C:\Users\Jaewoo\드럼연습서비스\app\server\.venv\Lib\site-packages\onnxruntime\capi\_pybind_state.py", line 32, in <module>
+    from .onnxruntime_pybind11_state import *  # noqa
+AttributeError: _ARRAY_API not found
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "C:\Users\Jaewoo\드럼연습서비스\app\server\.venv\Scripts\oemer.exe\__main__.py", line 5, in <module>
+  File "C:\Users\Jaewoo\드럼연습서비스\app\server\.venv\Lib\site-packages\oemer\ete.py", line 287, in main
+    mxl_path = extract(args)
+               ^^^^^^^^^^^^^
+  File "C:\Users\Jaewoo\드럼연습서비스\app\server\.venv\Lib\site-packages\oemer\ete.py", line 131, in extract
+    staff, symbols, stems_rests, notehead, clefs_keys = generate_pred(str(img_path), use_tf=args.use_tf)
+                                                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Jaewoo\드럼연습서비스\app\server\.venv\Lib\site-packages\oemer\ete.py", line 51, in generate_pred
+    staff_symbols_map, _ = inference(
+                           ^^^^^^^^^^
+  File "C:\Users\Jaewoo\드럼연습서비스\app\server\.venv\Lib\site-packages\oemer\inference.py", line 48, in inference
+    import onnxruntime as rt
+  File "C:\Users\Jaewoo\드럼연습서비스\app\server\.venv\Lib\site-packages\onnxruntime\__init__.py", line 57, in <module>
+    raise import_capi_exception
+  File "C:\Users\Jaewoo\드럼연습서비스\app\server\.venv\Lib\site-packages\onnxruntime\__init__.py", line 23, in <module>
+    from onnxruntime.capi._pybind_state import ExecutionMode  # noqa: F401
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Jaewoo\드럼연습서비스\app\server\.venv\Lib\site-packages\onnxruntime\capi\_pybind_state.py", line 32, in <module>
+    from .onnxruntime_pybind11_state import *  # noqa
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ImportError

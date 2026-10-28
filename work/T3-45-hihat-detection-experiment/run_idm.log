@@ -1,0 +1,18 @@
+W1028 00:38:02.213000 32988 Lib\site-packages\torch\utils\flop_counter.py:29] triton not found; flop counting will not work for triton kernels
+[device] cuda
+C:\Users\Jaewoo\드럼연습서비스\app\server\.venv\Lib\site-packages\torchaudio\functional\functional.py:581: UserWarning: At least one mel filterbank has all zero values. The value for `n_mels` (128) may be set too high. Or, the value for `n_freqs` (513) may be set too low.
+  warnings.warn(
+Loading model: idm-44-train-kits
+Found checkpoint at: pretrained\idm-44-train-kits\checkpoints\val-epoch=518-global_step=0.ckpt
+[model] loaded: idm-44-train-kits
+[separate] 완료
+[stem CY_CR] onsets=0, rms_dbfs=None
+[stem CY_RD] onsets=0, rms_dbfs=None
+[stem HH_CHH] onsets=0, rms_dbfs=None
+[stem HH_OHH] onsets=0, rms_dbfs=None
+[stem KD] onsets=55, rms_dbfs=-52.90258578726881
+[stem SD] onsets=128, rms_dbfs=-57.270987359681406
+[stem TT_HFT] onsets=559, rms_dbfs=-41.60859795407231
+[stem TT_HMT] onsets=10, rms_dbfs=-64.17867166952976
+[stem TT_LMT] onsets=154, rms_dbfs=-53.50972379220462
+[done] 결과 저장: C:\Users\Jaewoo\드럼연습서비스\work\T3-45-hihat-detection-experiment\variant_idm_result.json

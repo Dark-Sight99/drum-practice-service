@@ -1,0 +1,170 @@
+{
+  "kick": {
+    "independent_onset_ground_truth": {
+      "onset_count": 341,
+      "rms_dbfs": -41.47631197743638
+    },
+    "variant_B_isolated_default_gain": {
+      "by_class": {
+        "kick": 317,
+        "snare": 0,
+        "hihat_closed": 0,
+        "tom_mid": 0,
+        "crash": 0
+      },
+      "unmapped_pitches": {},
+      "total": 317
+    },
+    "variant_C_isolated_boosted_gain": {
+      "by_class": {
+        "kick": 317,
+        "snare": 0,
+        "hihat_closed": 0,
+        "tom_mid": 0,
+        "crash": 0
+      },
+      "unmapped_pitches": {},
+      "total": 317
+    }
+  },
+  "snare": {
+    "independent_onset_ground_truth": {
+      "onset_count": 302,
+      "rms_dbfs": -46.82307316375101
+    },
+    "variant_B_isolated_default_gain": {
+      "by_class": {
+        "kick": 0,
+        "snare": 59,
+        "hihat_closed": 0,
+        "tom_mid": 159,
+        "crash": 0
+      },
+      "unmapped_pitches": {},
+      "total": 218
+    },
+    "variant_C_isolated_boosted_gain": {
+      "by_class": {
+        "kick": 0,
+        "snare": 59,
+        "hihat_closed": 0,
+        "tom_mid": 159,
+        "crash": 0
+      },
+      "unmapped_pitches": {},
+      "total": 218
+    }
+  },
+  "toms": {
+    "independent_onset_ground_truth": {
+      "onset_count": 173,
+      "rms_dbfs": -58.13719810028627
+    },
+    "variant_B_isolated_default_gain": {
+      "by_class": {
+        "kick": 0,
+        "snare": 0,
+        "hihat_closed": 0,
+        "tom_mid": 7,
+        "crash": 0
+      },
+      "unmapped_pitches": {},
+      "total": 7
+    },
+    "variant_C_isolated_boosted_gain": {
+      "by_class": {
+        "kick": 0,
+        "snare": 0,
+        "hihat_closed": 0,
+        "tom_mid": 7,
+        "crash": 0
+      },
+      "unmapped_pitches": {},
+      "total": 7
+    }
+  },
+  "hh": {
+    "independent_onset_ground_truth": {
+      "onset_count": 967,
+      "rms_dbfs": -79.61612157773968
+    },
+    "variant_B_isolated_default_gain": {
+      "by_class": {
+        "kick": 0,
+        "snare": 0,
+        "hihat_closed": 0,
+        "tom_mid": 0,
+        "crash": 0
+      },
+      "unmapped_pitches": {},
+      "total": 0
+    },
+    "variant_C_isolated_boosted_gain": {
+      "by_class": {
+        "kick": 0,
+        "snare": 0,
+        "hihat_closed": 0,
+        "tom_mid": 0,
+        "crash": 0
+      },
+      "unmapped_pitches": {},
+      "total": 0
+    }
+  },
+  "ride": {
+    "independent_onset_ground_truth": {
+      "onset_count": 994,
+      "rms_dbfs": -83.1543707166212
+    },
+    "variant_B_isolated_default_gain": {
+      "by_class": {
+        "kick": 401,
+        "snare": 115,
+        "hihat_closed": 35,
+        "tom_mid": 0,
+        "crash": 0
+      },
+      "unmapped_pitches": {},
+      "total": 551
+    },
+    "variant_C_isolated_boosted_gain": {
+      "by_class": {
+        "kick": 401,
+        "snare": 115,
+        "hihat_closed": 35,
+        "tom_mid": 0,
+        "crash": 0
+      },
+      "unmapped_pitches": {},
+      "total": 551
+    }
+  },
+  "crash": {
+    "independent_onset_ground_truth": {
+      "onset_count": 1640,
+      "rms_dbfs": -80.12563353972331
+    },
+    "variant_B_isolated_default_gain": {
+      "by_class": {
+        "kick": 0,
+        "snare": 0,
+        "hihat_closed": 0,
+        "tom_mid": 0,
+        "crash": 0
+      },
+      "unmapped_pitches": {},
+      "total": 0
+    },
+    "variant_C_isolated_boosted_gain": {
+      "by_class": {
+        "kick": 0,
+        "snare": 0,
+        "hihat_closed": 0,
+        "tom_mid": 0,
+        "crash": 0
+      },
+      "unmapped_pitches": {},
+      "total": 0
+    }
+  }
+}

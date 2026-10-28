@@ -1,0 +1,38 @@
+{
+  "CY_CR": {
+    "onset_count": 0,
+    "rms_dbfs": null
+  },
+  "CY_RD": {
+    "onset_count": 0,
+    "rms_dbfs": null
+  },
+  "HH_CHH": {
+    "onset_count": 0,
+    "rms_dbfs": null
+  },
+  "HH_OHH": {
+    "onset_count": 0,
+    "rms_dbfs": null
+  },
+  "KD": {
+    "onset_count": 55,
+    "rms_dbfs": -52.90258578726881
+  },
+  "SD": {
+    "onset_count": 128,
+    "rms_dbfs": -57.270987359681406
+  },
+  "TT_HFT": {
+    "onset_count": 559,
+    "rms_dbfs": -41.60859795407231
+  },
+  "TT_HMT": {
+    "onset_count": 10,
+    "rms_dbfs": -64.17867166952976
+  },
+  "TT_LMT": {
+    "onset_count": 154,
+    "rms_dbfs": -53.50972379220462
+  }
+}

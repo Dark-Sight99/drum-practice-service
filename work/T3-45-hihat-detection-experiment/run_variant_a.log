@@ -1,0 +1,11 @@
+[device] cuda
+[separate] 기존 분리 결과 재사용: C:\Users\Jaewoo\드럼연습서비스\work\T3-45-hihat-detection-experiment\separated\htdemucs\pretender\drums.wav
+[variant target_-18dBFS] normalize_loudness 시작
+[variant target_-18dBFS] done - total_notes=703, hihat_closed count=0
+[variant target_-12dBFS] normalize_loudness 시작
+[variant target_-12dBFS] done - total_notes=703, hihat_closed count=0
+[variant target_-8dBFS] normalize_loudness 시작
+[variant target_-8dBFS] done - total_notes=703, hihat_closed count=0
+[variant target_-4dBFS] normalize_loudness 시작
+[variant target_-4dBFS] done - total_notes=703, hihat_closed count=0
+[done] 결과 저장: C:\Users\Jaewoo\드럼연습서비스\work\T3-45-hihat-detection-experiment\variant_a_result.json

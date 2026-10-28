@@ -36,6 +36,18 @@ test-results/
 # 사용자 악보에서 추출된 실제 악보 콘텐츠(저작권 있을 수 있음) — 통계·분석 결과(result.md)만 커밋, 원본 추출물은 제외
 qa-evidence/T0-3/out/
 
+# T3-45 실험: 분리된 오디오·클론한 서드파티 저장소·체크포인트(수백MB~GB) — 스크립트와
+# 요약 결과(JSON/MD)만 커밋, 원본 산출물은 제외
+work/T3-45-hihat-detection-experiment/separated/
+work/T3-45-hihat-detection-experiment/separated_compare/
+work/T3-45-hihat-detection-experiment/drumsep_stems/
+work/T3-45-hihat-detection-experiment/idm_output/
+work/T3-45-hihat-detection-experiment/adtstr_output/
+work/T3-45-hihat-detection-experiment/adt_str_repo/
+work/T3-45-hihat-detection-experiment/idm_repo/
+work/T0-3-oemer-comparison/test_run.log
+work/T3-45-hihat-detection-experiment/*.wav
+
 # OS
 .DS_Store
 Thumbs.db

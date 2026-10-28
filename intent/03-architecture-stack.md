@@ -91,6 +91,9 @@
 | pypdfium2 | Apache-2.0/BSD-3-Clause(확인됨, 2026-10-23) | 가능 | 가능 |
 | ADTOF-pytorch(대안 채보 모델) | **없음**(LICENSE 파일·GitHub 라이선스 필드 모두 미표시, Q-15) | Phase 0 내부 테스트만 | 불가(해소 전) — Phase 3 채택 전 재확인 필요 |
 | imageio-ffmpeg(파이썬 패키지, T3-16-feedback 음악 스템 MP3 압축용) | 패키지 자체 BSD-2-Clause(PyPI 확인, 2026-10-26). **단, 번들된 ffmpeg 실행파일은 별도** — 직접 실행해 빌드 설정 확인 결과 `--enable-gpl --enable-version3`(GPLv3) | 가능(배포 아님, 서버에서 돌리기만 함) | ⚠ GPLv3 — 바이너리를 포함해 배포 시 소스 공개 의무 등 재검토 필요(의뢰인 승인, 2026-10-26: 개인 사용 단계는 진행, 상업 배포 전 재확인) |
+| DrumSep(aufr33-jarredou MDX23C 6-stem 분리 모델, T3-45 하이햇 검출 개선 실험용) | **출처마다 다르게 표기됨**(2026-10-28 조사) — CC BY-NC-ND/CC BY-NC-SA 추정, 원 제작자 공식 LICENSE 미확인. mdxnet-infer(추론 패키지)는 MIT | **실험(work/T3-45-hihat-detection-experiment/)에서만 사용, 운영 코드엔 미채택** | 불가(비상업 추정) — 채택 전 라이선스 재확인 필수 |
+| ADT_STR(72.3M 파라미터 Transformer 채보 모델, T3-45 실험용) | CC BY-SA 4.0(README 확인, 2026-10-28) | **실험(work/T3-45-hihat-detection-experiment/)에서만 사용, 운영 코드엔 미채택** | 조건부 가능(동일 라이선스 공개 의무, Share-Alike) — 채택 시 재검토 |
+| Inverse Drum Machine(idm-44-train-kits, T3-45 실험용) | Apache-2.0(GitHub 확인, 2026-10-28) | **실험(work/T3-45-hihat-detection-experiment/)에서만 사용, 운영 코드엔 미채택** | 가능(고지) |
 | @formkit/auto-animate(라이브러리 화면 카드 삭제/추가 슬라이드 transition, T3-36) | MIT(확인됨, 2026-10-27, `npm view` `license` 필드) | 가능 | 가능(고지) |
 | 기타 | 추가 시 기록 | | |
 

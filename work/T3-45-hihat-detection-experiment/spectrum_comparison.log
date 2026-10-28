@@ -1,0 +1,26 @@
+
+=== original_mp4 (sr=44100) ===
+  0-300Hz(저음역): 97.128%
+  300-2kHz(중음역): 2.203%
+  2k-6kHz(하이햇 하단): 0.644%
+  6k-12kHz(하이햇 상단): 0.025%
+  12k-20kHz(심벌 상단): 0.000%
+  20kHz+: 0.000%
+
+=== recorded_ver (sr=44100) ===
+  0-300Hz(저음역): 91.807%
+  300-2kHz(중음역): 2.559%
+  2k-6kHz(하이햇 하단): 2.487%
+  6k-12kHz(하이햇 상단): 2.278%
+  12k-20kHz(심벌 상단): 0.869%
+  20kHz+: 0.000%
+
+=== official_video_mp3 (sr=44100) ===
+  0-300Hz(저음역): 91.160%
+  300-2kHz(중음역): 2.614%
+  2k-6kHz(하이햇 하단): 2.880%
+  6k-12kHz(하이햇 상단): 2.651%
+  12k-20kHz(심벌 상단): 0.694%
+  20kHz+: 0.000%
+
+[done] C:\Users\Jaewoo\드럼연습서비스\work\T3-45-hihat-detection-experiment\spectrum_comparison_result.json

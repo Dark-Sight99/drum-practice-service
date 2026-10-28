@@ -1,0 +1,22 @@
+file	result	error_tail
+IMG_7943	FAIL	AssertionError: 4
+IMG_7944	FAIL	IndexError: too many indices for array: array is 1-dimensional, but 2 were indexed
+IMG_7945	FAIL	IndexError: too many indices for array: array is 1-dimensional, but 2 were indexed
+IMG_7946	FAIL	IndexError: too many indices for array: array is 1-dimensional, but 2 were indexed
+IMG_7947	OK	
+IMG_7948	FAIL	IndexError: too many indices for array: array is 1-dimensional, but 2 were indexed
+IMG_7949	FAIL	IndexError: too many indices for array: array is 1-dimensional, but 2 were indexed
+IMG_7950	FAIL	IndexError: too many indices for array: array is 1-dimensional, but 2 were indexed
+IMG_7951	FAIL	IndexError: too many indices for array: array is 1-dimensional, but 2 were indexed
+IMG_7952	FAIL	IndexError: too many indices for array: array is 1-dimensional, but 2 were indexed
+IMG_7953	FAIL	IndexError: too many indices for array: array is 1-dimensional, but 2 were indexed
+IMG_7954	OK	
+IMG_7955	FAIL	IndexError: too many indices for array: array is 1-dimensional, but 2 were indexed
+IMG_7956	FAIL	IndexError: too many indices for array: array is 1-dimensional, but 2 were indexed
+IMG_7957	FAIL	IndexError: too many indices for array: array is 1-dimensional, but 2 were indexed
+IMG_7958	FAIL	IndexError: too many indices for array: array is 1-dimensional, but 2 were indexed
+IMG_7959	FAIL	IndexError: too many indices for array: array is 1-dimensional, but 2 were indexed
+IMG_7960	FAIL	IndexError: too many indices for array: array is 1-dimensional, but 2 were indexed
+IMG_7961	FAIL	IndexError: too many indices for array: array is 1-dimensional, but 2 were indexed
+IMG_7962	FAIL	IndexError: too many indices for array: array is 1-dimensional, but 2 were indexed
+IMG_7963	OK	

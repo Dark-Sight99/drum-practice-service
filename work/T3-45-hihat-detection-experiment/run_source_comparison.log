@@ -1,0 +1,24 @@
+[device] cuda
+
+=== original_mp4: pretender.mp4 ===
+[separate] Demucs 분리 시작
+[separate] 완료: C:\Users\Jaewoo\드럼연습서비스\work\T3-45-hihat-detection-experiment\separated_compare\original_mp4\htdemucs\pretender\drums.wav
+Loading PyTorch weights from: C:\Users\Jaewoo\드럼연습서비스\data\repos\ADTOF-pytorch\src\adtof_pytorch\data\adtof_frame_rnn_pytorch_weights.pth
+Loading PyTorch weights from: C:\Users\Jaewoo\드럼연습서비스\data\repos\ADTOF-pytorch\src\adtof_pytorch\data\adtof_frame_rnn_pytorch_weights.pth
+[original_mp4] total_notes=741, hihat={'threshold': 0.22, 'max_activation': 0.08068487048149109, 'note_count': 0}
+
+=== recorded_ver: pretender_녹화버전.mp4 ===
+[separate] Demucs 분리 시작
+[separate] 완료: C:\Users\Jaewoo\드럼연습서비스\work\T3-45-hihat-detection-experiment\separated_compare\recorded_ver\htdemucs\pretender_녹화버전\drums.wav
+Loading PyTorch weights from: C:\Users\Jaewoo\드럼연습서비스\data\repos\ADTOF-pytorch\src\adtof_pytorch\data\adtof_frame_rnn_pytorch_weights.pth
+Loading PyTorch weights from: C:\Users\Jaewoo\드럼연습서비스\data\repos\ADTOF-pytorch\src\adtof_pytorch\data\adtof_frame_rnn_pytorch_weights.pth
+[recorded_ver] total_notes=1820, hihat={'threshold': 0.22, 'max_activation': 0.9118772745132446, 'note_count': 1202}
+
+=== official_video_mp3: Official髭男dism - Pretender［Official Video］ (1).mp3 ===
+[separate] Demucs 분리 시작
+[separate] 완료: C:\Users\Jaewoo\드럼연습서비스\work\T3-45-hihat-detection-experiment\separated_compare\official_video_mp3\htdemucs\Official髭男dism - Pretender［Official Video］ (1)\drums.wav
+Loading PyTorch weights from: C:\Users\Jaewoo\드럼연습서비스\data\repos\ADTOF-pytorch\src\adtof_pytorch\data\adtof_frame_rnn_pytorch_weights.pth
+Loading PyTorch weights from: C:\Users\Jaewoo\드럼연습서비스\data\repos\ADTOF-pytorch\src\adtof_pytorch\data\adtof_frame_rnn_pytorch_weights.pth
+[official_video_mp3] total_notes=1802, hihat={'threshold': 0.22, 'max_activation': 0.9170171618461609, 'note_count': 1184}
+
+[done] 결과 저장: C:\Users\Jaewoo\드럼연습서비스\work\T3-45-hihat-detection-experiment\source_comparison_result.json

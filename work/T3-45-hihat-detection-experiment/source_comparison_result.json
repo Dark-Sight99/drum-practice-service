@@ -1,0 +1,95 @@
+{
+  "original_mp4": {
+    "file": "C:\\Users\\Jaewoo\\드럼연습서비스\\음원\\pretender.mp4",
+    "total_notes": 741,
+    "by_class": {
+      "kick": {
+        "threshold": 0.22,
+        "max_activation": 0.7748249173164368,
+        "note_count": 321
+      },
+      "snare": {
+        "threshold": 0.24,
+        "max_activation": 0.8513216972351074,
+        "note_count": 115
+      },
+      "tom": {
+        "threshold": 0.32,
+        "max_activation": 0.7899450063705444,
+        "note_count": 305
+      },
+      "hihat": {
+        "threshold": 0.22,
+        "max_activation": 0.08068487048149109,
+        "note_count": 0
+      },
+      "crash": {
+        "threshold": 0.3,
+        "max_activation": 0.006606076844036579,
+        "note_count": 0
+      }
+    }
+  },
+  "recorded_ver": {
+    "file": "C:\\Users\\Jaewoo\\드럼연습서비스\\음원\\pretender_녹화버전.mp4",
+    "total_notes": 1820,
+    "by_class": {
+      "kick": {
+        "threshold": 0.22,
+        "max_activation": 0.9220536351203918,
+        "note_count": 320
+      },
+      "snare": {
+        "threshold": 0.24,
+        "max_activation": 0.9197854399681091,
+        "note_count": 248
+      },
+      "tom": {
+        "threshold": 0.32,
+        "max_activation": 0.8462933897972107,
+        "note_count": 35
+      },
+      "hihat": {
+        "threshold": 0.22,
+        "max_activation": 0.9118772745132446,
+        "note_count": 1202
+      },
+      "crash": {
+        "threshold": 0.3,
+        "max_activation": 0.8182085752487183,
+        "note_count": 15
+      }
+    }
+  },
+  "official_video_mp3": {
+    "file": "C:\\Users\\Jaewoo\\드럼연습서비스\\음원\\Official髭男dism - Pretender［Official Video］ (1).mp3",
+    "total_notes": 1802,
+    "by_class": {
+      "kick": {
+        "threshold": 0.22,
+        "max_activation": 0.9214226603507996,
+        "note_count": 321
+      },
+      "snare": {
+        "threshold": 0.24,
+        "max_activation": 0.9239413142204285,
+        "note_count": 250
+      },
+      "tom": {
+        "threshold": 0.32,
+        "max_activation": 0.8468908667564392,
+        "note_count": 31
+      },
+      "hihat": {
+        "threshold": 0.22,
+        "max_activation": 0.9170171618461609,
+        "note_count": 1184
+      },
+      "crash": {
+        "threshold": 0.3,
+        "max_activation": 0.8037019968032837,
+        "note_count": 16
+      }
+    }
+  }
+}

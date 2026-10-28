@@ -1,0 +1,109 @@
+{
+  "official_video_mp3(외부근거 184)": {
+    "hihat_n": 1184,
+    "dominant_hihat_ioi_ms": 157.5,
+    "candidates": {
+      "60": {
+        "hihat_subdivision_n": 8,
+        "hihat_err": 0.2563,
+        "kick_grid_misalign": 0.989,
+        "snare_grid_misalign": 0.9656
+      },
+      "80": {
+        "hihat_subdivision_n": 4,
+        "hihat_err": 0.1905,
+        "kick_grid_misalign": 0.9907,
+        "snare_grid_misalign": 0.9922
+      },
+      "100": {
+        "hihat_subdivision_n": 4,
+        "hihat_err": 0.0476,
+        "kick_grid_misalign": 0.9939,
+        "snare_grid_misalign": 0.9931
+      },
+      "120": {
+        "hihat_subdivision_n": 3,
+        "hihat_err": 0.0882,
+        "kick_grid_misalign": 0.939,
+        "snare_grid_misalign": 0.9883
+      },
+      "150": {
+        "hihat_subdivision_n": 3,
+        "hihat_err": 0.1834,
+        "kick_grid_misalign": 0.9888,
+        "snare_grid_misalign": 0.9902
+      },
+      "184": {
+        "hihat_subdivision_n": 2,
+        "hihat_err": 0.0352,
+        "kick_grid_misalign": 0.6617,
+        "snare_grid_misalign": 0.4784
+      },
+      "220": {
+        "hihat_subdivision_n": 2,
+        "hihat_err": 0.1342,
+        "kick_grid_misalign": 0.99,
+        "snare_grid_misalign": 0.9889
+      }
+    },
+    "chosen_bpm": 184,
+    "reason": "하이햇 간격 기반 최소 오차(err=0.0352)"
+  },
+  "recorded_ver(참고용, 정답 미상)": {
+    "hihat_n": 1202,
+    "dominant_hihat_ioi_ms": 157.5,
+    "candidates": {
+      "60": {
+        "hihat_subdivision_n": 8,
+        "hihat_err": 0.2563,
+        "kick_grid_misalign": 0.9861,
+        "snare_grid_misalign": 0.9707
+      },
+      "80": {
+        "hihat_subdivision_n": 4,
+        "hihat_err": 0.1905,
+        "kick_grid_misalign": 0.9933,
+        "snare_grid_misalign": 0.9967
+      },
+      "100": {
+        "hihat_subdivision_n": 4,
+        "hihat_err": 0.0476,
+        "kick_grid_misalign": 0.9901,
+        "snare_grid_misalign": 0.988
+      },
+      "120": {
+        "hihat_subdivision_n": 3,
+        "hihat_err": 0.0882,
+        "kick_grid_misalign": 0.9434,
+        "snare_grid_misalign": 0.9684
+      },
+      "150": {
+        "hihat_subdivision_n": 3,
+        "hihat_err": 0.1834,
+        "kick_grid_misalign": 0.9962,
+        "snare_grid_misalign": 0.9892
+      },
+      "184": {
+        "hihat_subdivision_n": 2,
+        "hihat_err": 0.0352,
+        "kick_grid_misalign": 0.6636,
+        "snare_grid_misalign": 0.4707
+      },
+      "220": {
+        "hihat_subdivision_n": 2,
+        "hihat_err": 0.1342,
+        "kick_grid_misalign": 0.9885,
+        "snare_grid_misalign": 0.9764
+      }
+    },
+    "chosen_bpm": 184,
+    "reason": "하이햇 간격 기반 최소 오차(err=0.0352)"
+  },
+  "original_mp4(T3-42 손글씨 악보 근거 92)": {
+    "hihat_n": 0,
+    "dominant_hihat_ioi_ms": null,
+    "candidates": {},
+    "chosen_bpm": null,
+    "reason": "하이햇 온셋 부족 — 보정 불가(안전망으로 기존 방식 유지해야 함)"
+  }
+}
