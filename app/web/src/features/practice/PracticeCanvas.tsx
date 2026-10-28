@@ -219,6 +219,16 @@ function readPieceColor(piece: DrumPiece): string {
   return getComputedStyle(document.documentElement).getPropertyValue(varName).trim() || '#fff'
 }
 
+/** 2026-10-28(의뢰인 요청) — 노래 진행 시간 표시용 "분:초" 포맷(초는 항상
+ * 2자리, 분은 1자리부터 — 시간 단위는 범위 밖: 연습 음원이 몇 시간씩 가는
+ * 경우는 없음). */
+function formatMmSs(totalSeconds: number): string {
+  const clamped = Math.max(0, Math.round(totalSeconds))
+  const minutes = Math.floor(clamped / 60)
+  const seconds = clamped % 60
+  return `${minutes}:${String(seconds).padStart(2, '0')}`
+}
+
 /** 폰 세로 화면 판별 — intent/04-ui-ux.md §3 "폰 세로 = 레인만(킷은 축소 아이콘)".
  * 폭<높이(세로 방향) AND 폭이 좁음(태블릿보다 작음)을 기준으로 함 — 구체 임계값은
  * work/T2-3/plan.md §가정, qa-evidence/T2-3/result.md에서 실기기로 재확인 예정. */
@@ -396,6 +406,12 @@ export function PracticeCanvas({
   // (예: 재생 전 초기 위치 0초에 틱 0 노트가 있으면 처음부터 켜진 채로 보임).
   // isPlaying을 ref로도 들고 있어 루프 안에서 "재생 중일 때만" 점등을 계산한다.
   const isPlayingRef = useRef(false)
+  // 2026-10-28(의뢰인 요청) — "일시정지했을 때 진행바가 0%인 것처럼 사라진다"
+  // 버그 수정용. 위 isPlayingRef와 같은 이유(rAF 루프는 state가 아니라 ref를
+  // 읽음)로 "일시정지 중"도 별도 ref로 들고 있는다 — isPlayingRef만으로는
+  // "정지(위치 0으로 리셋)"와 "일시정지(그 위치에 고정)"를 구분할 수 없어
+  // 진행바 계산(아래 rAF 루프)이 둘을 똑같이 "멈춤"으로 취급해 버렸다.
+  const isPausedRef = useRef(false)
 
   // --- BPM(REQ-04: 원곡 대비 50%~150%) ---
   const minBpm = Math.max(1, Math.round(score.meta.bpm * 0.5))
@@ -852,6 +868,10 @@ export function PracticeCanvas({
   // style.height를 매 프레임 직접 쓴다(한 엘리먼트의 한 CSS 속성만 바뀌는
   // DOM 쓰기라 VDOM diff·리렌더 없음 — 오히려 기존 setState보다 가벼움).
   const progressBarRef = useRef<HTMLDivElement>(null)
+  // 2026-10-28(의뢰인 요청) — "노래 진행중인 분초를 나타낼 수 있으면 좋겠어"
+  // — 위 progressBarRef와 같은 이유(매 프레임 갱신, React state 안 거침)로
+  // textContent를 직접 DOM에 쓴다.
+  const timeDisplayRef = useRef<HTMLDivElement>(null)
   // T3-3(REQ-04) — 오디오 트랙 리싱크 폴링 스로틀(위 TRACK_RESYNC_INTERVAL_MS).
   const lastTrackResyncAtRef = useRef(0)
 
@@ -958,7 +978,15 @@ export function PracticeCanvas({
       // barSeconds/songStartSeconds는 위에서 렌더러 호출용으로 이미 계산해 재사용.
       const activeLoop = loopRef.current
       let rawPercent = 0
-      if (isPlayingRef.current) {
+      // 2026-10-28(의뢰인 요청) — "일시정지했을 때 진행바가 0%인 것처럼
+      // 사라진다" 지적. 원래 isPlayingRef.current만 봤는데, 그러면
+      // "정지"(Transport.stop() — 위치 0으로 리셋)와 "일시정지"
+      // (Transport.pause() — 그 위치에 고정, 위 clock.ts 코멘트 참고)를
+      // 똑같이 "멈춤"으로 취급해 둘 다 0%로 그려버렸다. 일시정지 중엔
+      // positionSeconds가 멈춘 그 값을 그대로 유지하므로(clock.ts 확인),
+      // 같은 공식을 그대로 써도 올바른 진행률이 나온다 — isPausedRef도
+      // 함께 봐서 그 경우만 추가로 계산하게 한다.
+      if (isPlayingRef.current || isPausedRef.current) {
         if (activeLoop) {
           const loopStartSeconds = songStartSeconds + barSeconds * activeLoop.startBar
           const loopEndSeconds = songStartSeconds + barSeconds * activeLoop.endBar
@@ -975,6 +1003,17 @@ export function PracticeCanvas({
       const clampedPercent = Math.min(100, Math.max(0, rawPercent))
       if (progressBarRef.current) {
         progressBarRef.current.style.height = `${clampedPercent}%`
+      }
+      // 2026-10-28(의뢰인 요청) — "노래 진행중인 분초를 나타낼 수 있으면
+      // 좋겠어" — 위 진행바와 달리 재생/일시정지/정지 전부에서 그대로
+      // positionSeconds에서 계산(정지 땐 0초, 일시정지 땐 고정된 그 값이라
+      // 별도 게이트가 필요 없음). 곡 전체 대비(루프 중에도 절대 위치) —
+      // 진행바는 루프 중엔 "루프 구간 안에서"로 바뀌지만(위 코멘트), 분초는
+      // "이 곡의 몇 분 몇 초"라는 절대적인 정보라 루프 여부와 무관하게 둔다.
+      if (timeDisplayRef.current) {
+        const elapsedSeconds = Math.max(0, positionSeconds - songStartSeconds)
+        const totalSeconds = barSeconds * totalBars
+        timeDisplayRef.current.textContent = `${formatMmSs(Math.min(elapsedSeconds, totalSeconds))} / ${formatMmSs(totalSeconds)}`
       }
       rafIdRef.current = requestAnimationFrame(loop)
     }
@@ -1021,6 +1060,7 @@ export function PracticeCanvas({
     autoStopTimerIdRef.current = null
     autoStopRemainingMsRef.current = null
     autoStopScheduledAtRef.current = null
+    isPausedRef.current = false
     setIsPaused(false)
     if (!playbackRef.current) return
     playbackRef.current.handle.stop()
@@ -1061,6 +1101,7 @@ export function PracticeCanvas({
     playbackRef.current.metronome.stopRinging()
     pauseAutoStopTimer()
     isPlayingRef.current = false
+    isPausedRef.current = true
     setIsPlaying(false)
     setIsPaused(true)
   }
@@ -1079,6 +1120,7 @@ export function PracticeCanvas({
     if (isPaused) {
       const session = playbackRef.current
       if (!session) {
+        isPausedRef.current = false
         setIsPaused(false)
         return
       }
@@ -1089,6 +1131,7 @@ export function PracticeCanvas({
         if (playbackRef.current?.handle === session.handle) stopPlayback()
       })
       isPlayingRef.current = true
+      isPausedRef.current = false
       setIsPlaying(true)
       setIsPaused(false)
       return
@@ -1819,6 +1862,24 @@ export function PracticeCanvas({
               }}
             />
           </div>
+        </div>
+
+        {/* 2026-10-28(의뢰인 요청) — "노래 진행중인 분초를 나타낼 수 있으면
+         * 좋겠어" — 레인 바로 아래, 레인과 같은 중앙 정렬(기존 블루투스
+         * 안내문과 같은 폭·정렬 패턴 재사용). 값 자체는 위 rAF 루프가
+         * timeDisplayRef에 매 프레임 직접 씀(progressBarRef와 같은 이유). */}
+        <div
+          ref={timeDisplayRef}
+          style={{
+            color: 'var(--text-muted)',
+            fontSize: '0.85em',
+            fontFamily: 'monospace',
+            margin: '0 auto',
+            maxWidth: PRACTICE_LANE_MAX_WIDTH_PX + 20,
+            textAlign: 'center',
+          }}
+        >
+          0:00 / 0:00
         </div>
 
         {/* 2026-10-27 의뢰인 요청 — 재생 컨트롤(10초전/재생/10초후/리셋)을
