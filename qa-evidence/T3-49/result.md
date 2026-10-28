@@ -63,5 +63,16 @@
    `0:00 / 4:50`로 정상 복귀 확인(정지와 일시정지가 서로 다르게 동작함을
    증명 — 정지만 0으로 리셋, 일시정지는 유지).
 
+## Codex 모드A 검수
+`task-mvs6v1p8-boyxu8` — 판정 **APPROVE**("No actionable issue found").
+`isPausedRef`가 `setIsPaused`의 모든 전이 지점에서 일관되게 갱신됨,
+`isPlayingRef`/`isPausedRef`가 둘 다 false인 경우는 정지·셋업 상태로
+타당함, 진행률 계산이 루프·비루프 둘 다 고정된 Transport 위치를 올바르게
+사용함, 분:초 표시도 같은 위치값을 읽고 곡 길이로 클램프됨,
+`stopPlayback()`이 다음 애니메이션 프레임이 읽기 전에 Transport를 먼저
+멈춤, `formatMmSs` 포맷터의 장시간 동작도 문서화된 범위와 일치함 — 확인.
+(검수 프롬프트 전달 중 Bash 도구 환경 오류로 서브에이전트 경유 시도가
+실패해, 직접 PowerShell로 `codex-companion.mjs task`를 호출해 우회함.)
+
 ## 남은 작업
-- Codex 모드A 검수 요청 예정 → APPROVE 후 `main` 병합.
+- (완료) Codex 모드A APPROVE → `main` 병합.
