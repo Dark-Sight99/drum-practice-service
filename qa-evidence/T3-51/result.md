@@ -49,5 +49,18 @@
    `aria-label` 그대로 "재생") 분초도 `0:00` 그대로임을 확인(단축키가
    가로채지 않고 입력 요소의 기본 동작에 양보함).
 
+## Codex 모드A 검수
+`task-mvs9pa85-2jbjn3` — 판정 **APPROVE**("No actionable issue found").
+`handleSeek`가 `playbackBpm`·`score`·`isPaused`를 컴포넌트 state에서
+직접 읽으므로 effect 의존성 배열에 포함한 게 stale 값을 막는 올바른
+선택임을 확인. 입력 요소 가드가 세 단축키 전부보다 먼저 실행됨 확인.
+스페이스바의 `preventDefault()`가 재생 가드보다 먼저 실행되고, keydown의
+기본 동작을 막는 것 자체가 버튼의 네이티브 활성화(스페이스 keyup 시
+포커스된 버튼 클릭)도 함께 막아 버튼에 포커스가 있을 때 중복 토글이
+안 생김을 확인(Claude 내장 브라우저로도 재생 버튼에 포커스를 직접 준
+뒤 스페이스바 1회 입력 → 정확히 1번만 토글됨을 실측 확인 — 코드
+분석과 실측 둘 다 일치). `handlePlay`/`handlePause`/`handleSeek` 자체는
+무변경 확인.
+
 ## 남은 작업
-- Codex 모드A 검수 요청 예정 → APPROVE 후 `main` 병합.
+- (완료) Codex 모드A APPROVE → `main` 병합.
