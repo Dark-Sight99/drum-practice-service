@@ -1462,6 +1462,22 @@ export function PracticeCanvas({
           style={{ width: 64 }}
         />
         <span style={{ color: 'var(--text-muted)' }}>ms</span>
+        {/* 2026-10-28(의뢰인 요청, 3차) — "기본값이 몇인지 모른다"는 지적 —
+         * 기본값(보정 없음, 0ms)으로 바로 되돌리는 아이콘. 편집 중(draft)
+         * 이었다면 그 draft도 같이 지워 입력창이 즉시 0으로 보이게 한다. */}
+        <button
+          type="button"
+          className="settings-trigger"
+          onClick={() => {
+            setAudioLatencyCompensationMs(0)
+            setIsEditingLatency(false)
+          }}
+          disabled={isPlaying || isPaused}
+          aria-label="오디오 지연 보정 기본값(0ms)으로 재설정"
+          title="기본값(0ms)으로 재설정"
+        >
+          <RotateCcw size={14} aria-hidden="true" />
+        </button>
       </label>
 
       {/* T3-4 게이트 피드백 1차(2026-10-25)로 믹서를 킷 그림 옆에 뒀던 것을
