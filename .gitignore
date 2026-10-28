@@ -47,6 +47,7 @@ work/T3-45-hihat-detection-experiment/adt_str_repo/
 work/T3-45-hihat-detection-experiment/idm_repo/
 work/T0-3-oemer-comparison/test_run.log
 work/T3-45-hihat-detection-experiment/*.wav
+work/T3-45-hihat-detection-experiment/beat_this_checkpoints/
 
 # OS
 .DS_Store
