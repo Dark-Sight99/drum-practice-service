@@ -258,6 +258,30 @@ function useNarrowSettingsLayout(): boolean {
   return isNarrow
 }
 
+const KIT_STACKED_BREAKPOINT_QUERY = '(max-width: 1199px)'
+
+/** 2026-10-28(의뢰인 요청) — "레인은 좌측, 드럼킷은 우측에 두면 레인을 세로로
+ * 더 길게 쓸 수 있지 않을까" — 넓은 화면에서는 노트 레인(+진행바·재생
+ * 컨트롤·블루투스 안내)을 좌측 열로, 드럼킷 그림을 우측 열로 나란히 두고,
+ * 화면이 좁아지면(의뢰인 요청대로) 지금처럼 킷을 레인 아래로 내린다.
+ * `useNarrowSettingsLayout`(왼쪽 사이드바/Drawer 분기, 900px)과는 다른
+ * 축의 질문이라 별도 훅으로 둔다 — 둘 다 켜진 상태(사이드바 320 + 레인
+ * 420 + 킷 320 + 간격)가 한 행에 들어가는 최소 폭 기준 어림값(다른
+ * 브레이크포인트들과 같은 성격의 추정치 — 실기기 QA로 재확인 예정,
+ * intent/07-open-questions.md에 기록). */
+function useStackedKitLayout(): boolean {
+  const [isStacked, setIsStacked] = useState(
+    () => window.matchMedia(KIT_STACKED_BREAKPOINT_QUERY).matches,
+  )
+  useEffect(() => {
+    const mq = window.matchMedia(KIT_STACKED_BREAKPOINT_QUERY)
+    const onChange = () => setIsStacked(mq.matches)
+    mq.addEventListener('change', onChange)
+    return () => mq.removeEventListener('change', onChange)
+  }, [])
+  return isStacked
+}
+
 // Codex 모드A 지적(T3-29 리뷰 C-001, 반영) — T3-28에서 믹서 저장이 곡별이
 // 아니라 계정 전체 자원이 됐는데, 이 저장 파이프라인(아래 scheduleMixerSave
 // 등)은 여전히 컴포넌트 인스턴스별 useRef(savingRef/pendingSaveRef/
@@ -366,6 +390,9 @@ export function PracticeCanvas({
   // 표시)에선 참조되지 않음.
   const isNarrowSettingsLayout = useNarrowSettingsLayout()
   const [isSettingsOpen, setIsSettingsOpen] = useState(false)
+  // 2026-10-28(의뢰인 요청) — 레인/킷 좌우 배치 분기(위 useStackedKitLayout
+  // 코멘트 참고).
+  const isKitStacked = useStackedKitLayout()
   // 재생 중인 핸들·보이스를 들고 있다가 정지/언마운트 시 반드시 정리한다 —
   // 안 그러면 Transport에 예약된 이벤트가 남아 있다가 재생을 다시 시작했을 때
   // 이미 폐기된(또는 아직 로드 전인) 버퍼로 Player.start()를 호출해 실제로
@@ -1643,351 +1670,389 @@ export function PracticeCanvas({
           minWidth: 0,
         }}
       >
-        {/* 2026-10-27 의뢰인 요청 — A-B 루프 상태(구간 입력·안내 문구)만 남은
-         * 줄(BPM은 위 설정 패널로 이동, 2026-10-28). loopPhase가
-         * 'active'가 아니면 아무것도 안 그려 빈 줄이 되는데, 레이아웃에
-         * 영향 없는 높이 0 요소라 굳이 조건부로 줄 자체를 없애지 않음. */}
+        {/* 2026-10-28(의뢰인 요청) — "레인은 좌측, 드럼킷은 우측에 두면 레인을
+         * 세로로 더 길게 쓸 수 있다"는 제안(위 useStackedKitLayout 코멘트
+         * 참고) — 넓은 화면에서는 좌측 열(레인+진행바·재생 컨트롤·블루투스
+         * 안내)과 우측 열(킷 그림)을 한 행에 나란히, 좁은 화면(핸드폰 등)은
+         * 의뢰인이 명시적으로 원한 대로 지금처럼 킷을 아래로 내려 위아래로
+         * 쌓는다. */}
         <div
           style={{
             display: 'flex',
-            flexWrap: 'wrap',
-            alignItems: 'center',
+            flexDirection: isKitStacked ? 'column' : 'row',
+            alignItems: isKitStacked ? 'stretch' : 'center',
             gap: 'var(--space-4)',
           }}
         >
-          {loopPhase === 'active' && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
-              <span>마디</span>
-              <input
-                type="number"
-                min={1}
-                max={totalBars}
-                value={loopStartFieldValue}
-                onFocus={() => {
-                  setLoopStartDraft(String(loopStartBar1))
-                  setIsEditingLoopStart(true)
-                }}
-                onChange={(e) => setLoopStartDraft(e.target.value)}
-                onBlur={(e) => {
-                  const next = clampLoopStart(Number(e.target.value))
-                  setLoopStartBar1(next)
-                  if (next >= loopEndBar1) setLoopEndBar1(Math.min(totalBars, next + 1))
-                  setIsEditingLoopStart(false)
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') e.currentTarget.blur()
-                }}
-                disabled={isPlaying || isPaused}
-                style={{ width: 48 }}
-              />
-              <span>~</span>
-              <input
-                type="number"
-                min={1}
-                max={totalBars}
-                value={loopEndFieldValue}
-                onFocus={() => {
-                  setLoopEndDraft(String(loopEndBar1))
-                  setIsEditingLoopEnd(true)
-                }}
-                onChange={(e) => setLoopEndDraft(e.target.value)}
-                onBlur={(e) => {
-                  const next = clampLoopEnd(Number(e.target.value))
-                  setLoopEndBar1(next)
-                  if (next <= loopStartBar1) setLoopStartBar1(Math.max(1, next - 1))
-                  setIsEditingLoopEnd(false)
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') e.currentTarget.blur()
-                }}
-                disabled={isPlaying || isPaused}
-                style={{ width: 48 }}
-              />
-            </div>
-          )}
-          {loopPhase === 'active' && (
-            <span style={{ color: 'var(--text-muted)', fontSize: '0.9em' }}>
-              ⟲ 마디 {loopStartBar1}~{loopEndBar1} 반복 중 — 레인 오른쪽 진행바는 이 구간 안에서의
-              위치
-            </span>
-          )}
-        </div>
-
-        {/* 레인 폭 고정(2026-10-25, 의뢰인 요청) — "화면을 넓게 쓰더라도 노트가
-         * 떨어지는 크기는 고정하고 그 외 여백은 배경으로 채우고 싶다"는 요청.
-         * `maxWidth`로 좁은 화면(모바일)에서는 기존처럼 꽉 채우고, 넓은
-         * 화면에서는 그 이상 넓어지지 않고 중앙 정렬 + 좌우는 `<main>`의
-         * 배경색(--bg)이 그대로 보이게 둔다(laneRenderer.ts가 매 프레임
-         * canvas.clientWidth를 읽어 내부 해상도를 맞추므로 렌더러 쪽 변경
-         * 불필요). 구체 px 값(추정치, intent/07-open-questions.md Q-29)은
-         * 위 상수 선언부 참고. T3-11 게이트 피드백 3차(2026-10-25, 의뢰인
-         * "레인도 외곽을 선으로 감싸서 레인크기를 보고 싶어...") — 캔버스
-         * 폭을 줄이고 나니 좌우 여백과 레인 배경이 같은 색이라 경계가 안
-         * 보였음. 노트 halo(밝은 대비색)와 달리 이건 "크기가 어디서
-         * 끝나는지"만 보여주면 되므로 이미 쓰던 차분한 `--border` 색으로 테두리.
-         * 2026-10-27(의뢰인 요청) — 진행바를 레인 아래 가로 막대에서 레인
-         * 오른쪽의 세로 막대로 옮긴다. 레인+진행바를 한 플렉스 행으로 묶고
-         * 그 행 전체를 가운데 정렬(캔버스 단독으로 margin:auto 하던 걸,
-         * 바로 옆에 진행바가 붙으므로 둘을 같이 중앙에 놓도록 바꿈). 기능은
-         * 그대로 — 0%일 때 바닥, 100%일 때 꼭대기까지 찬다(실제 height는
-         * 위 progressBarRef가 매 프레임 직접 씀 — 아래 style엔 일부러
-         * height를 안 둔다: 여기 두면 다른 이유로 리렌더될 때마다 React가
-         * ref가 써둔 값을 이 값으로 되돌려버린다). */}
-        <div
-          style={{
-            display: 'flex',
-            gap: 'var(--space-2)',
-            maxWidth: PRACTICE_LANE_MAX_WIDTH_PX + 20,
-            margin: '0 auto',
-          }}
-        >
-          <div style={{ position: 'relative', flex: 1, minWidth: 0 }}>
-            <canvas
-              ref={canvasRef}
-              style={{
-                display: 'block',
-                width: '100%',
-                height: 400,
-                background: 'var(--bg)',
-                border: '1px solid var(--border)',
-              }}
-            />
-            {/* 2026-10-28(의뢰인 요청) — 악보 빠르기말 표기(이미지 참고: 악보
-             * 좌측 상단의 "♩=184")처럼, BPM을 레인 좌측 상단에 표시 — 그 전엔
-             * 설정 패널의 BPM 입력 옆에만 있던 걸 레인 쪽으로 옮김(같은
-             * playbackBpm을 읽으므로 설정에서 BPM을 바꾸면 그대로 반영됨). */}
-            <div
-              style={{
-                position: 'absolute',
-                top: 4,
-                left: 4,
-                padding: '2px 6px',
-                background: 'rgba(0,0,0,0.6)',
-                color: 'var(--text)',
-                fontSize: '0.85em',
-                borderRadius: 4,
-                pointerEvents: 'none',
-              }}
-            >
-              ♩= {playbackBpm}
-            </div>
-            {/* T3-14(진단용 임시, 원인 특정되면 제거) — 실기기 FPS를 화면에 바로
-             * 보여줘 영상 녹화 없이도 숫자로 바로 보고 가능하게. 위 BPM
-             * 표시(2026-10-28 추가)와 겹치지 않게 오른쪽 상단으로. */}
-            {fpsDisplay !== null && (
-              <div
-                style={{
-                  position: 'absolute',
-                  top: 4,
-                  right: 4,
-                  padding: '2px 6px',
-                  background: 'rgba(0,0,0,0.6)',
-                  color:
-                    fpsDisplay >= 50
-                      ? 'var(--success)'
-                      : fpsDisplay >= 30
-                        ? 'var(--warning)'
-                        : 'var(--danger)',
-                  fontSize: '0.8em',
-                  fontFamily: 'monospace',
-                  borderRadius: 4,
-                  pointerEvents: 'none',
-                }}
-              >
-                FPS: {fpsDisplay}
-              </div>
-            )}
-          </div>
           <div
             style={{
-              width: 14,
-              flexShrink: 0,
-              position: 'relative',
-              borderRadius: 7,
-              background: 'var(--surface-2)',
-              overflow: 'hidden',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 'var(--space-4)',
+              flex: isKitStacked ? undefined : 1,
+              minWidth: 0,
             }}
           >
+            {/* 2026-10-27 의뢰인 요청 — A-B 루프 상태(구간 입력·안내 문구)만 남은
+             * 줄(BPM은 위 설정 패널로 이동, 2026-10-28). loopPhase가
+             * 'active'가 아니면 아무것도 안 그려 빈 줄이 되는데, 레이아웃에
+             * 영향 없는 높이 0 요소라 굳이 조건부로 줄 자체를 없애지 않음. */}
             <div
-              ref={progressBarRef}
               style={{
-                position: 'absolute',
-                bottom: 0,
-                left: 0,
-                right: 0,
-                background: loopEnabled ? 'var(--warning)' : 'var(--accent)',
+                display: 'flex',
+                flexWrap: 'wrap',
+                alignItems: 'center',
+                gap: 'var(--space-4)',
               }}
+            >
+              {loopPhase === 'active' && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
+                  <span>마디</span>
+                  <input
+                    type="number"
+                    min={1}
+                    max={totalBars}
+                    value={loopStartFieldValue}
+                    onFocus={() => {
+                      setLoopStartDraft(String(loopStartBar1))
+                      setIsEditingLoopStart(true)
+                    }}
+                    onChange={(e) => setLoopStartDraft(e.target.value)}
+                    onBlur={(e) => {
+                      const next = clampLoopStart(Number(e.target.value))
+                      setLoopStartBar1(next)
+                      if (next >= loopEndBar1) setLoopEndBar1(Math.min(totalBars, next + 1))
+                      setIsEditingLoopStart(false)
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') e.currentTarget.blur()
+                    }}
+                    disabled={isPlaying || isPaused}
+                    style={{ width: 48 }}
+                  />
+                  <span>~</span>
+                  <input
+                    type="number"
+                    min={1}
+                    max={totalBars}
+                    value={loopEndFieldValue}
+                    onFocus={() => {
+                      setLoopEndDraft(String(loopEndBar1))
+                      setIsEditingLoopEnd(true)
+                    }}
+                    onChange={(e) => setLoopEndDraft(e.target.value)}
+                    onBlur={(e) => {
+                      const next = clampLoopEnd(Number(e.target.value))
+                      setLoopEndBar1(next)
+                      if (next <= loopStartBar1) setLoopStartBar1(Math.max(1, next - 1))
+                      setIsEditingLoopEnd(false)
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') e.currentTarget.blur()
+                    }}
+                    disabled={isPlaying || isPaused}
+                    style={{ width: 48 }}
+                  />
+                </div>
+              )}
+              {loopPhase === 'active' && (
+                <span style={{ color: 'var(--text-muted)', fontSize: '0.9em' }}>
+                  ⟲ 마디 {loopStartBar1}~{loopEndBar1} 반복 중 — 레인 오른쪽 진행바는 이 구간
+                  안에서의 위치
+                </span>
+              )}
+            </div>
+
+            {/* 레인 폭 고정(2026-10-25, 의뢰인 요청) — "화면을 넓게 쓰더라도 노트가
+             * 떨어지는 크기는 고정하고 그 외 여백은 배경으로 채우고 싶다"는 요청.
+             * `maxWidth`로 좁은 화면(모바일)에서는 기존처럼 꽉 채우고, 넓은
+             * 화면에서는 그 이상 넓어지지 않고 중앙 정렬 + 좌우는 `<main>`의
+             * 배경색(--bg)이 그대로 보이게 둔다(laneRenderer.ts가 매 프레임
+             * canvas.clientWidth를 읽어 내부 해상도를 맞추므로 렌더러 쪽 변경
+             * 불필요). 구체 px 값(추정치, intent/07-open-questions.md Q-29)은
+             * 위 상수 선언부 참고. T3-11 게이트 피드백 3차(2026-10-25, 의뢰인
+             * "레인도 외곽을 선으로 감싸서 레인크기를 보고 싶어...") — 캔버스
+             * 폭을 줄이고 나니 좌우 여백과 레인 배경이 같은 색이라 경계가 안
+             * 보였음. 노트 halo(밝은 대비색)와 달리 이건 "크기가 어디서
+             * 끝나는지"만 보여주면 되므로 이미 쓰던 차분한 `--border` 색으로 테두리.
+             * 2026-10-27(의뢰인 요청) — 진행바를 레인 아래 가로 막대에서 레인
+             * 오른쪽의 세로 막대로 옮긴다. 레인+진행바를 한 플렉스 행으로 묶고
+             * 그 행 전체를 가운데 정렬(캔버스 단독으로 margin:auto 하던 걸,
+             * 바로 옆에 진행바가 붙으므로 둘을 같이 중앙에 놓도록 바꿈). 기능은
+             * 그대로 — 0%일 때 바닥, 100%일 때 꼭대기까지 찬다(실제 height는
+             * 위 progressBarRef가 매 프레임 직접 씀 — 아래 style엔 일부러
+             * height를 안 둔다: 여기 두면 다른 이유로 리렌더될 때마다 React가
+             * ref가 써둔 값을 이 값으로 되돌려버린다). */}
+            <div
+              style={{
+                display: 'flex',
+                gap: 'var(--space-2)',
+                maxWidth: PRACTICE_LANE_MAX_WIDTH_PX + 20,
+                margin: '0 auto',
+              }}
+            >
+              <div style={{ position: 'relative', flex: 1, minWidth: 0 }}>
+                <canvas
+                  ref={canvasRef}
+                  style={{
+                    display: 'block',
+                    width: '100%',
+                    // 2026-10-28(의뢰인 요청) — 킷을 레인 아래가 아니라 옆(우측)에
+                    // 두는 넓은 화면에서는 그만큼 생긴 세로 공간을 레인 자체를
+                    // 더 길게(더 먼 미리보기) 만드는 데 쓴다.
+                    height: isKitStacked ? 400 : 600,
+                    background: 'var(--bg)',
+                    border: '1px solid var(--border)',
+                  }}
+                />
+                {/* 2026-10-28(의뢰인 요청) — 악보 빠르기말 표기(이미지 참고: 악보
+                 * 좌측 상단의 "♩=184")처럼, BPM을 레인 좌측 상단에 표시 — 그 전엔
+                 * 설정 패널의 BPM 입력 옆에만 있던 걸 레인 쪽으로 옮김(같은
+                 * playbackBpm을 읽으므로 설정에서 BPM을 바꾸면 그대로 반영됨). */}
+                <div
+                  style={{
+                    position: 'absolute',
+                    top: 4,
+                    left: 4,
+                    padding: '2px 6px',
+                    background: 'rgba(0,0,0,0.6)',
+                    color: 'var(--text)',
+                    fontSize: '0.85em',
+                    borderRadius: 4,
+                    pointerEvents: 'none',
+                  }}
+                >
+                  ♩= {playbackBpm}
+                </div>
+                {/* T3-14(진단용 임시, 원인 특정되면 제거) — 실기기 FPS를 화면에 바로
+                 * 보여줘 영상 녹화 없이도 숫자로 바로 보고 가능하게. 위 BPM
+                 * 표시(2026-10-28 추가)와 겹치지 않게 오른쪽 상단으로. */}
+                {fpsDisplay !== null && (
+                  <div
+                    style={{
+                      position: 'absolute',
+                      top: 4,
+                      right: 4,
+                      padding: '2px 6px',
+                      background: 'rgba(0,0,0,0.6)',
+                      color:
+                        fpsDisplay >= 50
+                          ? 'var(--success)'
+                          : fpsDisplay >= 30
+                            ? 'var(--warning)'
+                            : 'var(--danger)',
+                      fontSize: '0.8em',
+                      fontFamily: 'monospace',
+                      borderRadius: 4,
+                      pointerEvents: 'none',
+                    }}
+                  >
+                    FPS: {fpsDisplay}
+                  </div>
+                )}
+              </div>
+              <div
+                style={{
+                  width: 14,
+                  flexShrink: 0,
+                  position: 'relative',
+                  borderRadius: 7,
+                  background: 'var(--surface-2)',
+                  overflow: 'hidden',
+                }}
+              >
+                <div
+                  ref={progressBarRef}
+                  style={{
+                    position: 'absolute',
+                    bottom: 0,
+                    left: 0,
+                    right: 0,
+                    background: loopEnabled ? 'var(--warning)' : 'var(--accent)',
+                  }}
+                />
+              </div>
+            </div>
+
+            {/* 2026-10-27 의뢰인 요청 — 재생 컨트롤(10초전/재생/10초후/리셋)을
+             * 레인 아래, 가운데 정렬로. 버튼을 딱딱한 사각형 대신 둥근 아이콘
+             * (도형)으로(index.css .transport-btn) — 재생/일시정지는 더 크고
+             * 포인트색으로 채워 중심을 잡는다(이미지 레퍼런스 스타일). */}
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: 'var(--space-3)',
+              }}
+            >
+              {/* T3-13(2026-10-25, 의뢰인 요청 — 이미지 첨부) — 재생/일시정지를
+               * 토글 버튼 하나로 합치고(표준 미디어 플레이어 패턴), 양옆에 ±10초
+               * 탐색 버튼을 둔다. "정지"는 "리셋"으로 이름만 바꿔(동작은 기존
+               * handleStop 그대로 — 처음으로 되돌아감) 옆에 유지. 토글 버튼은
+               * 정지/일시정지 상태면 handlePlay()(새 세션 시작, 또는 isPaused
+               * 분기로 재개), 재생 중이면 handlePause() — 기존 로직 무변경, 버튼
+               * 묶음만 재구성. "▶ 재생" 쪽만 `isStarting`일 때 비활성화(모드A
+               * 지적 — handlePlay()의 새 세션 경로가 비동기라 연타하면 세션
+               * 생성이 겹쳐 돈다, 위 isStartingRef 선언부 참고). T3-16-feedback-7 —
+               * `audioTracksLoading`도 같이 막음(오디오 스템 전체 다운로드가 아직
+               * 안 끝남). 일시정지→재개 경로는 이미 한 번 성공적으로 시작된
+               * 세션이라 그 시점엔 로딩이 이미 끝나 있었을 수밖에 없어 안전. */}
+              <button
+                type="button"
+                className="transport-btn"
+                style={{ width: 44, height: 44 }}
+                title="10초 되감기"
+                aria-label="10초 되감기"
+                onClick={() => handleSeek(-10)}
+                disabled={!isPlaying && !isPaused}
+              >
+                <Rewind size={20} aria-hidden="true" />
+              </button>
+              {isPlaying ? (
+                <button
+                  type="button"
+                  className="transport-btn transport-btn--play"
+                  style={{ width: 50, height: 50 }}
+                  title="일시정지"
+                  aria-label="일시정지"
+                  onClick={handlePause}
+                >
+                  <Pause size={22} aria-hidden="true" />
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className="transport-btn transport-btn--play"
+                  style={{ width: 50, height: 50 }}
+                  title={audioTracksLoading ? '음원 불러오는 중…' : '재생'}
+                  aria-label={audioTracksLoading ? '음원 불러오는 중' : '재생'}
+                  onClick={handlePlay}
+                  disabled={isStarting || audioTracksLoading}
+                >
+                  <Play size={22} aria-hidden="true" style={{ marginLeft: 2 }} />
+                </button>
+              )}
+              <button
+                type="button"
+                className="transport-btn"
+                style={{ width: 44, height: 44 }}
+                title="10초 빨리감기"
+                aria-label="10초 빨리감기"
+                onClick={() => handleSeek(10)}
+                disabled={!isPlaying && !isPaused}
+              >
+                <FastForward size={20} aria-hidden="true" />
+              </button>
+              <button
+                type="button"
+                className="transport-btn"
+                style={{ width: 44, height: 44 }}
+                title="처음으로 리셋"
+                aria-label="처음으로 리셋"
+                onClick={handleStop}
+                disabled={!isPlaying && !isPaused}
+              >
+                <RotateCcw size={20} aria-hidden="true" />
+              </button>
+
+              {/* 2026-10-27(의뢰인 요청) — "여기서 시작"/"여기까지" 버튼 + A-B 루프
+               * 체크박스 3개를 버튼 하나로 통합. idle("⟲ 루프 시작") → 누르면
+               * 시작점을 찍고 start-marked("⟲ 여기까지")로 → 누르면 끝점을 찍으며
+               * 루프가 켜지고 active("⟲ 루프 진행중")로 → 누르면 루프가 꺼지고 다시
+               * idle로(마이크로 인터랙션 — 전역 button 호버/전환이 이미 200ms라
+               * 상태 전환마다 배경색이 부드럽게 바뀜). active 단계만 재생 중이
+               * 아니어도 항상 눌러서 끌 수 있다(기존 체크박스가 그랬던 것과 동일 —
+               * "루프를 그만 걸고 싶다"는 재생 상태와 무관해야 함). 2026-10-27
+               * 추가 요청 — 리셋 버튼 우측으로 위치 이동(원래 상단 BPM 옆이었음). */}
+              {/* 2026-10-27(의뢰인 요청) — "재생 버튼·루프 시작 버튼이 과하게
+               * 크다" 지적 — 패딩·글자 크기를 줄여 옆의 작은 아이콘 버튼들과
+               * 어울리는 크기로(텍스트는 이미 짧아 더 줄이기보단 크기만 축소). */}
+              <button
+                type="button"
+                onClick={handleLoopButtonClick}
+                disabled={loopPhase !== 'active' && !isPlaying && !isPaused}
+                style={{
+                  whiteSpace: 'nowrap',
+                  padding: '6px 10px',
+                  fontSize: '0.85em',
+                  ...(loopPhase === 'active'
+                    ? {
+                        background: 'var(--warning)',
+                        borderColor: 'var(--warning)',
+                        color: 'var(--bg)',
+                      }
+                    : undefined),
+                }}
+              >
+                <Repeat
+                  size={14}
+                  aria-hidden="true"
+                  style={{ verticalAlign: 'middle', marginRight: 4 }}
+                />
+                {loopPhase === 'idle'
+                  ? '루프 시작'
+                  : loopPhase === 'start-marked'
+                    ? '여기까지'
+                    : '루프 진행중'}
+              </button>
+            </div>
+
+            {/* 2026-10-28(의뢰인 요청) — 블루투스 이어폰의 물리적 지연(보통
+             * 100~300ms) 때문에 "노트가 지나간 뒤에 소리가 들린다"는 문의가 있었음
+             * (YOASOBI 곡 재현, qa-evidence/T3-46/result.md) — 저희 쪽 버그가
+             * 아니라 출력 장치 자체의 특성이라 코드로 "고칠" 수는 없고, 상시 노출
+             * 안내문 + 수동 보정값(아래)으로 대응. 재생 버튼 바로 아래, 상시 노출
+             * (모달/토스트로 한 번만 보여주면 나중에 다시 못 봄 — 기기를 바꿔
+             * 접속할 때마다 다시 알아야 하는 정보라 상시 노출이 맞다고 판단).
+             * 2026-10-28(의뢰인 요청, 2차) — 오디오 지연 보정 기능이 생겼으니
+             * "스피커·유선을 쓰라"는 회피 안내보다 "믹서에서 직접 보정할 수
+             * 있다"는 해결 안내를 먼저 준다. 레인과 같은 중앙 정렬(아래
+             * maxWidth+margin auto, 레인 박스와 동일한 폭 — 의뢰인 지적:
+             * "드럼+문구랑 레인이랑 정렬이 안 맞는다").
+             * 2026-10-28(의뢰인 요청, 3차) — "말이 너무 길다" 지적 — 스피커·유선
+             * 보조 설명(괄호 문장)을 빼고 핵심(블루투스 지연·믹서에서 보정)만
+             * 남겨 절반 가까이 줄임. */}
+            <p
+              style={{
+                color: 'var(--text-muted)',
+                fontSize: '0.85em',
+                margin: '0 auto',
+                maxWidth: PRACTICE_LANE_MAX_WIDTH_PX + 20,
+                textAlign: 'center',
+              }}
+            >
+              🎧 블루투스 이어폰은 싱크가 밀릴 수 있어요 — 왼쪽 믹서의 오디오 지연 보정으로
+              맞춰보세요.
+            </p>
+          </div>
+
+          {/* 2026-10-28(의뢰인 요청) — 오디오 지연 보정·믹서·보이는 마디 수는 위
+           * settingsPanelContent(왼쪽 사이드바/Drawer)로 이동 — 킷 그림만 여기
+           * 메인 영역에 남긴다. 킷 그림은 "지금 쳐야 할 위치"를 실시간으로
+           * 보여주는 항상-표시 정보라 설정이 아님(의뢰인이 설정으로 꼽은 건
+           * BPM·오디오 지연 보정·믹서·보이는 마디 수뿐 — 위 목록 참고).
+           * T3-11(2026-10-25, 의뢰인 피드백 "폰 세로에서 드럼킷이 안 보여") —
+           * 세로 폰에서는 폭만 축소(160px, 넓은 화면은 320px)해 "축소 아이콘"에
+           * 가깝게 맞춘다(원래 의도, intent/04-ui-ux.md §3).
+           * 2026-10-28(의뢰인 요청, 2차) — "드럼+문구랑 레인이랑 정렬이 안
+           * 맞는다" 지적 — margin:auto로 레인과 같은 중심에 오게.
+           * 2026-10-28(의뢰인 요청, 4차) — 넓은 화면에서는 레인 좌측·킷 우측
+           * 배치라 margin:auto(가운데 정렬) 대신 flexShrink:0(고정폭 유지)만
+           * 필요 — 세로 중앙 정렬은 위 행의 alignItems:center가 담당. */}
+          <div
+            style={{
+              maxWidth: isPortraitPhone ? 160 : 320,
+              margin: isKitStacked ? '0 auto' : undefined,
+              flexShrink: 0,
+            }}
+          >
+            <KitIllustration
+              activeHandByPiece={activeHandByPiece}
+              showSticking={false}
+              pieceColor={readPieceColor}
             />
           </div>
-        </div>
-
-        {/* 2026-10-27 의뢰인 요청 — 재생 컨트롤(10초전/재생/10초후/리셋)을
-         * 레인 아래, 가운데 정렬로. 버튼을 딱딱한 사각형 대신 둥근 아이콘
-         * (도형)으로(index.css .transport-btn) — 재생/일시정지는 더 크고
-         * 포인트색으로 채워 중심을 잡는다(이미지 레퍼런스 스타일). */}
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            gap: 'var(--space-3)',
-          }}
-        >
-          {/* T3-13(2026-10-25, 의뢰인 요청 — 이미지 첨부) — 재생/일시정지를
-           * 토글 버튼 하나로 합치고(표준 미디어 플레이어 패턴), 양옆에 ±10초
-           * 탐색 버튼을 둔다. "정지"는 "리셋"으로 이름만 바꿔(동작은 기존
-           * handleStop 그대로 — 처음으로 되돌아감) 옆에 유지. 토글 버튼은
-           * 정지/일시정지 상태면 handlePlay()(새 세션 시작, 또는 isPaused
-           * 분기로 재개), 재생 중이면 handlePause() — 기존 로직 무변경, 버튼
-           * 묶음만 재구성. "▶ 재생" 쪽만 `isStarting`일 때 비활성화(모드A
-           * 지적 — handlePlay()의 새 세션 경로가 비동기라 연타하면 세션
-           * 생성이 겹쳐 돈다, 위 isStartingRef 선언부 참고). T3-16-feedback-7 —
-           * `audioTracksLoading`도 같이 막음(오디오 스템 전체 다운로드가 아직
-           * 안 끝남). 일시정지→재개 경로는 이미 한 번 성공적으로 시작된
-           * 세션이라 그 시점엔 로딩이 이미 끝나 있었을 수밖에 없어 안전. */}
-          <button
-            type="button"
-            className="transport-btn"
-            style={{ width: 44, height: 44 }}
-            title="10초 되감기"
-            aria-label="10초 되감기"
-            onClick={() => handleSeek(-10)}
-            disabled={!isPlaying && !isPaused}
-          >
-            <Rewind size={20} aria-hidden="true" />
-          </button>
-          {isPlaying ? (
-            <button
-              type="button"
-              className="transport-btn transport-btn--play"
-              style={{ width: 50, height: 50 }}
-              title="일시정지"
-              aria-label="일시정지"
-              onClick={handlePause}
-            >
-              <Pause size={22} aria-hidden="true" />
-            </button>
-          ) : (
-            <button
-              type="button"
-              className="transport-btn transport-btn--play"
-              style={{ width: 50, height: 50 }}
-              title={audioTracksLoading ? '음원 불러오는 중…' : '재생'}
-              aria-label={audioTracksLoading ? '음원 불러오는 중' : '재생'}
-              onClick={handlePlay}
-              disabled={isStarting || audioTracksLoading}
-            >
-              <Play size={22} aria-hidden="true" style={{ marginLeft: 2 }} />
-            </button>
-          )}
-          <button
-            type="button"
-            className="transport-btn"
-            style={{ width: 44, height: 44 }}
-            title="10초 빨리감기"
-            aria-label="10초 빨리감기"
-            onClick={() => handleSeek(10)}
-            disabled={!isPlaying && !isPaused}
-          >
-            <FastForward size={20} aria-hidden="true" />
-          </button>
-          <button
-            type="button"
-            className="transport-btn"
-            style={{ width: 44, height: 44 }}
-            title="처음으로 리셋"
-            aria-label="처음으로 리셋"
-            onClick={handleStop}
-            disabled={!isPlaying && !isPaused}
-          >
-            <RotateCcw size={20} aria-hidden="true" />
-          </button>
-
-          {/* 2026-10-27(의뢰인 요청) — "여기서 시작"/"여기까지" 버튼 + A-B 루프
-           * 체크박스 3개를 버튼 하나로 통합. idle("⟲ 루프 시작") → 누르면
-           * 시작점을 찍고 start-marked("⟲ 여기까지")로 → 누르면 끝점을 찍으며
-           * 루프가 켜지고 active("⟲ 루프 진행중")로 → 누르면 루프가 꺼지고 다시
-           * idle로(마이크로 인터랙션 — 전역 button 호버/전환이 이미 200ms라
-           * 상태 전환마다 배경색이 부드럽게 바뀜). active 단계만 재생 중이
-           * 아니어도 항상 눌러서 끌 수 있다(기존 체크박스가 그랬던 것과 동일 —
-           * "루프를 그만 걸고 싶다"는 재생 상태와 무관해야 함). 2026-10-27
-           * 추가 요청 — 리셋 버튼 우측으로 위치 이동(원래 상단 BPM 옆이었음). */}
-          {/* 2026-10-27(의뢰인 요청) — "재생 버튼·루프 시작 버튼이 과하게
-           * 크다" 지적 — 패딩·글자 크기를 줄여 옆의 작은 아이콘 버튼들과
-           * 어울리는 크기로(텍스트는 이미 짧아 더 줄이기보단 크기만 축소). */}
-          <button
-            type="button"
-            onClick={handleLoopButtonClick}
-            disabled={loopPhase !== 'active' && !isPlaying && !isPaused}
-            style={{
-              whiteSpace: 'nowrap',
-              padding: '6px 10px',
-              fontSize: '0.85em',
-              ...(loopPhase === 'active'
-                ? {
-                    background: 'var(--warning)',
-                    borderColor: 'var(--warning)',
-                    color: 'var(--bg)',
-                  }
-                : undefined),
-            }}
-          >
-            <Repeat
-              size={14}
-              aria-hidden="true"
-              style={{ verticalAlign: 'middle', marginRight: 4 }}
-            />
-            {loopPhase === 'idle'
-              ? '루프 시작'
-              : loopPhase === 'start-marked'
-                ? '여기까지'
-                : '루프 진행중'}
-          </button>
-        </div>
-
-        {/* 2026-10-28(의뢰인 요청) — 블루투스 이어폰의 물리적 지연(보통
-         * 100~300ms) 때문에 "노트가 지나간 뒤에 소리가 들린다"는 문의가 있었음
-         * (YOASOBI 곡 재현, qa-evidence/T3-46/result.md) — 저희 쪽 버그가
-         * 아니라 출력 장치 자체의 특성이라 코드로 "고칠" 수는 없고, 상시 노출
-         * 안내문 + 수동 보정값(아래)으로 대응. 재생 버튼 바로 아래, 상시 노출
-         * (모달/토스트로 한 번만 보여주면 나중에 다시 못 봄 — 기기를 바꿔
-         * 접속할 때마다 다시 알아야 하는 정보라 상시 노출이 맞다고 판단).
-         * 2026-10-28(의뢰인 요청, 2차) — 오디오 지연 보정 기능이 생겼으니
-         * "스피커·유선을 쓰라"는 회피 안내보다 "믹서에서 직접 보정할 수
-         * 있다"는 해결 안내를 먼저 준다. 레인과 같은 중앙 정렬(아래
-         * maxWidth+margin auto, 레인 박스와 동일한 폭 — 의뢰인 지적:
-         * "드럼+문구랑 레인이랑 정렬이 안 맞는다").
-         * 2026-10-28(의뢰인 요청, 3차) — "말이 너무 길다" 지적 — 스피커·유선
-         * 보조 설명(괄호 문장)을 빼고 핵심(블루투스 지연·믹서에서 보정)만
-         * 남겨 절반 가까이 줄임. */}
-        <p
-          style={{
-            color: 'var(--text-muted)',
-            fontSize: '0.85em',
-            margin: '0 auto',
-            maxWidth: PRACTICE_LANE_MAX_WIDTH_PX + 20,
-            textAlign: 'center',
-          }}
-        >
-          🎧 블루투스 이어폰은 싱크가 밀릴 수 있어요 — 왼쪽 믹서의 오디오 지연 보정으로 맞춰보세요.
-        </p>
-
-        {/* 2026-10-28(의뢰인 요청) — 오디오 지연 보정·믹서·보이는 마디 수는 위
-         * settingsPanelContent(왼쪽 사이드바/Drawer)로 이동 — 킷 그림만 여기
-         * 메인 영역에 남긴다. 킷 그림은 "지금 쳐야 할 위치"를 실시간으로
-         * 보여주는 항상-표시 정보라 설정이 아님(의뢰인이 설정으로 꼽은 건
-         * BPM·오디오 지연 보정·믹서·보이는 마디 수뿐 — 위 목록 참고).
-         * T3-11(2026-10-25, 의뢰인 피드백 "폰 세로에서 드럼킷이 안 보여") —
-         * 세로 폰에서는 폭만 축소(160px, 넓은 화면은 320px)해 "축소 아이콘"에
-         * 가깝게 맞춘다(원래 의도, intent/04-ui-ux.md §3).
-         * 2026-10-28(의뢰인 요청, 2차) — "드럼+문구랑 레인이랑 정렬이 안
-         * 맞는다" 지적 — margin:auto로 레인과 같은 중심에 오게. */}
-        <div style={{ maxWidth: isPortraitPhone ? 160 : 320, margin: '0 auto' }}>
-          <KitIllustration
-            activeHandByPiece={activeHandByPiece}
-            showSticking={false}
-            pieceColor={readPieceColor}
-          />
         </div>
       </div>
     </div>
