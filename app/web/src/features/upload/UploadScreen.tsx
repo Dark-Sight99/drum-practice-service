@@ -8,6 +8,7 @@ import {
 } from '../../api/songs'
 import { ApiError } from '../../api/client'
 import { importScoreFile, validateDrumScore, type DrumScore } from '../../score'
+import { checkHighFrequencyContent } from '../../audio/qualityCheck'
 import { Modal } from '../../components/Modal'
 import { Spinner } from '../../components/Spinner'
 
@@ -114,6 +115,15 @@ export function UploadScreen({
   const [pollTick, setPollTick] = useState(0)
   const [isFetchingScore, setIsFetchingScore] = useState(false)
   const [playError, setPlayError] = useState<string | null>(null)
+  // 2026-10-28(의뢰인 요청) — 업로드 전 음원 고주파 함유량 경고(qualityCheck.ts,
+  // T3-45 실측 근거). "경고만 하고 업로드는 허용"으로 확정(의뢰인 선택) — 낮게
+  // 나와도 차단하지 않고, true일 때만 [그대로 업로드]/[다른 파일 선택] 선택지를
+  // 보여준다. 디코딩이 비동기라, 그 사이 사용자가 다른 파일을 또 고르면
+  // 먼저 고른 파일의 결과가 나중에 도착해 지금 선택과 안 맞을 수 있음 — 위
+  // submitGenerationRef와 같은 "세대 번호" 가드로 막는다.
+  const [lowQualityWarningVisible, setLowQualityWarningVisible] = useState(false)
+  const fileSelectionGenerationRef = useRef(0)
+  const fileInputRef = useRef<HTMLInputElement | null>(null)
 
   useEffect(() => {
     return () => {
@@ -145,6 +155,7 @@ export function UploadScreen({
   }, [generatingSong, pollTick])
 
   function resetState() {
+    fileSelectionGenerationRef.current += 1 // 진행 중이던 음질 검사가 있었다면 무효화
     setFile(null)
     setFileKind(null)
     setParsedScore(null)
@@ -159,6 +170,23 @@ export function UploadScreen({
     setPollTick(0)
     setIsFetchingScore(false)
     setPlayError(null)
+    setLowQualityWarningVisible(false)
+    if (fileInputRef.current) fileInputRef.current.value = ''
+  }
+
+  // 2026-10-28(의뢰인 요청) — 음질 경고의 "다른 파일 선택" 버튼. 폼 전체를
+  // 리셋하는 resetState()와 달리 모달을 닫지 않고 파일 선택만 지운다(제목·
+  // 아티스트도 원래 파일명에서 자동 채워진 것이었으니 같이 지움).
+  function handleChooseDifferentFile() {
+    fileSelectionGenerationRef.current += 1
+    setFile(null)
+    setFileKind(null)
+    setParsedScore(null)
+    setNoteCount(0)
+    setParseError(null)
+    setTitle('')
+    setLowQualityWarningVisible(false)
+    if (fileInputRef.current) fileInputRef.current.value = ''
   }
 
   function handleCancel() {
@@ -174,10 +202,12 @@ export function UploadScreen({
   async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const selected = e.target.files?.[0]
     if (!selected) return
+    const myGeneration = ++fileSelectionGenerationRef.current
     setFile(selected)
     setParsedScore(null)
     setParseError(null)
     setSubmitError(null)
+    setLowQualityWarningVisible(false)
 
     const kind = detectKind(selected.name)
     setFileKind(kind)
@@ -189,6 +219,20 @@ export function UploadScreen({
     }
     if (kind === 'audio') {
       setTitle(selected.name.slice(0, selected.name.lastIndexOf('.')))
+      // 2026-10-28(의뢰인 요청) — 업로드 자체는 막지 않고 그 사이 백그라운드로
+      // 음질만 확인(await 안 함 — 파일 선택 자체를 디코딩 끝날 때까지 묶어둘
+      // 이유가 없음). 결과가 왔을 때 아직 이 선택이 유효한지(세대 번호 일치)
+      // 확인 후에만 반영.
+      checkHighFrequencyContent(selected)
+        .then((result) => {
+          if (myGeneration !== fileSelectionGenerationRef.current) return
+          setLowQualityWarningVisible(result.isLowQuality)
+        })
+        .catch(() => {
+          // 분석 실패(디코딩 불가 등)는 qualityCheck.ts 자체가 "저품질 아님"
+          // 기본값으로 처리해 보통 여기까지 안 오지만, 혹시 몰라 조용히 무시
+          // (경고를 띄우지 않는 쪽이 안전 — 근거 없이 막지 않는다는 원칙).
+        })
       return
     }
 
@@ -425,6 +469,7 @@ export function UploadScreen({
               </label>
               <input
                 id="upload-file-input"
+                ref={fileInputRef}
                 type="file"
                 accept={ACCEPT}
                 onChange={(e) => void handleFileChange(e)}
@@ -460,7 +505,36 @@ export function UploadScreen({
               </p>
             )}
 
-            {canSubmit && (
+            {/* 2026-10-28(의뢰인 요청) — 업로드 전 음질 경고. "경고만 하고
+             * 업로드는 허용"(의뢰인 선택) — 차단하지 않고 선택지만 준다.
+             * 승인된 문구 그대로. */}
+            {fileKind === 'audio' && lowQualityWarningVisible && (
+              <div
+                role="alert"
+                style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  gap: 'var(--space-2)',
+                  marginTop: 'var(--space-2)',
+                }}
+              >
+                <p style={{ color: 'var(--warning)', textAlign: 'center', margin: 0 }}>
+                  이 파일은 고음(하이햇·심벌 등) 소리가 약해 보여요. 하이햇/심벌 인식이 부정확할 수
+                  있습니다. 원본이 더 있다면 그걸로 다시 올려보세요. 그래도 이대로 올리시겠어요?
+                </p>
+                <div style={{ display: 'flex', gap: 'var(--space-2)' }}>
+                  <button type="button" onClick={() => setLowQualityWarningVisible(false)}>
+                    그대로 업로드
+                  </button>
+                  <button type="button" onClick={handleChooseDifferentFile}>
+                    다른 파일 선택
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {canSubmit && !lowQualityWarningVisible && (
               <form
                 onSubmit={(e) => void handleSubmit(e)}
                 style={{
