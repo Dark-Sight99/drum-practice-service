@@ -59,5 +59,15 @@
 3. **좁은 화면(375px, 모바일 프리셋)** — 기존과 동일하게 "믹서" 트리거
    버튼 + Drawer, 레인 아래 킷(소형), 레이아웃 회귀 없음을 스크린샷으로 확인.
 
+## Codex 모드A 검수
+`task-mvs6uk9b-iad1vn` — 판정 **APPROVE**("No actionable correctness issue
+found"). 레인 렌더러가 매 프레임 `canvas.clientHeight`를 읽어 `hitLineY`·
+초당 픽셀·미리보기를 다시 계산하므로 600px 캔버스에서도 stale 값이 없음,
+FPS·BPM 오버레이 위치 정상, `KitIllustration` 컴포넌트 타입·props·이벤트
+배선 그대로, 900~1199px 구간(사이드바+킷 스택 동시 적용)도 교정 문제
+없음, `alignItems: center`도 오버플로·클리핑 없음 — 확인. (검수 프롬프트
+전달 중 Bash 도구 환경 오류로 서브에이전트 경유 시도가 두 번 실패해, 직접
+PowerShell로 `codex-companion.mjs task`를 호출해 우회함.)
+
 ## 남은 작업
-- Codex 모드A 검수 요청 예정 → APPROVE 후 `main` 병합.
+- (완료) Codex 모드A APPROVE → `main` 병합.
