@@ -1559,8 +1559,17 @@ export function PracticeCanvas({
        * 지연 보정과 같은 묶음이 더 맞다는 판단(의뢰인 지시).
        * 2026-10-28(의뢰인 요청, 2차) — 패널(Drawer/사이드바) 자체 제목이
        * "믹서"가 되면서 이 채널 볼륨 소제목과 글자가 겹쳐 "채널 볼륨"으로
-       * 구분(기능은 그대로). */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
+       * 구분(기능은 그대로).
+       * 2026-10-28(의뢰인 요청, 9차) — "드럼이 위로 너무 붙었다, 빈
+       * 공간 기준으로 중앙정렬" — 아래 킷 wrapper에 flex:1을 줘도, 그
+       * wrapper의 실제 부모가 (BPM·지연보정과 달리) 이 div라서 이 div
+       * 자체가 바깥 사이드바의 남는 높이를 받지 못하면 소용없었다
+       * (channel 볼륨+보이는 마디 수+킷을 묶어온 기존 구조). 이 div에도
+       * flex:1을 줘 바깥 사이드바(넓은 화면에서는 레인과 같은 높이로
+       * 늘어나 있음)의 남는 높이를 그대로 받고, 그 안에서 킷 wrapper의
+       * flex:1이 "채널 볼륨+보이는 마디 수를 뺀 나머지 전부"를 가져가
+       * 가운데 정렬되게 한다. */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)', flex: 1 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)' }}>
           <strong>채널 볼륨</strong>
           <button onClick={applyDrumlessPreset}>
@@ -1631,7 +1640,24 @@ export function PracticeCanvas({
           // 화면에 있을 때 크기처럼, 꽉 차게" — maxWidth를 160(아이콘
           // 수준의 작은 고정값)에서 패널 자체 너비를 그대로 채우도록
           // width:'100%'로.
-          <div style={{ width: '100%' }}>
+          // 2026-10-28(의뢰인 요청, 9차) — "드럼이 위로 너무 붙었다, 빈
+          // 공간 기준으로 중앙정렬" — 넓은 사이드바는 메인 영역(레인)과
+          // 같은 높이로 늘어나 있어 믹서 컨트롤 아래 빈 공간이 꽤 남는데,
+          // 킷이 그 공간 맨 위에 붙어 있었다. 이 wrapper를 flex:1로 바꿔
+          // "보이는 마디 수" 아래 남는 세로 공간 전부를 차지하게 하고,
+          // 그 안에서 킷을 가운데(세로·가로 모두) 정렬한다. Drawer
+          // 모드에서는 이 wrapper의 부모(Drawer 내부 column)가 내용
+          // 높이만큼만 차지해 "남는 공간" 자체가 없으므로 flex:1이 할
+          // 일이 없어 기존과 동일하게 동작(회귀 없음).
+          <div
+            style={{
+              width: '100%',
+              flex: 1,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+          >
             <KitIllustration
               activeHandByPiece={activeHandByPiece}
               showSticking={false}
@@ -2199,8 +2225,13 @@ export function PracticeCanvas({
                 textAlign: 'center',
               }}
             >
-              🎧 블루투스 이어폰은 싱크가 밀릴 수 있어요 — 왼쪽 믹서의 오디오 지연 보정으로
-              맞춰보세요.
+              {/* 2026-10-28(의뢰인 요청, 9차) — "두 줄로 나누자" — 기존엔
+               * em dash로 한 문장처럼 이어 쓰고 줄바꿈은 폭에 따라
+               * 자동으로 맡겼는데, 명시적으로 두 문장을 분리해 달라는
+               * 요청 — <br />로 항상 이 지점에서 줄바꿈. */}
+              🎧 블루투스 이어폰은 싱크가 밀릴 수 있어요
+              <br />
+              왼쪽 믹서의 오디오 지연 보정으로 맞춰보세요.
             </p>
           </div>
 
