@@ -94,30 +94,25 @@ export function realFft(
   return { magnitudes, frequencies }
 }
 
-/** AudioBuffer의 모든 채널을 평균 내 모노로 합친다(스펙트럼 분석은 채널 구분이
- * 필요 없음 — compare_spectrum.py와 같은 방식). */
-function mixToMono(buffer: AudioBuffer): Float32Array {
-  const length = buffer.length
-  const out = new Float32Array(length)
-  const channelCount = buffer.numberOfChannels
-  for (let ch = 0; ch < channelCount; ch++) {
-    const data = buffer.getChannelData(ch)
-    for (let i = 0; i < length; i++) {
-      out[i] += data[i] / channelCount
-    }
-  }
-  return out
-}
-
-/** 모노 PCM 신호 전체에서 `FFT_SIZE` 길이 윈도우를 여러 개(최대
- * `MAX_ANALYSIS_WINDOWS`개, 곡 전체에 고르게 분산) 뽑아 평균 스펙트럼을 구하고,
- * 6kHz 이상 에너지 비율을 계산한다 — 순수 함수라 테스트하기 쉽게 `decodeAudioData`
- * 호출과 분리해둠(아래 `checkHighFrequencyContent`가 그 경계). */
+/** 채널별 PCM 신호 전체에서 `FFT_SIZE` 길이 윈도우를 여러 개(최대
+ * `MAX_ANALYSIS_WINDOWS`개, 곡 전체에 고르게 분산) 뽑아 채널마다 따로 FFT를
+ * 구한 뒤, 그 크기 스펙트럼(제곱 = 에너지)을 채널끼리 합산해 6kHz 이상 에너지
+ * 비율을 계산한다 — 순수 함수라 테스트하기 쉽게 `decodeAudioData` 호출과
+ * 분리해둠(아래 `checkHighFrequencyContent`가 그 경계).
+ *
+ * Codex 모드A 지적(Minor C-003, 반영, qa-evidence/T3-47) — 이전엔 채널을 먼저
+ * 시간 영역에서 평균 내 모노로 합친 뒤(옛 mixToMono) FFT를 한 번만 구했는데,
+ * 좌우 채널의 고주파 성분이 서로 위상이 반대(out-of-phase)면 평균 과정에서
+ * 그 성분이 상쇄돼 실제론 하이햇/심벌 소리가 들리는 음원인데도 저품질로
+ * 오판할 수 있었다. 채널마다 따로 FFT를 구해 "크기(절댓값)"를 합산하는
+ * 방식은 크기가 항상 0 이상이라 상쇄가 원리적으로 불가능 — 기준값
+ * (LOW_HIGH_FREQUENCY_RATIO_THRESHOLD)은 그대로 둠(비율 자체의 계산 방식만
+ * 바뀌었을 뿐 T3-45 실측값의 자릿수 범위는 동일하게 유지됨). */
 export function analyzeHighFrequencyRatio(
-  monoSignal: Float32Array,
+  channels: Float32Array[],
   sampleRate: number,
 ): HighFrequencyCheckResult {
-  const totalSamples = monoSignal.length
+  const totalSamples = channels[0]?.length ?? 0
   if (totalSamples < FFT_SIZE) {
     // 너무 짧은 오디오(예: 테스트용 1초 미만 조각)는 판단 근거가 부족 — 경고하지
     // 않는 쪽(오탐보다 미탐이 안전 — 업로드를 막을 근거가 불충분하면 막지 않는다).
@@ -133,12 +128,14 @@ export function analyzeHighFrequencyRatio(
   for (let w = 0; w < windowCount; w++) {
     const maxStart = totalSamples - FFT_SIZE
     const start = windowCount > 1 ? Math.floor((w / (windowCount - 1)) * maxStart) : 0
-    const frame = monoSignal.subarray(start, start + FFT_SIZE)
-    const { magnitudes, frequencies } = realFft(frame, sampleRate)
-    for (let k = 0; k < magnitudes.length; k++) {
-      const energy = magnitudes[k] * magnitudes[k]
-      totalEnergySum += energy
-      if (frequencies[k] >= HIGH_FREQUENCY_THRESHOLD_HZ) highEnergySum += energy
+    for (const channel of channels) {
+      const frame = channel.subarray(start, start + FFT_SIZE)
+      const { magnitudes, frequencies } = realFft(frame, sampleRate)
+      for (let k = 0; k < magnitudes.length; k++) {
+        const energy = magnitudes[k] * magnitudes[k]
+        totalEnergySum += energy
+        if (frequencies[k] >= HIGH_FREQUENCY_THRESHOLD_HZ) highEnergySum += energy
+      }
     }
   }
 
@@ -162,8 +159,11 @@ export async function checkHighFrequencyContent(file: File): Promise<HighFrequen
   try {
     const arrayBuffer = await file.arrayBuffer()
     const audioBuffer = await audioContext.decodeAudioData(arrayBuffer)
-    const mono = mixToMono(audioBuffer)
-    return analyzeHighFrequencyRatio(mono, audioBuffer.sampleRate)
+    const channels: Float32Array[] = []
+    for (let ch = 0; ch < audioBuffer.numberOfChannels; ch++) {
+      channels.push(audioBuffer.getChannelData(ch))
+    }
+    return analyzeHighFrequencyRatio(channels, audioBuffer.sampleRate)
   } catch {
     return { highFrequencyRatio: 1, isLowQuality: false }
   } finally {

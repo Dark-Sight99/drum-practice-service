@@ -109,12 +109,54 @@ export function playDrumScore(
   // 2026-10-28 — 보정값만큼 "소리를 트리거하는 시각"을 당긴다(위 옵션 설명 참고).
   // 화면 쪽(laneRenderer.ts)은 이 값을 전혀 모름 — 노트의 "진짜" 시각은 안 바뀜.
   const latencyCompensationSeconds = (options.audioLatencyCompensationMs ?? 0) / 1000
+  // Codex 모드A 지적(Minor C-002, qa-evidence/T3-47) — 0초 밑으로는 못 당기게
+  // 막는 바닥(아래 compensatedTriggerTime) 때문에, 곡 맨 앞(0초 근방)에 몰린
+  // 여러 이벤트가 큰 보정값에서 같은 시각(0초)으로 겹칠 수 있다. 이 함수의
+  // options는 UI(PracticeCanvas.tsx의 AUDIO_LATENCY_COMPENSATION_MIN/MAX_MS,
+  // ±500ms)를 거쳐서만 들어오므로 실제로는 겹침이 적고, 겹쳐도(클릭/노트
+  // 신스가 같은 틱에 두 번 트리거) 들리는 소리엔 사실상 차이가 없어 방치.
+
+  // Codex 모드A 지적(Major C-001, 반영, qa-evidence/T3-47) — 위 "Tone.js 루프
+  // 동작 근거" 주석대로 네이티브 루프는 예약 시각이 [loopStart, loopEnd) 안에
+  // 있는 이벤트만 매 루프 재진입 때 재발화한다. 보정으로 시각을 당기면 루프
+  // 시작 경계에 걸린 이벤트(특히 트랙 재시작 콜백 — 아래 audioStartSeconds가
+  // loopStartSeconds와 정확히 같음)가 그 경계 밑으로 밀려나 더 이상 루프
+  // 구간 안이 아니게 되고, 재진입 때 다시 안 울리는 회귀가 있었다(최초
+  // 1회만 울리고 이후 루프에서 트랙이 재시작 안 됨).
+  //
+  // loopStartSeconds 이상인 이벤트는 그 경계 밑으로 못 내려가게 바닥을
+  // 올린다 — 다만 정확히 loopStartSeconds "그 값"으로 고정하면 안 된다: Tone.js
+  // 15.1.22를 Claude 내장 브라우저에서 직접 실행해 확인한 결과(2026-10-28,
+  // qa-evidence/T3-47), loopStart 경계에 정확히 걸치거나 그로부터 ~3~4ms
+  // 이내인 schedule() 이벤트는 "루프 진입 전 1회만 울리고 이후 재진입에서
+  // 재발화하지 않는" 별도의 양자화 버그가 있었다(같은 이벤트를 loopStart+
+  // 10~20ms 지점에 두면 여러 번의 루프 재진입에서 모두 정상 재발화함을
+  // 반복 확인). 그래서 바닥을 loopStartSeconds 자체가 아니라
+  // LOOP_BOUNDARY_SAFETY_MARGIN_SECONDS(확인된 위험 구간 3~4ms보다 5배 이상
+  // 넉넉한 20ms)만큼 안쪽으로 둔다 — 그 경계에 걸린 이벤트는 보정 혜택을
+  // 최대 20ms만 못 받지만(±500ms 보정 범위에 비하면 미미), 루프 재발화는
+  // 항상 보장된다. 루프 밖(그 이전) 이벤트는 기존처럼 0까지만 막는다.
+  //
+  // 부수 효과 — 이 바닥은 보정값이 0(보정 안 씀)이어도 적용된다(Math.max가
+  // "경계에 정확히 걸친" 값도 안전 구간으로 밀어올림). 즉 트랙 재시작
+  // 콜백(아래)처럼 nominal 시각이 loopStartSeconds와 정확히 같은 이벤트는
+  // T3-47 이전(이 보정 기능 자체가 없던 시절)부터 이미 이 Tone.js 경계
+  // 버그에 걸려 있었을 가능성이 높다(지연 보정 유무와 무관하게 재현됨,
+  // 위 실측 결과 참고) — 이번 수정이 그 잠재 버그도 같이 막는다.
+  const LOOP_BOUNDARY_SAFETY_MARGIN_SECONDS = 0.02
+  function compensatedTriggerTime(timeSeconds: number): number {
+    const floor =
+      schedule.loopStartSeconds !== null && timeSeconds >= schedule.loopStartSeconds
+        ? schedule.loopStartSeconds + LOOP_BOUNDARY_SAFETY_MARGIN_SECONDS
+        : 0
+    return Math.max(floor, timeSeconds - latencyCompensationSeconds)
+  }
 
   for (const click of countInClicks) {
     scheduledIds.push(
       transport.schedule((time) => {
         countInClick.trigger(click.accent, time)
-      }, Math.max(0, click.timeSeconds - latencyCompensationSeconds)),
+      }, compensatedTriggerTime(click.timeSeconds)),
     )
   }
 
@@ -129,7 +171,7 @@ export function playDrumScore(
     scheduledIds.push(
       transport.schedule((time) => {
         voices[note.piece].trigger(time, note.velocity / 127)
-      }, Math.max(0, timeSeconds - latencyCompensationSeconds)),
+      }, compensatedTriggerTime(timeSeconds)),
     )
   }
 
@@ -161,7 +203,7 @@ export function playDrumScore(
           playbackRate,
         )
         tracks.playFrom(positionSeconds, playbackRate)
-      }, Math.max(0, audioStartSeconds - latencyCompensationSeconds)),
+      }, compensatedTriggerTime(audioStartSeconds)),
     )
   }
 

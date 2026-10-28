@@ -41,7 +41,7 @@ describe('analyzeHighFrequencyRatio', () => {
     // T3-45 실측(결함 pretender.mp4)과 같은 성격 — 6kHz 이상이 거의 없는 신호.
     const signal = sineWave(200, FFT_SIZE * 4, SAMPLE_RATE)
 
-    const result = analyzeHighFrequencyRatio(signal, SAMPLE_RATE)
+    const result = analyzeHighFrequencyRatio([signal], SAMPLE_RATE)
 
     expect(result.highFrequencyRatio).toBeLessThan(0.001)
     expect(result.isLowQuality).toBe(true)
@@ -50,7 +50,7 @@ describe('analyzeHighFrequencyRatio', () => {
   it('고주파(10kHz) 신호는 고주파 비율이 높아 저품질로 판단되지 않는다', () => {
     const signal = sineWave(10000, FFT_SIZE * 4, SAMPLE_RATE)
 
-    const result = analyzeHighFrequencyRatio(signal, SAMPLE_RATE)
+    const result = analyzeHighFrequencyRatio([signal], SAMPLE_RATE)
 
     expect(result.highFrequencyRatio).toBeGreaterThan(0.9)
     expect(result.isLowQuality).toBe(false)
@@ -70,7 +70,7 @@ describe('analyzeHighFrequencyRatio', () => {
       mixed[i] = low[i] * 0.85 + high[i] * 0.15
     }
 
-    const result = analyzeHighFrequencyRatio(mixed, SAMPLE_RATE)
+    const result = analyzeHighFrequencyRatio([mixed], SAMPLE_RATE)
 
     expect(result.isLowQuality).toBe(false)
   })
@@ -78,7 +78,33 @@ describe('analyzeHighFrequencyRatio', () => {
   it('FFT 윈도우보다 짧은 신호는 판단 근거 부족으로 저품질 아님(안전한 미탐) 처리', () => {
     const signal = new Float32Array(100)
 
-    const result = analyzeHighFrequencyRatio(signal, SAMPLE_RATE)
+    const result = analyzeHighFrequencyRatio([signal], SAMPLE_RATE)
+
+    expect(result.isLowQuality).toBe(false)
+  })
+
+  it('좌우 채널의 고주파가 서로 반대 위상이어도(모노 합성 시 상쇄) 저품질로 오판하지 않는다', () => {
+    // Codex 모드A 지적(Minor C-003, qa-evidence/T3-47) — 옛 구현(시간 영역에서
+    // 채널 평균 후 FFT 1회)은 이 경우 고주파 성분이 평균 과정에서 상쇄돼
+    // 거의 0이 되므로 저품질로 오판했다. 좌우 채널을 각각 FFT한 뒤 크기(항상
+    // 0 이상)를 합산하면 상쇄가 원리적으로 불가능해야 한다.
+    const length = FFT_SIZE * 4
+    const low = sineWave(150, length, SAMPLE_RATE)
+    const high = sineWave(8000, length, SAMPLE_RATE)
+    const left = new Float32Array(length)
+    const right = new Float32Array(length)
+    for (let i = 0; i < length; i++) {
+      left[i] = low[i] * 0.85 + high[i] * 0.15
+      right[i] = low[i] * 0.85 - high[i] * 0.15 // 고주파 성분만 반대 위상
+    }
+    // 시간 영역 평균이면 고주파가 상쇄됨을 전제 확인(이 테스트 자체가 틀리지
+    // 않았는지 검증) — (left+right)/2 == low만 남아야 함.
+    const naiveMono = new Float32Array(length)
+    for (let i = 0; i < length; i++) naiveMono[i] = (left[i] + right[i]) / 2
+    const naiveResult = analyzeHighFrequencyRatio([naiveMono], SAMPLE_RATE)
+    expect(naiveResult.isLowQuality).toBe(true) // 상쇄로 저품질처럼 보임(전제 확인)
+
+    const result = analyzeHighFrequencyRatio([left, right], SAMPLE_RATE)
 
     expect(result.isLowQuality).toBe(false)
   })
