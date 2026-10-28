@@ -229,21 +229,12 @@ function formatMmSs(totalSeconds: number): string {
   return `${minutes}:${String(seconds).padStart(2, '0')}`
 }
 
-/** 폰 세로 화면 판별 — intent/04-ui-ux.md §3 "폰 세로 = 레인만(킷은 축소 아이콘)".
- * 폭<높이(세로 방향) AND 폭이 좁음(태블릿보다 작음)을 기준으로 함 — 구체 임계값은
- * work/T2-3/plan.md §가정, qa-evidence/T2-3/result.md에서 실기기로 재확인 예정. */
-function usePortraitPhoneLayout(): boolean {
-  const [isPortraitPhone, setIsPortraitPhone] = useState(
-    () => window.matchMedia('(max-width: 600px) and (orientation: portrait)').matches,
-  )
-  useEffect(() => {
-    const mq = window.matchMedia('(max-width: 600px) and (orientation: portrait)')
-    const onChange = () => setIsPortraitPhone(mq.matches)
-    mq.addEventListener('change', onChange)
-    return () => mq.removeEventListener('change', onChange)
-  }, [])
-  return isPortraitPhone
-}
+// 2026-10-28(의뢰인 요청, 7차) — 예전엔 폰 세로 화면(intent/04-ui-ux.md §3
+// "폰 세로 = 레인만, 킷은 축소 아이콘")만 킷을 작게 줄였는데, 이번 요청으로
+// "레인·킷이 나란히 들어갈 공간이 없는 화면(isKitStacked) 전부"에서 킷을
+// 메인 영역이 아니라 설정 패널(믹서 아래)로 옮기는 것으로 범위가 넓어져(아래
+// settingsPanelContent 참고), 세로/가로 방향을 따로 구분하던
+// usePortraitPhoneLayout() 훅은 더 이상 쓰이는 곳이 없어졌다 — 삭제.
 
 const SETTINGS_SIDEBAR_BREAKPOINT_QUERY = '(max-width: 900px)'
 
@@ -402,7 +393,6 @@ export function PracticeCanvas({
   // 전에 즉시 막기 위함(동기 가드), state는 버튼 disabled 표시용.
   const isStartingRef = useRef(false)
   const [isStarting, setIsStarting] = useState(false)
-  const isPortraitPhone = usePortraitPhoneLayout()
   // 2026-10-28(의뢰인 요청) — 설정 패널 반응형 분기(위 useNarrowSettingsLayout
   // 코멘트 참고). 좁은 화면에서만 쓰는 열림 상태라 넓은 화면(사이드바 항상
   // 표시)에선 참조되지 않음.
@@ -1625,6 +1615,26 @@ export function PracticeCanvas({
             <option value={4}>4</option>
           </select>
         </label>
+
+        {/* 2026-10-28(의뢰인 요청, 7차) — "화면이 줄어들기 시작하면 레인이
+         * 너무 작다, 차라리 드럼을 믹서 아래 부분에 넣고 레인을 남은
+         * 공간에 가운데 정렬하면 어떨까", "믹서가 모달로 나와야 하는
+         * 화면부터는 드럼이 잘 안 보여도 된다 — 1순위는 레인" — 레인·킷이
+         * 나란히 놓일 공간이 없는 화면(isKitStacked)에서는 킷을 메인
+         * 영역(레인 아래)이 아니라 여기 설정 패널(믹서 아래)로 옮긴다.
+         * 메인 영역은 레인 하나만 남아 남는 폭·높이에 그대로 가운데
+         * 정렬되고(아래 메인 영역 JSX 참고), 넓은 사이드바에서는 항상
+         * 보이지만 Drawer로 접히는 화면(≤900px)에서는 믹서를 열어야만
+         * 보여서 "드럼이 안 보여도 된다"는 우선순위와도 자연히 맞는다. */}
+        {isKitStacked && (
+          <div style={{ maxWidth: 160, margin: '0 auto' }}>
+            <KitIllustration
+              activeHandByPiece={activeHandByPiece}
+              showSticking={false}
+              pieceColor={readPieceColor}
+            />
+          </div>
+        )}
       </div>
     </>
   )
@@ -1756,6 +1766,16 @@ export function PracticeCanvas({
             // leftStack 안의 레인이 "남는 높이만큼" 늘어날 수 있다(의뢰인
             // 요청 — 스크롤 없이 한 화면에 다 보이게).
             alignItems: 'stretch',
+            // 2026-10-28(의뢰인 요청, 7차) — "화면이 넓어질수록 레인·킷이
+            // 동떨어지게 된다, 보이지 않는 하나의 박스에 담겼다 생각하고
+            // 같이 가운데로" — 6차의 "킷을 레인 오른쪽 남는 공간의
+            // 가운데에" 방식은 초광폭 화면에서 그 "남는 공간"이 커질수록
+            // 간격도 같이 벌어지는 부작용이 있었다. {레인, 킷}을 고정
+            // 간격(gap)으로 묶어 그 묶음 전체를 가운데 정렬하는 방식으로
+            // 되돌린다 — 화면이 아무리 넓어져도 레인-킷 간격은 항상
+            // 일정(이번엔 isKitStacked에서 킷 자체를 메인 영역에 안 그려서
+            // 그쪽엔 justifyContent가 영향 없음).
+            justifyContent: isKitStacked ? undefined : 'center',
             gap: 'var(--space-4)',
             // 2026-10-28(의뢰인 요청, 6차) — "레인 위로 빈 공간이 있다,
             // 드럼이 아래로 내려간 좁은 화면에서도(안 보이더라도) 레인
@@ -2150,44 +2170,28 @@ export function PracticeCanvas({
             </p>
           </div>
 
-          {/* 2026-10-28(의뢰인 요청) — 오디오 지연 보정·믹서·보이는 마디 수는 위
-           * settingsPanelContent(왼쪽 사이드바/Drawer)로 이동 — 킷 그림만 여기
-           * 메인 영역에 남긴다. 킷 그림은 "지금 쳐야 할 위치"를 실시간으로
-           * 보여주는 항상-표시 정보라 설정이 아님(의뢰인이 설정으로 꼽은 건
-           * BPM·오디오 지연 보정·믹서·보이는 마디 수뿐 — 위 목록 참고).
-           * T3-11(2026-10-25, 의뢰인 피드백 "폰 세로에서 드럼킷이 안 보여") —
-           * 세로 폰에서는 폭만 축소(160px, 넓은 화면은 320px)해 "축소 아이콘"에
-           * 가깝게 맞춘다(원래 의도, intent/04-ui-ux.md §3).
-           * 2026-10-28(의뢰인 요청, 2차) — "드럼+문구랑 레인이랑 정렬이 안
-           * 맞는다" 지적 — margin:auto로 레인과 같은 중심에 오게.
-           * 2026-10-28(의뢰인 요청, 4차) — 넓은 화면에서는 레인 좌측·킷 우측
-           * 배치라 margin:auto(가운데 정렬) 대신 flexShrink:0(고정폭 유지)만
-           * 필요 — 세로 중앙 정렬은 위 행의 alignItems:center가 담당.
-           * 2026-10-28(의뢰인 요청, 6차) — "드럼 위치를 레인 옆 빈공간
-           * 기준으로 가운데에 두고 싶다" — 4·5차 때는 레인 열(고정폭) 바로
-           * 옆에 킷을 붙이고 그 {레인+킷} 묶음 전체를 가운데 정렬했는데,
-           * 그러면 킷이 "레인 열 바로 옆"에 붙을 뿐 "레인 오른쪽 남는
-           * 공간 전체의 가운데"는 아니었다. 레인 열(고정폭, 위)과 분리된
-           * "킷 영역" wrapper를 하나 더 둬 그 영역이 남는 폭 전부
-           * (flex:1)를 차지하고, 그 안에서 킷을 가로·세로 모두 가운데
-           * 정렬한다 — 좁은 화면(isKitStacked)에서는 이 wrapper가
-           * display:'contents'로 레이아웃에서 사라져(자식인 킷 div가 바로
-           * 위 행의 직계 자식처럼 동작) 기존 동작(레인 아래 스택)에
-           * 영향 없음. */}
-          <div
-            style={{
-              display: isKitStacked ? 'contents' : 'flex',
-              flex: isKitStacked ? undefined : 1,
-              minWidth: 0,
-              alignItems: isKitStacked ? undefined : 'center',
-              justifyContent: isKitStacked ? undefined : 'center',
-            }}
-          >
+          {/* 2026-10-28(의뢰인 요청, 7차) — "믹서가 모달로 나와야 하는
+           * 화면부터는 드럼이 잘 안 보여도 된다, 1순위는 레인" — 킷을
+           * 메인 영역에 그리는 건 레인·킷이 나란히 들어갈 공간이 있는
+           * 넓은 화면(!isKitStacked)에서만. 좁은 화면(isKitStacked)에서는
+           * 아예 여기서 그리지 않는다 — 대신 위
+           * settingsPanelContent(믹서 아래)로 옮겨졌다(그쪽 코멘트 참고).
+           * 그 결과 메인 영역엔 레인만 남아 남는 폭·높이 전부를 레인이
+           * 쓰며 자연히 가운데 정렬된다("레인을 남는 공간에 가운데
+           * 정렬로" 요청 그대로).
+           * (이전 이력) T3-11(2026-10-25) 세로 폰 축소(160px)/넓은 화면
+           * 320px, 2026-10-28 2차 margin:auto 중앙정렬, 4차 좌우 배치
+           * 전환 시 flexShrink:0 — 전부 이 조건부 렌더링 안으로 유지.
+           * 2026-10-28(의뢰인 요청, 7차) — alignSelf:'center'로 위 행의
+           * stretch를 상쇄해 레인 열 높이 안에서 세로 중앙(round 5와 동일
+           * 방식으로 복귀 — round 6의 "남는 공간 전체의 가운데" 방식은
+           * 초광폭 화면에서 레인과 너무 멀어진다는 재지적으로 되돌림). */}
+          {!isKitStacked && (
             <div
               style={{
-                maxWidth: isPortraitPhone ? 160 : 320,
-                margin: isKitStacked ? '0 auto' : undefined,
+                maxWidth: 320,
                 flexShrink: 0,
+                alignSelf: 'center',
               }}
             >
               <KitIllustration
@@ -2196,7 +2200,7 @@ export function PracticeCanvas({
                 pieceColor={readPieceColor}
               />
             </div>
-          </div>
+          )}
         </div>
       </div>
     </div>
