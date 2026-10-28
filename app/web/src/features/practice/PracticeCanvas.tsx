@@ -1630,6 +1630,12 @@ export function PracticeCanvas({
         // flex-start였던 걸 변경 — 메인 영역은 이미 더 높아 실질적으로
         // 그대로고, 사이드바만 그 높이로 늘어남).
         alignItems: isNarrowSettingsLayout ? 'flex-start' : 'stretch',
+        // 2026-10-28(의뢰인 요청, 5차) — App.tsx가 이 컴포넌트를 담는
+        // wrapper를 `flex:1, minHeight:0`(남는 뷰포트 높이 전부)로 주므로,
+        // 이 루트도 그 높이를 그대로 받아야 아래 레인이 "남는 높이만큼"
+        // 늘어나는 계산이 가능하다. 좁은 화면(킷 아래로 스택)에서는 이
+        // 높이를 쓰는 자식이 없어(레인 고정 400px 그대로) 사실상 영향 없음.
+        height: '100%',
       }}
     >
       {/* 2026-10-28(의뢰인 요청) — 반응형 설정 패널: 넓은 화면(연습 레인 폭 +
@@ -1723,8 +1729,31 @@ export function PracticeCanvas({
           style={{
             display: 'flex',
             flexDirection: isKitStacked ? 'column' : 'row',
-            alignItems: isKitStacked ? 'stretch' : 'center',
+            // 2026-10-28(의뢰인 요청, 5차) — 항상 stretch. isKitStacked(세로
+            // 쌓기)에서는 원래부터 stretch(교차축=가로, 사이드바 구분선용).
+            // !isKitStacked(좌우 배치)에서도 stretch로 바꿔(교차축=세로)
+            // leftStack이 이 행의 전체 높이를 받게 한다 — 그래야 아래
+            // leftStack 안의 레인이 "남는 높이만큼" 늘어날 수 있다(의뢰인
+            // 요청 — 스크롤 없이 한 화면에 다 보이게). 킷은 그 높이만큼
+            // 같이 늘어나면 안 되므로 킷 wrapper에 alignSelf:'center'로
+            // 개별 예외를 둔다(아래).
+            alignItems: 'stretch',
+            // 2026-10-28(의뢰인 요청, 5차) — "드럼이 너무 우측 끝에 붙어있다,
+            // 노트에 가까워지게" 지적 — 원인은 바로 아래 leftStack이
+            // flex:1로 남는 폭을 전부 먹은 뒤 그 "안에서" 레인을 가운데
+            // 정렬했기 때문(레인 자체는 가운데인데, leftStack의 테두리가
+            // 화면 끝까지라 킷은 그 테두리 바로 옆 = 화면 맨 끝에 붙음).
+            // leftStack 폭을 레인 폭으로 고정하고(아래), 이 행 자체를
+            // 가운데 정렬해 {레인 열 + 킷}을 한 덩어리로 묶어 중앙에 둔다.
+            justifyContent: isKitStacked ? undefined : 'center',
             gap: 'var(--space-4)',
+            // 2026-10-28(의뢰인 요청, 5차) — main-column(위)이 App.tsx가 준
+            // 남는 뷰포트 높이로 stretch돼 있으므로, 이 행도 flex:1로 그
+            // 높이를 그대로 받아야 아래 레인까지 전달된다. isKitStacked
+            // (세로 쌓기, 좁은 화면)에서는 안 건드림 — 그 화면들은 원래부터
+            // 자연스러운 세로 스크롤이 문제된 적이 없어 범위 밖으로 둔다.
+            flex: isKitStacked ? undefined : 1,
+            minHeight: isKitStacked ? undefined : 0,
           }}
         >
           <div
@@ -1732,7 +1761,11 @@ export function PracticeCanvas({
               display: 'flex',
               flexDirection: 'column',
               gap: 'var(--space-4)',
-              flex: isKitStacked ? undefined : 1,
+              // flex:1 대신 레인 폭(PRACTICE_LANE_MAX_WIDTH_PX+20)으로 고정 —
+              // 바로 위 코멘트 참고.
+              flexGrow: isKitStacked ? undefined : 0,
+              flexShrink: isKitStacked ? undefined : 0,
+              width: isKitStacked ? undefined : PRACTICE_LANE_MAX_WIDTH_PX + 20,
               minWidth: 0,
             }}
           >
@@ -1832,6 +1865,12 @@ export function PracticeCanvas({
                 gap: 'var(--space-2)',
                 maxWidth: PRACTICE_LANE_MAX_WIDTH_PX + 20,
                 margin: '0 auto',
+                // 2026-10-28(의뢰인 요청, 5차) — leftStack이 받은 "남는 높이"를
+                // 이 행이 flex:1로 가져가야, 그 안의 캔버스(아래 height:'100%')가
+                // 실제로 그만큼 늘어난다. 좁은 화면(킷 아래 스택)은 범위 밖 —
+                // 고정 400px 그대로.
+                flex: isKitStacked ? undefined : 1,
+                minHeight: isKitStacked ? undefined : 0,
               }}
             >
               <div style={{ position: 'relative', flex: 1, minWidth: 0 }}>
@@ -1843,7 +1882,13 @@ export function PracticeCanvas({
                     // 2026-10-28(의뢰인 요청) — 킷을 레인 아래가 아니라 옆(우측)에
                     // 두는 넓은 화면에서는 그만큼 생긴 세로 공간을 레인 자체를
                     // 더 길게(더 먼 미리보기) 만드는 데 쓴다.
-                    height: isKitStacked ? 400 : 600,
+                    // 2026-10-28(의뢰인 요청, 5차) — "스크롤 없이 한 화면에"
+                    // 지적 — 600 고정값 대신 남는 높이를 그대로 채우도록
+                    // height:'100%'로 바꾸고(위 flex 체인 전체가 이 값을
+                    // 뷰포트 높이에서 역산해 전달), 극단적으로 짧은 창에서도
+                    // 레인이 너무 쪼그라들지 않게 최소 300px은 보장.
+                    height: isKitStacked ? 400 : '100%',
+                    minHeight: isKitStacked ? undefined : 300,
                     background: 'var(--bg)',
                     border: '1px solid var(--border)',
                   }}
@@ -2106,6 +2151,11 @@ export function PracticeCanvas({
               maxWidth: isPortraitPhone ? 160 : 320,
               margin: isKitStacked ? '0 auto' : undefined,
               flexShrink: 0,
+              // 2026-10-28(의뢰인 요청, 5차) — 위 행이 이제 항상 stretch라
+              // (레인 열에 전체 높이를 주기 위해) 킷도 같이 늘어나려 하는데,
+              // 킷은 정사각形 그림이라 늘어나면 안 됨 — 개별적으로 'center'로
+              // 되돌려 원래 의도(레인 열 높이 안에서 세로 중앙)를 유지한다.
+              alignSelf: isKitStacked ? undefined : 'center',
             }}
           >
             <KitIllustration
