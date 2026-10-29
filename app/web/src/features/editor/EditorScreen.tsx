@@ -1356,7 +1356,13 @@ export function EditorScreen({
                 fontSize: '0.8em',
                 whiteSpace: 'nowrap',
                 pointerEvents: 'none',
-                zIndex: 1,
+                // Codex 모드A 지적(권장, 반영) — 노트 버튼에 준 zIndex: 2
+                // (위 코멘트) 때문에, 틱 0(또는 근처) 노트는 절반이
+                // ROW_LABEL_WIDTH 안쪽까지 걸쳐지는데(디자인상 원래도 그랬음
+                // — tickToPx(0) - NOTE_SIZE/2가 음수) 라벨이 2보다 낮은
+                // zIndex면 그 노트가 라벨 글자를 가려버린다. 라벨을 항상
+                // 가장 위로.
+                zIndex: 3,
               }}
             >
               {row.label}
