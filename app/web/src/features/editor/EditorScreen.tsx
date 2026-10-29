@@ -1602,7 +1602,12 @@ export function EditorScreen({
                       top: (ROW_HEIGHT - NOTE_SIZE) / 2,
                       width: NOTE_SIZE,
                       height: NOTE_SIZE,
-                      borderRadius: '50%',
+                      // 2026-10-29(T3-73, 의뢰인 요청) — 연습 화면(laneRenderer.ts의
+                      // 'rounded-rect' 도형, 모서리 반지름 4)과 모양을 맞춰 두
+                      // 화면에서 같은 노트가 같은 인상으로 보이게 한다. 원(50%)은
+                      // 중심점이 격자선과 조금만 어긋나도 "선에서 벗어난" 인상을
+                      // 주기 쉬운데, 네모는 변이 그대로 보여 덜 그렇다.
+                      borderRadius: 4,
                       border: isSelected
                         ? '2px solid var(--warning)'
                         : isHihatOpen
