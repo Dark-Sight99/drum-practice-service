@@ -1635,7 +1635,18 @@ export function PracticeCanvas({
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)' }}>
           <strong>채널 볼륨</strong>
-          <button onClick={applyDrumlessPreset}>
+          {/* 2026-10-29(의뢰인 요청) — 전역 button(각진 큰 박스) 대신 아래
+           * Mute 버튼들과 어울리는 알약 모양으로. 지금 꺼진 상태(드럼리스
+           * 프리셋 적용 중)면 danger색으로 채워 상태를 색으로도 드러낸다
+           * (.mute-btn--active와 같은 원리, 위 index.css 참고). */}
+          <button
+            className={
+              mixerState.stem_drums.volume === 0
+                ? 'preset-toggle-btn preset-toggle-btn--active'
+                : 'preset-toggle-btn'
+            }
+            onClick={applyDrumlessPreset}
+          >
             🥁 원곡 드럼 {mixerState.stem_drums.volume === 0 ? '켜기' : '끄기'}
           </button>
         </div>

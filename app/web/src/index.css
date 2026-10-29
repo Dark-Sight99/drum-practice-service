@@ -99,6 +99,37 @@ select:disabled {
   color: var(--text);
 }
 
+/* 2026-10-29(의뢰인 요청) — "76, 0ms, 2 이런 숫자 박스들이 촌스러워 보인다"
+ * — 가장 큰 원인은 숫자칸(BPM·오디오 지연 보정·보이는 마디 수·A-B 루프
+ * 마디) 전부가 OS 기본 스피너 화살표(▲▼)를 그대로 달고 있던 것. 마우스
+ * 휠·키보드 화살표로 증감은 여전히 되니 기능 손실 없이 화살표만 숨긴다.
+ * 가운데 정렬도 추가 — 왼쪽 정렬이던 숫자가 좁은 박스 안에서 안 어울려
+ * 보였음. */
+input[type='number'] {
+  text-align: center;
+  appearance: textfield;
+  -moz-appearance: textfield;
+}
+input[type='number']::-webkit-outer-spin-button,
+input[type='number']::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+/* 2026-10-29(의뢰인 요청, 같은 지적) — "보이는 마디 수" select의 OS 기본
+ * 드롭다운 화살표도 같은 이유로 숨기고, 토큰 색(--text-muted)을 쓰는 직접
+ * 그린 쉐브론으로 교체. 고정 다크 테마 하나뿐이라(라이트 모드 토글 없음,
+ * tokens.css 참고) 데이터 URI에 색을 고정값으로 넣어도 테마 불일치 위험이
+ * 없다. */
+select {
+  appearance: none;
+  -webkit-appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6' fill='none'%3E%3Cpath d='M1 1L5 5L9 1' stroke='%239aa1b2' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right var(--space-2) center;
+  padding-right: calc(var(--space-2) * 2 + 10px);
+}
+
 /* 2026-10-26 의뢰인 요청 — 라이브러리 곡 카드. 클릭 가능한(처리 완료) 카드만
  * 호버 시 그림자가 진해지고 살짝 위로 뜬다. */
 .song-card {
@@ -268,4 +299,41 @@ input[type='range'].mixer-slider::-moz-range-thumb {
 
 .mute-btn--active:hover {
   border-color: var(--danger);
+}
+
+/* 2026-10-29(의뢰인 요청) — "원곡 드럼 끄기 버튼도 조금 그렇다" — 전역
+ * button 스타일(각진 큰 박스)이 같은 행의 Mute 버튼들(.mute-btn, 둥근
+ * 알약 모양)과 안 어울렸다. 이것도 프리셋을 "켜고 끄는" 토글이라 같은
+ * 알약 톤으로 맞추되, Mute보다 상위 동작(채널 전체 상태를 바꿈)이라
+ * 살짝 더 또렷하게(글자 크기·패딩을 한 단계 키움, accent색 보더로 구분).
+ * 켜져 있는 상태(음소거 중, volume===0)는 .mute-btn--active와 같은 원리로
+ * danger색 채움 — "지금 꺼져 있다"는 게 색으로도 바로 보이게. */
+.preset-toggle-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  background: none;
+  border: 1px solid var(--accent);
+  border-radius: 999px;
+  padding: var(--space-1) var(--space-3);
+  color: var(--accent);
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition:
+    background-color 200ms ease,
+    border-color 200ms ease,
+    color 200ms ease;
+}
+
+.preset-toggle-btn:hover {
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
+}
+
+.preset-toggle-btn--active {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.preset-toggle-btn--active:hover {
+  background: color-mix(in srgb, var(--danger) 15%, transparent);
 }
