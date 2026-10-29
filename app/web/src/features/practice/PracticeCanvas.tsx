@@ -394,6 +394,11 @@ export function PracticeCanvas({
   // 전에 즉시 막기 위함(동기 가드), state는 버튼 disabled 표시용.
   const isStartingRef = useRef(false)
   const [isStarting, setIsStarting] = useState(false)
+  // 2026-10-29(의뢰인 요청) — 재생 시작 자체가 실패(오디오 엔진 셋업 실패)하면
+  // 지금까진 콘솔에만 에러가 찍히고 화면엔 아무 표시가 없었다 — "다시 시도"
+  // 배너를 보여주기 위한 상태. handlePlay()가 재시도 때마다 맨 앞에서 false로
+  // 리셋한다(재시도 또는 성공하면 배너가 사라짐).
+  const [playStartFailed, setPlayStartFailed] = useState(false)
   // 2026-10-28(의뢰인 요청) — 설정 패널 반응형 분기(위 useNarrowSettingsLayout
   // 코멘트 참고). 좁은 화면에서만 쓰는 열림 상태라 넓은 화면(사이드바 항상
   // 표시)에선 참조되지 않음.
@@ -497,6 +502,13 @@ export function PracticeCanvas({
   // 전부 이 가드 뒤에서만 한다.
   const audioTrackPoolRef = useRef<AudioTrackPool | null>(null)
   const [audioTracksLoading, setAudioTracksLoading] = useState(false)
+  // 2026-10-29(의뢰인 요청) — "음원을 못 받았으면 다시 시도해서 받게 하자,
+  // 신스 드럼만 재생해봤자 드럼 소리만 날 뿐이다" — 실패해도 신스 폴백으로
+  // 조용히 넘어가던 것에, 눈에 보이는 배너 + 재시도 버튼을 추가한다. 재생
+  // 자체는 여전히 막지 않음(신스 폴백 유지) — 다만 사용자가 "지금 신스로
+  // 재생 중"임을 알고 다시 받을 수 있게.
+  const [audioTracksFailed, setAudioTracksFailed] = useState(false)
+  const [audioTracksRetryToken, setAudioTracksRetryToken] = useState(0)
   const availableAudioKindsKey = availableAudioKinds.join(',')
   useEffect(() => {
     audioTrackPoolRef.current = null
@@ -505,6 +517,7 @@ export function PracticeCanvas({
     // 올린다(이 리셋이 없으면 이전 곡 로딩 중 곡을 바꿨는데 새 곡이 바로
     // 아래 early return에 걸리는 경우 로딩 표시가 영원히 안 꺼짐).
     setAudioTracksLoading(false)
+    setAudioTracksFailed(false)
     if (songId === undefined) return
     const stemKinds = availableAudioKinds.filter((kind) => kind !== 'original')
     if (stemKinds.length === 0) return // MIDI-only 곡 등 — 만들 트랙 자체가 없음
@@ -531,6 +544,7 @@ export function PracticeCanvas({
         // eslint-disable-next-line no-console
         console.error('오디오 트랙 풀 생성 실패 — 이 세션은 신스 드럼만 재생됩니다', err)
         setAudioTracksLoading(false)
+        setAudioTracksFailed(true)
       })
     return () => {
       cancelled = true
@@ -538,7 +552,13 @@ export function PracticeCanvas({
       audioTrackPoolRef.current = null
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [songId, availableAudioKindsKey])
+  }, [songId, availableAudioKindsKey, audioTracksRetryToken])
+
+  // 재시도 버튼 — songId/availableAudioKindsKey는 그대로지만 토큰만 올려
+  // 위 effect를 다시 돌게 한다(cleanup → 재실행, 기존 cancelled 가드 재사용).
+  function retryAudioTrackDownload(): void {
+    setAudioTracksRetryToken((n) => n + 1)
+  }
 
   function clampBpm(value: number): number {
     if (Number.isNaN(value)) return playbackBpm
@@ -1142,6 +1162,7 @@ export function PracticeCanvas({
     // 막아야 해서 ref로 동기 체크 — state만 쓰면 같은 틱에 두 번째 호출이
     // 들어올 때 아직 반영 전일 수 있음).
     if (isStartingRef.current) return
+    setPlayStartFailed(false)
     // T3-6(REQ-04) — 일시정지 중이면 "처음부터 새 세션" 로직(아래의 모든
     // await·stopPlayback() 호출)을 전부 건너뛰고 재개만 한다. 반드시 첫
     // await보다 먼저, 완전히 동기적으로 끝나야 자동 정지 타이머와의 경쟁이
@@ -1299,7 +1320,17 @@ export function PracticeCanvas({
       setIsStarting(false)
     } catch (err) {
       cleanupAbortedSetup()
-      throw err
+      // 2026-10-29(의뢰인 요청) — 예전엔 여기서 그대로 다시 던져 호출부
+      // (onClick={handlePlay}, void handlePlay())가 아무도 안 받는 처리되지
+      // 않은 Promise 거부로 콘솔에만 남고 화면엔 아무 표시가 없었다 — 위
+      // audioTrackPool 생성 실패(524번째 줄 근처)와 같은 패턴으로 콘솔
+      // 로그 + 상태 플래그로 바꿔, 아래 배너가 "다시 시도" 버튼을 보여줄 수
+      // 있게 한다. cleanupAbortedSetup()이 이미 isStarting을 풀어줘서 버튼은
+      // 바로 다시 누를 수 있는 상태.
+      // eslint-disable-next-line no-console
+      console.error('재생 시작 실패', err)
+      setPlayStartFailed(true)
+      return
     }
 
     // 방금 만든 세션에 지금 믹서 상태를 바로 적용(처음부터 맞게 시작 —
@@ -2305,6 +2336,73 @@ export function PracticeCanvas({
                     : '루프 진행중'}
               </button>
             </div>
+
+            {/* 2026-10-29(의뢰인 요청) — 음원 트랙 다운로드가 실패해도 조용히
+             * 신스 드럼으로 넘어가기만 하면 "왜 소리가 다른지" 사용자가 알 길이
+             * 없다 — 재생 버튼 바로 아래, 블루투스 안내문과 같은 폭으로 상시
+             * 노출(재시도 전까지 계속 보여야 함 — 토스트처럼 사라지면 안 됨). */}
+            {audioTracksFailed && (
+              <div
+                role="alert"
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 'var(--space-2)',
+                  margin: '0 auto',
+                  maxWidth: PRACTICE_LANE_MAX_WIDTH_PX + 20,
+                  background: 'rgba(232, 163, 61, 0.12)',
+                  border: '1px solid var(--warning)',
+                  borderRadius: 'var(--radius-control)',
+                  padding: 'var(--space-2) var(--space-3)',
+                  fontSize: '0.85em',
+                }}
+              >
+                <span aria-hidden="true">⚠</span>
+                <span style={{ flex: 1, minWidth: 0 }}>
+                  음원을 불러오지 못해 신스 드럼으로 재생합니다.
+                </span>
+                <button
+                  type="button"
+                  onClick={retryAudioTrackDownload}
+                  style={{ whiteSpace: 'nowrap', padding: '4px 10px', fontSize: '0.85em' }}
+                >
+                  다시 시도
+                </button>
+              </div>
+            )}
+
+            {/* 2026-10-29(의뢰인 요청) — 재생 시작 자체가 실패하면(오디오 엔진
+             * 셋업 실패) 예전엔 콘솔에만 에러가 남고 화면은 그냥 멈췄다 — 같은
+             * 자리에, 같은 모양의 배너로 "다시 시도" 제공. 버튼은 handlePlay()를
+             * 그대로 다시 호출 — 처음 재생 버튼을 누르는 것과 완전히 같은
+             * 경로(새 세션 셋업을 처음부터 다시 시도)라 별도 로직이 필요 없다. */}
+            {playStartFailed && (
+              <div
+                role="alert"
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 'var(--space-2)',
+                  margin: '0 auto',
+                  maxWidth: PRACTICE_LANE_MAX_WIDTH_PX + 20,
+                  background: 'rgba(229, 72, 77, 0.12)',
+                  border: '1px solid var(--danger)',
+                  borderRadius: 'var(--radius-control)',
+                  padding: 'var(--space-2) var(--space-3)',
+                  fontSize: '0.85em',
+                }}
+              >
+                <span aria-hidden="true">✕</span>
+                <span style={{ flex: 1, minWidth: 0 }}>재생을 시작할 수 없습니다.</span>
+                <button
+                  type="button"
+                  onClick={handlePlay}
+                  style={{ whiteSpace: 'nowrap', padding: '4px 10px', fontSize: '0.85em' }}
+                >
+                  다시 시도
+                </button>
+              </div>
+            )}
 
             {/* 2026-10-28(의뢰인 요청) — 블루투스 이어폰의 물리적 지연(보통
              * 100~300ms) 때문에 "노트가 지나간 뒤에 소리가 들린다"는 문의가 있었음
