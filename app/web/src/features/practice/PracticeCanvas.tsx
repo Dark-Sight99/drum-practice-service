@@ -49,7 +49,7 @@ import {
   type TrackPlayer,
 } from '../../audio'
 import { fetchMixerSetting, saveMixerSetting } from '../../api/auth'
-import { songAudioUrl } from '../../api/songs'
+import { songAudioUrl, type SongSummary } from '../../api/songs'
 import type { DrumPiece, DrumScore, Hand } from '../../score/types'
 import { createLaneRenderer, type LaneRenderer } from '../../render/laneRenderer'
 import { KitIllustration } from '../../render/KitIllustration'
@@ -353,10 +353,18 @@ export interface PracticeCanvasProps {
    * (work/T3-3/plan.md §범위경계 — 비0이면 이 재생 세션은 MIDI만, T3-5 범위). */
   songId?: number
   availableAudioKinds?: string[]
+  /** 2026-10-29(의뢰인 요청) — "연주 페이지에서 편집 버튼을 누르면 편집하는
+   * 페이지의 해당 부분으로 바로 이동해서 편집 바로 할 수 있게". 클릭 시점의
+   * 재생 위치(틱)를 같이 넘긴다 — song이 있어야(EditorScreen이 요구) 이
+   * 버튼 자체를 보여줄 수 있어 둘 다 선택값으로 묶는다. */
+  song?: SongSummary
+  onEditSong?: (song: SongSummary, drumScore: DrumScore, positionTicks: number) => void
 }
 
 export function PracticeCanvas({
   score,
+  song,
+  onEditSong,
   // 2026-10-26(의뢰인 피드백) — 기본값 2마디는 노트가 자주 겹쳐 보여 읽기
   // 어렵다는 재지적. T3-2 게이트 피드백 1차(실제 음원 QA)에서 이미 "1마디로
   // 하면 개별 타격이 또렷이 분리된다"고 확인된 적이 있어, 그 결론대로 기본값을
@@ -1530,6 +1538,28 @@ export function PracticeCanvas({
   // 컴포넌트가 사라질 때(곡 전환, 화면 이탈)도 재생 중이었다면 정리.
   useEffect(() => stopPlayback, [])
 
+  // 2026-10-29(의뢰인 요청) — "연주 페이지에서 편집 버튼을 누르면 편집하는
+  // 페이지의 해당 부분으로 바로 이동해서 편집 바로 할 수 있게". 재생/일시정지
+  // 둘 다에서 clock.getPositionSeconds()가 유효하므로(handleSeek와 같은
+  // 근거), 재생 중이지도 일시정지 중이지도 않으면(한 번도 안 눌렀거나
+  // "처음으로 리셋" 직후) 0으로 둔다. "지금 바로 그 위치로 이동"만 하고
+  // 편집 화면에서 자동으로 재생을 시작하진 않는다(의뢰인 명시).
+  function handleEditClick() {
+    if (!song || !onEditSong) return
+    let positionTicks = 0
+    if (playbackRef.current) {
+      const clock = getMasterClock()
+      const songStartSeconds = barDurationSeconds(score.meta.timeSignature, playbackBpm) * COUNT_IN_BARS
+      const songRelativeSeconds = Math.max(0, clock.getPositionSeconds() - songStartSeconds)
+      // scorePlayer.ts가 각 노트를 ticksToSeconds(tick, ppq, playbackBpm)로
+      // 예약하므로(연습 속도 조절 BPM 기준 — score.meta.bpm이 아님), 거꾸로
+      // 틱을 구할 때도 반드시 같은 playbackBpm을 써야 한다(연습 속도를
+      // 50~150%로 바꾼 상태에서 편집으로 넘어가면 둘이 달라 위치가 어긋남).
+      positionTicks = Math.round(songRelativeSeconds * (playbackBpm / 60) * score.ppq)
+    }
+    onEditSong(song, score, positionTicks)
+  }
+
   // 2026-10-28(의뢰인 요청) — "설정하는 부분(BPM·오디오 지연 보정·믹서·보이는
   // 마디 수)은 왼쪽에 다 몰아넣고 수정할 수 있게, 화면이 좁아지면 설정 버튼을
   // 눌러야 Drawer로 튀어나오게" — 넓은 화면/좁은 화면 둘 다에서 같은 콘텐츠를
@@ -1537,6 +1567,22 @@ export function PracticeCanvas({
   // 재사용한다(중복 방지).
   const settingsPanelContent = (
     <>
+      {/* 2026-10-29(의뢰인 요청) — "연주 페이지에서 편집 버튼을 누르면 편집
+       * 페이지의 해당 부분으로 바로 이동" — 지금 위치를 파악해 편집 화면으로
+       * 넘긴다. 재생 중이던 세션은 App.tsx가 화면을 'editor'로 바꾸면서 이
+       * 컴포넌트가 통째로 언마운트되는 순간 기존 정리 로직(바로 위
+       * `useEffect(() => stopPlayback, [])`)이 알아서 멈춘다 — 편집 화면이
+       * 자동으로 재생을 시작하지도 않음(의뢰인 명시: "연주페이지에서
+       * 재생되는동안 편집페이지에서도 동일하게 재생되고 있으면 안됨"). */}
+      {song && onEditSong && (
+        <button
+          onClick={() => {
+            handleEditClick()
+          }}
+        >
+          편집하기
+        </button>
+      )}
       <label style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
         BPM
         {/* 재생 시작 시점의 BPM/루프 설정으로 Transport가 이미 스케줄돼 있어,

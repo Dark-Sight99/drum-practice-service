@@ -1,9 +1,31 @@
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import * as Tone from 'tone'
+import { Pause, Play, Redo2, Undo2 } from 'lucide-react'
 import type { DrumNote, DrumPiece, DrumScore, Hand } from '../../score/types'
-import { alternateHandsByTick, recommendSticking, validateDrumScore } from '../../score'
+import { alternateHandsByTick, validateDrumScore } from '../../score'
 import { saveSongDrumScore, type SongSummary } from '../../api/songs'
+import { fetchMixerSetting, saveMixerSetting } from '../../api/auth'
 import { ApiError } from '../../api/client'
-import { barIndexForTick, ticksPerBar } from '../../audio'
+import {
+  barIndexForTick,
+  CHANNEL_KEYS,
+  createDrumVoices,
+  createMetronome,
+  defaultMixerState,
+  disposeDrumVoices,
+  effectiveGain,
+  getMasterClock,
+  metronomeGainToDb,
+  playDrumScore,
+  ticksPerBar,
+  ticksToSeconds,
+  type ChannelKey,
+  type ChannelState,
+  type DrumVoiceMap,
+  type Metronome,
+  type MixerState,
+  type PlaybackHandle,
+} from '../../audio'
 import {
   canRedo,
   canUndo,
@@ -18,11 +40,37 @@ import { VELOCITY_TIERS, velocityTierOf, type VelocityTier } from './velocity'
 
 const HAND_LABEL: Record<Exclude<Hand, null>, string> = { R: '오른손', L: '왼손', RF: '오른발', LF: '왼발' }
 
+const CHANNEL_LABEL: Record<ChannelKey, string> = {
+  synth_drums: '신스 드럼',
+  metronome: '메트로놈',
+  stem_drums: '원곡 드럼',
+  stem_bass: '베이스',
+  stem_vocals: '보컬',
+  stem_other: '그 외',
+}
+
+// 2026-10-29(의뢰인 요청) — "편집시에도 음악을 들으면서". 이 화면은 원곡
+// 오디오 스템 없이 신스 드럼 + 메트로놈만 재생한다(practice 화면의 실제
+// 분리 음원 스템 재생은 prime()/playFrom()/resync()로 이어지는 훨씬 복잡한
+// 파이프라인이라, "재생 시작 뒤 바로 임의 위치로 점프"라는 이 화면의
+// 요구와 섞으면 이 프로젝트가 과거에 반복해서 겪은 스템 동기화 버그
+// 부류(T3-16-feedback-6/7, T3-47 루프 경계 등)를 새로 만들 위험이 크다고
+// 판단 — 노트 트리거는 scorePlayer.ts가 각 노트를 개별 schedule()로 예약하는
+// 단순한 경로라 "시작 직후 점프"가 자연스럽게 안전함(지나간 노트는 그냥
+// 스킵됨, Tone.js Transport 표준 동작). 편집 중인 패턴을 듣는다는 핵심
+// 목적은 이걸로 충분히 달성되고, 원곡 전체 믹스가 꼭 필요해지면 별도
+// 작업으로 확장 가능.
 export interface EditorScreenProps {
   song: SongSummary
   initialScore: DrumScore
   onSaved: () => void
   onCancel: () => void
+  /** 2026-10-29(의뢰인 요청) — "연주 페이지에서 편집 버튼을 누르면 편집하는
+   * 페이지의 해당 부분으로 바로 이동해서 편집 바로 할 수 있게". 재생은
+   * 자동으로 시작하지 않음(의뢰인이 명시: "연주페이지에서 재생되는동안
+   * 편집페이지에서도 동일하게 재생되고 있으면 안됨") — 위치만 맞춰두고
+   * 멈춰 있는 상태로 진입. */
+  initialPositionTicks?: number
 }
 
 interface EditableNote extends DrumNote {
@@ -71,6 +119,15 @@ function readPieceColor(piece: DrumPiece): string {
   return getComputedStyle(document.documentElement).getPropertyValue(varName).trim() || '#fff'
 }
 
+/** PracticeCanvas.tsx의 formatMmSs와 같은 포맷(분:초, 초는 2자리) — 이
+ * 화면도 음원이 몇 시간씩 가지 않아 시간 단위는 범위 밖. */
+function formatMmSs(totalSeconds: number): string {
+  const clamped = Math.max(0, Math.round(totalSeconds))
+  const minutes = Math.floor(clamped / 60)
+  const seconds = clamped % 60
+  return `${minutes}:${String(seconds).padStart(2, '0')}`
+}
+
 const PX_PER_GRID_UNIT = 24
 const ROW_HEIGHT = 36
 const NOTE_SIZE = 16
@@ -81,7 +138,13 @@ const NOTE_SIZE = 16
 // 거터를 따로 두고 음표 타임라인은 그 오른쪽부터 시작하게 분리한다.
 const ROW_LABEL_WIDTH = 64
 
-export function EditorScreen({ song, initialScore, onSaved, onCancel }: EditorScreenProps) {
+export function EditorScreen({
+  song,
+  initialScore,
+  onSaved,
+  onCancel,
+  initialPositionTicks,
+}: EditorScreenProps) {
   const [history, setHistory] = useState<EditHistory<EditorState>>(() =>
     createHistory(toEditorState(initialScore)),
   )
@@ -90,13 +153,21 @@ export function EditorScreen({ song, initialScore, onSaved, onCancel }: EditorSc
   // 삭제·손 1개 지정용)은 size===1일 때만 의미를 갖고, 다중 선택(size>=2)은
   // 교대 일괄 적용에만 쓴다(work/T2-7/plan.md §설계 2, 범위 확장 안 함).
   const [selectedIds, setSelectedIds] = useState<ReadonlySet<number>>(new Set())
-  const [startHand, setStartHand] = useState<'R' | 'L'>('R')
   const [saveError, setSaveError] = useState<string | null>(null)
   const [isSaving, setIsSaving] = useState(false)
   const nextIdRef = useRef(initialScore.notes.length)
 
   const state = history.present
   const { meta, ppq } = state
+
+  // 2026-10-29(의뢰인 요청) — "저장버튼은 실제 변경하지 않았을 땐 비활성화
+  // 했다가 변경값이 있을때만 저장버튼 활성화". undo/redo는 history 배열 안의
+  // 기존 객체 참조를 그대로 옮길 뿐 새로 만들지 않는다(editHistory.ts) —
+  // 그래서 "저장된 시점의 state 객체 참조"와 지금 참조를 비교하기만 해도
+  // 정확히 "그때 그 상태로 되돌아왔는지"까지 판정된다(값 비교 불필요,
+  // undo로 저장 시점까지 돌아오면 자동으로 dirty=false가 됨).
+  const lastSavedStateRef = useRef(state)
+  const isDirty = state !== lastSavedStateRef.current
 
   function commit(next: EditorState) {
     setHistory((h) => pushHistory(h, next))
@@ -122,6 +193,182 @@ export function EditorScreen({ song, initialScore, onSaved, onCancel }: EditorSc
       snapTick(Math.round(((px - ROW_LABEL_WIDTH) / PX_PER_GRID_UNIT) * unitTicks), gridUnit, ppq),
     )
   }
+
+  // --- 재생(2026-10-29 의뢰인 요청) ---------------------------------------
+  const [isPlaying, setIsPlaying] = useState(false)
+  const [currentSeconds, setCurrentSeconds] = useState(() =>
+    ticksToSeconds(initialPositionTicks ?? 0, ppq, meta.bpm),
+  )
+  const [cursorTicks, setCursorTicks] = useState(initialPositionTicks ?? 0)
+  const cursorTicksRef = useRef(cursorTicks)
+  useEffect(() => {
+    cursorTicksRef.current = cursorTicks
+  }, [cursorTicks])
+
+  const [mixerState, setMixerStateRaw] = useState<MixerState>(defaultMixerState())
+  const mixerStateRef = useRef(mixerState)
+  useEffect(() => {
+    mixerStateRef.current = mixerState
+  }, [mixerState])
+
+  // 계정 전체 공유 믹서(의뢰인 요청 "믹서 동일하게 사용") — practice 화면과
+  // 같은 `/auth/me/mixer-setting`을 그대로 쓴다. practice의 채널별 편집-추적·
+  // 저장 직렬화 같은 정교한 경합 방지(PracticeCanvas.tsx 참고)는 이 화면
+  // 세션이 짧고 단순해 생략 — 단순 디바운스 저장으로 충분하다고 판단.
+  useEffect(() => {
+    let cancelled = false
+    fetchMixerSetting()
+      .then(({ volumes }) => {
+        if (cancelled || !volumes) return
+        const merged = defaultMixerState()
+        for (const key of CHANNEL_KEYS) if (volumes[key]) merged[key] = volumes[key]
+        setMixerStateRaw(merged)
+      })
+      .catch(() => {
+        // 못 불러와도 기본값으로 계속 — practice 화면 로드 실패와 같은 원칙.
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  const mixerSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  function updateChannel(key: ChannelKey, patch: Partial<ChannelState>) {
+    setMixerStateRaw((prev) => {
+      const next = { ...prev, [key]: { ...prev[key], ...patch } }
+      if (mixerSaveTimerRef.current) clearTimeout(mixerSaveTimerRef.current)
+      mixerSaveTimerRef.current = setTimeout(() => void saveMixerSetting(next), 500)
+      return next
+    })
+  }
+  useEffect(() => {
+    return () => {
+      if (mixerSaveTimerRef.current) {
+        clearTimeout(mixerSaveTimerRef.current)
+        void saveMixerSetting(mixerStateRef.current)
+      }
+    }
+  }, [])
+
+  // 신스 드럼 음색(샘플 로딩)은 한 번만 만들어 재생/일시정지를 반복할 때마다
+  // 재사용 — 매번 다시 만들면 비용도 크고 소리가 잠깐 끊길 수 있다.
+  const voicesSessionRef = useRef<{
+    voices: DrumVoiceMap
+    synthGain: Tone.Gain
+    limiter: Tone.Limiter
+  } | null>(null)
+  // 재생 핸들·메트로놈은 재생을 누를 때마다 새로 만든다(편집 중 노트·BPM·
+  // 박자표가 바뀔 수 있어 "다시 재생"은 항상 최신 state를 반영해야 함).
+  const playbackSessionRef = useRef<{ handle: PlaybackHandle; metronome: Metronome } | null>(null)
+  const rafIdRef = useRef<number | null>(null)
+  const lastRafUpdateRef = useRef(0)
+
+  // 재생 중 믹서가 바뀌면 즉시 반영(practice 화면과 같은 원칙).
+  useEffect(() => {
+    const voicesSession = voicesSessionRef.current
+    if (voicesSession) voicesSession.synthGain.gain.value = effectiveGain(mixerState.synth_drums)
+    const session = playbackSessionRef.current
+    if (session) session.metronome.setVolume(metronomeGainToDb(effectiveGain(mixerState.metronome)))
+  }, [mixerState])
+
+  function stopRaf() {
+    if (rafIdRef.current !== null) {
+      cancelAnimationFrame(rafIdRef.current)
+      rafIdRef.current = null
+    }
+  }
+
+  function startRaf() {
+    const clock = getMasterClock()
+    lastRafUpdateRef.current = 0
+    function loop(ts: number) {
+      // 60fps 그대로 setState하면 노트가 많을 때 매 프레임 전체 그리드가
+      // 다시 렌더돼 버벅일 수 있어(PracticeCanvas.tsx가 재생 위치를 React
+      // state 대신 DOM ref에 직접 쓰는 것과 같은 이유), 초당 약 10회로
+      // 줄인다 — 시간 표시·재생 위치선은 이 정도로도 충분히 매끄럽다.
+      if (ts - lastRafUpdateRef.current > 100) {
+        lastRafUpdateRef.current = ts
+        const seconds = clock.getPositionSeconds()
+        setCurrentSeconds(seconds)
+        setCursorTicks(secondsToTicks(seconds))
+      }
+      rafIdRef.current = requestAnimationFrame(loop)
+    }
+    rafIdRef.current = requestAnimationFrame(loop)
+  }
+
+  function secondsToTicks(seconds: number): number {
+    return Math.max(0, Math.round(seconds * (meta.bpm / 60) * ppq))
+  }
+
+  async function handlePlay() {
+    if (!voicesSessionRef.current) {
+      const limiter = new Tone.Limiter(-1).connect(Tone.getDestination())
+      const synthGain = new Tone.Gain(effectiveGain(mixerStateRef.current.synth_drums)).connect(
+        limiter,
+      )
+      const voices = await createDrumVoices(synthGain)
+      voicesSessionRef.current = { voices, synthGain, limiter }
+    }
+    const voicesSession = voicesSessionRef.current
+
+    playbackSessionRef.current?.handle.stop()
+    playbackSessionRef.current?.metronome.dispose()
+    const metronome = createMetronome({ timeSignature: meta.timeSignature })
+    metronome.setVolume(metronomeGainToDb(effectiveGain(mixerStateRef.current.metronome)))
+    const handle = playDrumScore(toDrumScore(state), voicesSession.voices, {
+      // 편집 중 임의 위치부터 듣는 용도라 카운트인은 불필요(처음부터 들을
+      // 땐 0초부터라 어차피 카운트인이 의미 없고, 중간부터면 더더욱).
+      countInBars: 0,
+      countInVolumeDb: metronomeGainToDb(effectiveGain(mixerStateRef.current.metronome)),
+    })
+    playbackSessionRef.current = { handle, metronome }
+
+    const clock = getMasterClock()
+    // scorePlayer.ts는 항상 0초부터 스케줄하고 시작한다(count-in 없이도
+    // "곡 시작"은 0초) — 재생 시작 직후 바로 지금 커서 위치로 점프한다.
+    // 이미 지난 노트의 schedule() 콜백은 그 시각을 넘어서면 자동으로
+    // 스킵되는 Tone.js 표준 동작이라(실제 설치된 Transport 소스 기준) 안전.
+    clock.setPositionSeconds(ticksToSeconds(cursorTicksRef.current, ppq, meta.bpm))
+    setIsPlaying(true)
+    startRaf()
+  }
+
+  function handlePause() {
+    playbackSessionRef.current?.handle.pause()
+    stopRaf()
+    const seconds = getMasterClock().getPositionSeconds()
+    setCurrentSeconds(seconds)
+    setCursorTicks(secondsToTicks(seconds))
+    setIsPlaying(false)
+  }
+
+  // 언마운트 시 오디오 리소스 정리.
+  useEffect(() => {
+    return () => {
+      stopRaf()
+      playbackSessionRef.current?.handle.stop()
+      playbackSessionRef.current?.metronome.dispose()
+      if (voicesSessionRef.current) {
+        disposeDrumVoices(voicesSessionRef.current.voices)
+        voicesSessionRef.current.synthGain.dispose()
+        voicesSessionRef.current.limiter.dispose()
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // 2026-10-29(의뢰인 요청) — "연주페이지에서 편집버튼을 누르면 그때 지금
+  // 위치를 파악하고 해당 위치로 이동시켜줘야함". 마운트 시 1회만 — 그
+  // 이후(편집 중 재생 등)의 cursorTicks 변화로 다시 스크롤하면 사용자가
+  // 보고 있던 자리를 멋대로 옮기게 된다.
+  const gridScrollRef = useRef<HTMLDivElement | null>(null)
+  useEffect(() => {
+    if (initialPositionTicks === undefined || !gridScrollRef.current) return
+    const targetPx = tickToPx(initialPositionTicks)
+    gridScrollRef.current.scrollLeft = Math.max(0, targetPx - ROW_LABEL_WIDTH - 80)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   function handleRowClick(e: React.MouseEvent<HTMLDivElement>, piece: DrumPiece) {
     const rect = e.currentTarget.getBoundingClientRect()
@@ -198,18 +445,6 @@ export function EditorScreen({ song, initialScore, onSaved, onCancel }: EditorSc
     })
   }
 
-  function applyAutoRecommend() {
-    const recommended = recommendSticking(state.notes, ppq, startHand)
-    commit({
-      ...state,
-      notes: state.notes.map((n, i) => ({
-        ...n,
-        hand: recommended[i].hand,
-        handSource: recommended[i].handSource,
-      })),
-    })
-  }
-
   function moveSelected(deltaTicks: number, deltaRows: number) {
     if (selectedNote === null) return
     // ppq가 격자 분할 수로 나누어떨어지지 않으면 unitTicks 자체가 정수가 아닐 수
@@ -266,6 +501,7 @@ export function EditorScreen({ song, initialScore, onSaved, onCancel }: EditorSc
     setIsSaving(true)
     try {
       await saveSongDrumScore(song.id, score)
+      lastSavedStateRef.current = state
       onSaved()
     } catch (err) {
       setSaveError(err instanceof ApiError ? err.message : '저장에 실패했습니다')
@@ -338,23 +574,80 @@ export function EditorScreen({ song, initialScore, onSaved, onCancel }: EditorSc
             <option value="8nt">셋잇단(8분)</option>
           </select>
         </label>
-        <button onClick={() => setHistory((h) => undo(h))} disabled={!canUndo(history)}>
-          실행취소
+        <button
+          onClick={() => setHistory((h) => undo(h))}
+          disabled={!canUndo(history)}
+          aria-label="실행취소"
+          title="실행취소"
+        >
+          <Undo2 size={16} aria-hidden="true" />
         </button>
-        <button onClick={() => setHistory((h) => redo(h))} disabled={!canRedo(history)}>
-          다시실행
+        <button
+          onClick={() => setHistory((h) => redo(h))}
+          disabled={!canRedo(history)}
+          aria-label="다시실행"
+          title="다시실행"
+        >
+          <Redo2 size={16} aria-hidden="true" />
         </button>
-        <label style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-1)' }}>
-          필인 시작손
-          <select value={startHand} onChange={(e) => setStartHand(e.target.value as 'R' | 'L')}>
-            <option value="R">오른손</option>
-            <option value="L">왼손</option>
-          </select>
-        </label>
-        <button onClick={applyAutoRecommend}>자동 추천 재적용</button>
-        <button onClick={() => void handleSave()} disabled={isSaving}>
+        <button
+          onClick={() => void handleSave()}
+          disabled={isSaving || !isDirty}
+          title={!isDirty && !isSaving ? '변경한 내용이 없습니다' : undefined}
+        >
           {isSaving ? '저장 중…' : '저장'}
         </button>
+      </div>
+
+      {/* 2026-10-29(의뢰인 요청) — "편집시에도 음악을 들으면서 할 수 있을까" */}
+      <div
+        style={{
+          display: 'flex',
+          flexWrap: 'wrap',
+          alignItems: 'center',
+          gap: 'var(--space-3)',
+          background: 'var(--surface)',
+          border: '1px solid var(--border)',
+          borderRadius: 'var(--radius-control)',
+          padding: 'var(--space-2) var(--space-3)',
+        }}
+      >
+        <button
+          onClick={() => void (isPlaying ? handlePause() : handlePlay())}
+          aria-label={isPlaying ? '일시정지' : '재생'}
+          title={isPlaying ? '일시정지' : '재생'}
+          style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+        >
+          {isPlaying ? (
+            <Pause size={16} aria-hidden="true" fill="currentColor" />
+          ) : (
+            <Play size={16} aria-hidden="true" fill="currentColor" />
+          )}
+        </button>
+        <span style={{ fontFamily: 'monospace', color: 'var(--text-muted)', fontSize: '0.9em' }}>
+          {formatMmSs(currentSeconds)}
+        </span>
+        <span style={{ color: 'var(--text-muted)', fontSize: '0.85em' }}>
+          신스 드럼 + 메트로놈만 들립니다(원곡 음원은 재생되지 않음).
+        </span>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--space-3)', marginLeft: 'auto' }}>
+          {(['synth_drums', 'metronome'] as const).map((key) => (
+            <label
+              key={key}
+              style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-1)', fontSize: '0.85em' }}
+            >
+              {CHANNEL_LABEL[key]}
+              <input
+                type="range"
+                min={0}
+                max={100}
+                value={Math.round(mixerState[key].volume * 100)}
+                onChange={(e) => updateChannel(key, { volume: Number(e.target.value) / 100 })}
+                style={{ width: 80 }}
+              />
+            </label>
+          ))}
+        </div>
       </div>
 
       {selectedNote && (
@@ -389,11 +682,13 @@ export function EditorScreen({ song, initialScore, onSaved, onCancel }: EditorSc
       {saveError && <p style={{ color: 'var(--danger)' }}>{saveError}</p>}
 
       <div
+        ref={gridScrollRef}
         role="application"
         aria-label="드럼 편집 그리드"
         tabIndex={0}
         onKeyDown={handleGridKeyDown}
         style={{
+          position: 'relative',
           overflowX: 'auto',
           border: '1px solid var(--border)',
           borderRadius: 'var(--radius-control)',
@@ -476,6 +771,20 @@ export function EditorScreen({ song, initialScore, onSaved, onCancel }: EditorSc
               })}
           </div>
         ))}
+        {/* 2026-10-29(의뢰인 요청) — 재생 위치선. 그리드 콘텐츠와 같은 스크롤
+         * 영역 안에 절대 위치시켜, 가로 스크롤 시 노트와 같이 움직인다. */}
+        <div
+          aria-hidden="true"
+          style={{
+            position: 'absolute',
+            top: 0,
+            bottom: 0,
+            left: tickToPx(cursorTicks),
+            width: 2,
+            background: 'var(--accent)',
+            pointerEvents: 'none',
+          }}
+        />
       </div>
     </div>
   )
