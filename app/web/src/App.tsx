@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useCompactHeaderLayout } from './useCompactHeaderLayout'
 import './styles/tokens.css'
 import { fetchCurrentUser, type CurrentUser } from './api/auth'
 import type { SongSummary } from './api/songs'
@@ -45,6 +46,7 @@ function App() {
     number | undefined
   >(undefined)
   const [editorOrigin, setEditorOrigin] = useState<'library' | 'practice'>('library')
+  const isCompactHeader = useCompactHeaderLayout()
 
   useEffect(() => {
     fetchCurrentUser()
@@ -111,29 +113,64 @@ function App() {
           background: 'var(--bg)',
           color: 'var(--text)',
           height: '100vh',
-          padding: 16,
+          padding: isCompactHeader ? 8 : 16,
           display: 'flex',
           flexDirection: 'column',
-          gap: 'var(--space-2)',
+          gap: isCompactHeader ? 'var(--space-1)' : 'var(--space-2)',
           overflow: 'auto',
         }}
       >
         {/* 2026-10-28(의뢰인 요청, 6차) — flex column으로 바꾸면서 버튼이
          * 기본 alignItems:stretch 때문에 가로 전체 폭으로 늘어나 버렸다
          * ("라이브러리 버튼을 한 줄 꽉 차게 해달라는 게 아니었다" 지적) —
-         * alignSelf:flex-start로 원래 내용 크기만큼으로 되돌림. */}
-        <button
-          style={{ flexShrink: 0, alignSelf: 'flex-start' }}
-          onClick={() => setScreen('library')}
+         * alignSelf:flex-start로 원래 내용 크기만큼으로 되돌림.
+         * 2026-10-30(T5-1) — 폰 가로처럼 세로 공간이 극단적으로 좁을 때
+         * (isCompactHeader)는 뒤로가기+제목을 두 줄 대신 한 줄로 묶어 레인에
+         * 돌려줄 세로 공간을 확보한다(위 useCompactHeaderLayout 코멘트 참고).
+         * 평소(넓은 높이)엔 기존 그대로 두 줄. */}
+        <div
+          style={{
+            display: 'flex',
+            flexDirection: isCompactHeader ? 'row' : 'column',
+            alignItems: isCompactHeader ? 'center' : 'stretch',
+            gap: 'var(--space-2)',
+            flexShrink: 0,
+            minWidth: 0,
+          }}
         >
-          ← 라이브러리
-        </button>
-        <h1 style={{ fontSize: '1.3rem', flexShrink: 0, margin: 0 }}>
-          {practiceSong.song.title}
-          {practiceSong.song.artist && (
-            <span style={{ color: 'var(--text-muted)' }}> — {practiceSong.song.artist}</span>
-          )}
-        </h1>
+          <button
+            style={{ flexShrink: 0, alignSelf: isCompactHeader ? undefined : 'flex-start' }}
+            onClick={() => setScreen('library')}
+          >
+            ← 라이브러리
+          </button>
+          <h1
+            // 2026-10-30(T5-1) — Codex 모드A 지적(C-004, 반영) — 가로모드에서
+            // 말줄임표로 잘릴 때 전체 제목을 확인할 방법이 없었다. title
+            // 속성으로 전체 텍스트(아티스트 포함)를 제공 — 호버 툴팁은 물론,
+            // 스크린리더도 title을 읽을 수 있다.
+            title={
+              isCompactHeader
+                ? `${practiceSong.song.title}${
+                    practiceSong.song.artist ? ` — ${practiceSong.song.artist}` : ''
+                  }`
+                : undefined
+            }
+            style={{
+              fontSize: '1.3rem',
+              margin: 0,
+              minWidth: 0,
+              ...(isCompactHeader
+                ? { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }
+                : {}),
+            }}
+          >
+            {practiceSong.song.title}
+            {practiceSong.song.artist && (
+              <span style={{ color: 'var(--text-muted)' }}> — {practiceSong.song.artist}</span>
+            )}
+          </h1>
+        </div>
         <div style={{ flex: 1, minHeight: 0 }}>
           <PracticeCanvas
             score={practiceSong.drumScore}
