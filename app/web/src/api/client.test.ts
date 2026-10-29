@@ -47,11 +47,21 @@ describe('apiFetch error messages', () => {
   })
 
   it('502/503/504이 아닌 상태 코드는 기존처럼 statusText를 그대로 쓴다', async () => {
+    // Codex 모드A 지적(반영) — 같은 Response 인스턴스로 apiFetch()를 두 번
+    // 부르면 첫 호출이 이미 본문 스트림을 소비해 두 번째는 "JSON 파싱
+    // 실패" 경로만 우연히 재확인하게 된다(의도가 불명확). 한 번만 호출해
+    // 그 결과(err) 하나로 두 가지를 전부 단언한다.
     vi.stubGlobal(
       'fetch',
       vi.fn().mockResolvedValue(new Response(null, { status: 404, statusText: 'Not Found' })),
     )
-    await expect(apiFetch('/songs')).rejects.toBeInstanceOf(ApiError)
-    await expect(apiFetch('/songs')).rejects.toMatchObject({ message: 'Not Found' })
+    let err: unknown
+    try {
+      await apiFetch('/songs')
+    } catch (caught) {
+      err = caught
+    }
+    expect(err).toBeInstanceOf(ApiError)
+    expect(err).toMatchObject({ message: 'Not Found' })
   })
 })

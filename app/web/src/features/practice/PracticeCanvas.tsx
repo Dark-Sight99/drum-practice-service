@@ -2343,6 +2343,7 @@ export function PracticeCanvas({
              * 노출(재시도 전까지 계속 보여야 함 — 토스트처럼 사라지면 안 됨). */}
             {audioTracksFailed && (
               <div
+                role="alert"
                 style={{
                   display: 'flex',
                   alignItems: 'center',
@@ -2377,6 +2378,7 @@ export function PracticeCanvas({
              * 경로(새 세션 셋업을 처음부터 다시 시도)라 별도 로직이 필요 없다. */}
             {playStartFailed && (
               <div
+                role="alert"
                 style={{
                   display: 'flex',
                   alignItems: 'center',
