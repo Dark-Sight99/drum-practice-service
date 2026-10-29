@@ -233,6 +233,115 @@ def test_reset_password_invalidates_existing_sessions(client: TestClient, db_ses
     assert client.get("/auth/me").status_code == 401
 
 
+def test_admin_can_update_username_and_admin_flag(client: TestClient, db_session) -> None:
+    """2026-10-29(의뢰인 요청) — "아이디비밀번호 변경", "관리자권한이나,
+    관리자권한제거나"를 이 화면에서."""
+    _make_user(db_session, "admin", "adminpw", is_admin=True)
+    target = _make_user(db_session, "someone", "pw1234", is_admin=False)
+    client.post("/auth/login", json={"username": "admin", "password": "adminpw"})
+
+    resp = client.patch(
+        f"/admin/users/{target.id}", json={"username": "renamed", "is_admin": True}
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["username"] == "renamed"
+    assert body["is_admin"] is True
+
+    # 다시 로그인하면(세션은 안 끊김, 하지만 확인차) 바뀐 아이디로 들어간다.
+    client.cookies.clear()
+    assert client.post(
+        "/auth/login", json={"username": "renamed", "password": "pw1234"}
+    ).status_code == 200
+
+
+def test_update_user_username_conflict_returns_409(client: TestClient, db_session) -> None:
+    _make_user(db_session, "admin", "adminpw", is_admin=True)
+    _make_user(db_session, "taken", "pw1")
+    target = _make_user(db_session, "someone", "pw2")
+    client.post("/auth/login", json={"username": "admin", "password": "adminpw"})
+
+    resp = client.patch(f"/admin/users/{target.id}", json={"username": "taken"})
+    assert resp.status_code == 409
+
+
+def test_admin_cannot_remove_own_admin_flag(client: TestClient, db_session) -> None:
+    """Q-16(intent/07-open-questions.md, "의뢰인 혼자 관리자인 전제") — 본인이
+    본인 관리자 권한을 해제하면 아무도 관리자가 없는 화면에 갇힐 수 있다."""
+    admin = _make_user(db_session, "admin", "adminpw", is_admin=True)
+    client.post("/auth/login", json={"username": "admin", "password": "adminpw"})
+
+    resp = client.patch(f"/admin/users/{admin.id}", json={"is_admin": False})
+    assert resp.status_code == 400
+
+    db_session.refresh(admin)
+    assert admin.is_admin is True
+
+
+def test_admin_cannot_suspend_self_via_api(client: TestClient, db_session) -> None:
+    """AdminScreen.tsx가 버튼을 막아도, API를 직접 호출하는 우회까지
+    서버에서 막아야 한다(서버가 최종 권위)."""
+    admin = _make_user(db_session, "admin", "adminpw", is_admin=True)
+    client.post("/auth/login", json={"username": "admin", "password": "adminpw"})
+
+    resp = client.patch(f"/admin/users/{admin.id}", json={"is_active": False})
+    assert resp.status_code == 400
+
+    db_session.refresh(admin)
+    assert admin.is_active is True
+
+
+def test_admin_can_delete_user_and_their_songs(client: TestClient, db_session) -> None:
+    """2026-10-29(의뢰인 요청) — "삭제... 기능들을 이 페이지에서"."""
+    _make_user(db_session, "admin", "adminpw", is_admin=True)
+    target = _make_user(db_session, "doomed", "pw1234")
+    db_session.add(
+        Song(user_id=target.id, title="지워질 곡", source_type=SongSourceType.AUDIO)
+    )
+    db_session.commit()
+    song = db_session.query(Song).filter(Song.user_id == target.id).first()
+    assert song is not None
+
+    client.post("/auth/login", json={"username": "admin", "password": "adminpw"})
+    resp = client.delete(f"/admin/users/{target.id}")
+    assert resp.status_code == 204
+
+    assert db_session.get(User, target.id) is None
+    assert db_session.query(Song).filter(Song.user_id == target.id).first() is None
+
+    # 삭제된 계정으로는 더 이상 로그인되지 않는다.
+    client.cookies.clear()
+    assert client.post(
+        "/auth/login", json={"username": "doomed", "password": "pw1234"}
+    ).status_code == 401
+
+
+def test_admin_cannot_delete_self(client: TestClient, db_session) -> None:
+    admin = _make_user(db_session, "admin", "adminpw", is_admin=True)
+    client.post("/auth/login", json={"username": "admin", "password": "adminpw"})
+
+    resp = client.delete(f"/admin/users/{admin.id}")
+    assert resp.status_code == 400
+    assert db_session.get(User, admin.id) is not None
+
+
+def test_non_admin_cannot_delete_user(client: TestClient, db_session) -> None:
+    _make_user(db_session, "jaewoo", "pw1234", is_admin=False)
+    target = _make_user(db_session, "someone", "pw1234")
+    client.post("/auth/login", json={"username": "jaewoo", "password": "pw1234"})
+
+    resp = client.delete(f"/admin/users/{target.id}")
+    assert resp.status_code == 403
+
+
+def test_delete_unknown_user_returns_404(client: TestClient, db_session) -> None:
+    _make_user(db_session, "admin", "adminpw", is_admin=True)
+    client.post("/auth/login", json={"username": "admin", "password": "adminpw"})
+
+    resp = client.delete("/admin/users/999999")
+    assert resp.status_code == 404
+
+
 def test_non_admin_cannot_reset_password(client: TestClient, db_session) -> None:
     _make_user(db_session, "jaewoo", "pw1234", is_admin=False)
     target = _make_user(db_session, "someone", "pw1234")

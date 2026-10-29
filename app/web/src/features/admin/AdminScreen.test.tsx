@@ -4,19 +4,28 @@ import { AdminScreen } from './AdminScreen'
 import { ApiError } from '../../api/client'
 import type { AdminUser } from '../../api/admin'
 
-const { listUsersMock, createUserMock, setUserActiveMock, resetUserPasswordMock } = vi.hoisted(
-  () => ({
-    listUsersMock: vi.fn(),
-    createUserMock: vi.fn(),
-    setUserActiveMock: vi.fn(),
-    resetUserPasswordMock: vi.fn(),
-  }),
-)
+const {
+  listUsersMock,
+  createUserMock,
+  setUserActiveMock,
+  resetUserPasswordMock,
+  updateUserMock,
+  deleteUserMock,
+} = vi.hoisted(() => ({
+  listUsersMock: vi.fn(),
+  createUserMock: vi.fn(),
+  setUserActiveMock: vi.fn(),
+  resetUserPasswordMock: vi.fn(),
+  updateUserMock: vi.fn(),
+  deleteUserMock: vi.fn(),
+}))
 vi.mock('../../api/admin', () => ({
   listUsers: listUsersMock,
   createUser: createUserMock,
   setUserActive: setUserActiveMock,
   resetUserPassword: resetUserPasswordMock,
+  updateUser: updateUserMock,
+  deleteUser: deleteUserMock,
 }))
 
 function makeUser(overrides: Partial<AdminUser> = {}): AdminUser {
@@ -29,6 +38,8 @@ describe('AdminScreen', () => {
     createUserMock.mockReset()
     setUserActiveMock.mockReset()
     resetUserPasswordMock.mockReset()
+    updateUserMock.mockReset()
+    deleteUserMock.mockReset()
   })
 
   it('계정 목록을 불러와 보여준다(아이디 찾기 겸용)', async () => {
@@ -125,5 +136,68 @@ describe('AdminScreen', () => {
     fireEvent.click(screen.getByRole('button', { name: '재설정' }))
 
     await waitFor(() => expect(resetUserPasswordMock).toHaveBeenCalledWith(2, 'newpw123'))
+  })
+
+  it('수정 모달에서 아이디를 바꾸면 updateUser를 호출한다', async () => {
+    listUsersMock
+      .mockResolvedValueOnce([makeUser({ id: 2, username: '친구1', is_admin: false })])
+      .mockResolvedValueOnce([makeUser({ id: 2, username: '바뀐이름', is_admin: false })])
+    updateUserMock.mockResolvedValue(makeUser({ id: 2, username: '바뀐이름', is_admin: false }))
+    render(<AdminScreen currentUserId={1} onBack={() => {}} />)
+
+    await screen.findByText('친구1')
+    fireEvent.click(screen.getByRole('button', { name: '수정' }))
+    const editDialog = screen.getByRole('dialog')
+    fireEvent.change(within(editDialog).getByLabelText('아이디'), {
+      target: { value: '바뀐이름' },
+    })
+    fireEvent.click(within(editDialog).getByRole('button', { name: '저장' }))
+
+    await waitFor(() =>
+      expect(updateUserMock).toHaveBeenCalledWith(2, { username: '바뀐이름' }),
+    )
+    await screen.findByText('바뀐이름')
+  })
+
+  it('본인 행의 수정 모달에서는 관리자 체크박스가 비활성화된다', async () => {
+    listUsersMock.mockResolvedValue([makeUser({ id: 1, username: '의뢰인', is_admin: true })])
+    render(<AdminScreen currentUserId={1} onBack={() => {}} />)
+
+    await screen.findByText('의뢰인')
+    fireEvent.click(screen.getByRole('button', { name: '수정' }))
+
+    const editDialog = screen.getByRole('dialog')
+    const checkbox = within(editDialog)
+      .getAllByRole('checkbox')
+      .find((el) => el.closest('label')?.textContent?.includes('관리자'))
+    expect(checkbox).toBeDisabled()
+  })
+
+  it('삭제 확인 모달에서 확인하면 deleteUser를 호출한다', async () => {
+    listUsersMock
+      .mockResolvedValueOnce([makeUser({ id: 2, username: '친구1', is_admin: false })])
+      .mockResolvedValueOnce([])
+    deleteUserMock.mockResolvedValue(undefined)
+    render(<AdminScreen currentUserId={1} onBack={() => {}} />)
+
+    await screen.findByText('친구1')
+    fireEvent.click(screen.getByRole('button', { name: '삭제' }))
+    const dialog = screen.getByRole('dialog')
+    fireEvent.click(within(dialog).getByRole('button', { name: '삭제' }))
+
+    await waitFor(() => expect(deleteUserMock).toHaveBeenCalledWith(2))
+  })
+
+  it('본인 행의 삭제·정지 버튼은 비활성화된다', async () => {
+    listUsersMock.mockResolvedValue([
+      makeUser({ id: 1, username: '의뢰인' }),
+      makeUser({ id: 2, username: '친구1' }),
+    ])
+    render(<AdminScreen currentUserId={1} onBack={() => {}} />)
+
+    await screen.findByText('의뢰인')
+    const ownerRow = screen.getByText('의뢰인').closest('div')!.parentElement!
+    expect(within(ownerRow).getByRole('button', { name: '삭제' })).toBeDisabled()
+    expect(within(ownerRow).getByRole('button', { name: '정지' })).toBeDisabled()
   })
 })

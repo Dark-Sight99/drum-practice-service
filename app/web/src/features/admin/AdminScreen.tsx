@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
 import {
   createUser,
+  deleteUser,
   listUsers,
   resetUserPassword,
   setUserActive,
+  updateUser,
   type AdminUser,
 } from '../../api/admin'
 import { ApiError } from '../../api/client'
@@ -16,7 +18,10 @@ export interface AdminScreenProps {
   onBack: () => void
 }
 
-// 2026-10-29(의뢰인 요청) — "계정 생성 기능도 있었으면 하는데 아이디비번찾기랑".
+// 2026-10-29(의뢰인 요청) — "계정 생성 기능도 있었으면 하는데 아이디비번찾기랑",
+// 이어서 "계정 관리 페이지에 현재 등록되어있는 계정정보도 볼 수 있게 해주고
+// 여기서 내가 계정권한 설정도 할수있게 해줘 삭제나, 관리자권한이나,
+// 관리자권한제거나, 아이디비밀번호 변경같은 기능들을 이 페이지에서".
 // REQ-08 결정(가입 화면 없음, 관리자가 직접 생성·정지, intent/02-requirements.md)은
 // 그대로 두고 — 관리자가 그 작업을 할 수 있는 화면만 새로 만든다. "비번 찾기"는
 // 의뢰인 확인대로 이메일 발송 없이 "관리자가 직접 재설정"으로(아래 비밀번호
@@ -41,6 +46,20 @@ export function AdminScreen({ currentUserId, onBack }: AdminScreenProps) {
   const [resetPassword, setResetPassword] = useState('')
   const [resetSubmitting, setResetSubmitting] = useState(false)
   const [resetError, setResetError] = useState<string | null>(null)
+
+  // 2026-10-29(의뢰인 요청) — 아이디·관리자 여부 수정.
+  const [editTarget, setEditTarget] = useState<AdminUser | null>(null)
+  const [editUsername, setEditUsername] = useState('')
+  const [editIsAdmin, setEditIsAdmin] = useState(false)
+  const [editSubmitting, setEditSubmitting] = useState(false)
+  const [editError, setEditError] = useState<string | null>(null)
+
+  // 2026-10-29(의뢰인 요청) — 계정 삭제. LibraryScreen의 곡 삭제 확인
+  // 모달(window.confirm 대신 모달, 2026-10-27 의뢰인 요청)과 같은 패턴 —
+  // 되돌릴 수 없는 작업이라 확인 단계를 둔다.
+  const [deleteTarget, setDeleteTarget] = useState<AdminUser | null>(null)
+  const [deleteSubmitting, setDeleteSubmitting] = useState(false)
+  const [deleteError, setDeleteError] = useState<string | null>(null)
 
   const [toast, setToast] = useState<{ id: number; message: string } | null>(null)
   const toastIdRef = useRef(0)
@@ -125,6 +144,62 @@ export function AdminScreen({ currentUserId, onBack }: AdminScreenProps) {
       setResetError(err instanceof ApiError ? err.message : '비밀번호 재설정에 실패했습니다')
     } finally {
       setResetSubmitting(false)
+    }
+  }
+
+  function openEdit(user: AdminUser) {
+    setEditTarget(user)
+    setEditUsername(user.username)
+    setEditIsAdmin(user.is_admin)
+    setEditError(null)
+  }
+
+  async function handleEditSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    if (!editTarget) return
+    setEditSubmitting(true)
+    setEditError(null)
+    try {
+      const patch: { username?: string; is_admin?: boolean } = {}
+      if (editUsername !== editTarget.username) patch.username = editUsername
+      // 본인 행은 관리자 체크박스 자체를 비활성화해두지만(아래 JSX), 혹시라도
+      // 값이 바뀐 채 제출되는 걸 막기 위해 여기서도 한 번 더 막는다 — 서버가
+      // 최종 권위(admin.py)라 어차피 400으로 거부되긴 하지만, 사용자에게
+      // 더 명확한 메시지를 바로 보여줄 수 있다.
+      if (editIsAdmin !== editTarget.is_admin) {
+        if (editTarget.id === currentUserId && !editIsAdmin) {
+          setEditError('본인의 관리자 권한은 해제할 수 없습니다')
+          setEditSubmitting(false)
+          return
+        }
+        patch.is_admin = editIsAdmin
+      }
+      if (Object.keys(patch).length > 0) {
+        await updateUser(editTarget.id, patch)
+        showToast(`✓ ${editTarget.username} 정보를 수정했습니다`)
+      }
+      setEditTarget(null)
+      await reload()
+    } catch (err) {
+      setEditError(err instanceof ApiError ? err.message : '수정에 실패했습니다')
+    } finally {
+      setEditSubmitting(false)
+    }
+  }
+
+  async function handleDelete() {
+    if (!deleteTarget) return
+    setDeleteSubmitting(true)
+    setDeleteError(null)
+    try {
+      await deleteUser(deleteTarget.id)
+      showToast(`✓ ${deleteTarget.username} 계정을 삭제했습니다`)
+      setDeleteTarget(null)
+      await reload()
+    } catch (err) {
+      setDeleteError(err instanceof ApiError ? err.message : '삭제에 실패했습니다')
+    } finally {
+      setDeleteSubmitting(false)
     }
   }
 
@@ -218,6 +293,7 @@ export function AdminScreen({ currentUserId, onBack }: AdminScreenProps) {
                 alignItems: 'center',
                 justifyContent: 'space-between',
                 gap: 'var(--space-2)',
+                flexWrap: 'wrap',
                 background: 'var(--surface)',
                 border: '1px solid var(--border)',
                 borderRadius: 'var(--radius-control)',
@@ -232,8 +308,12 @@ export function AdminScreen({ currentUserId, onBack }: AdminScreenProps) {
                 {!u.is_active && (
                   <span style={{ fontSize: 11, color: 'var(--danger)' }}>정지됨</span>
                 )}
+                {u.id === currentUserId && (
+                  <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>(본인)</span>
+                )}
               </div>
-              <div style={{ display: 'flex', gap: 'var(--space-2)' }}>
+              <div style={{ display: 'flex', gap: 'var(--space-2)', flexWrap: 'wrap' }}>
+                <button onClick={() => openEdit(u)}>수정</button>
                 <button
                   onClick={() => {
                     setResetTarget(u)
@@ -255,6 +335,21 @@ export function AdminScreen({ currentUserId, onBack }: AdminScreenProps) {
                   ) : (
                     '정지 해제'
                   )}
+                </button>
+                <button
+                  onClick={() => {
+                    setDeleteTarget(u)
+                    setDeleteError(null)
+                  }}
+                  disabled={u.id === currentUserId}
+                  title={u.id === currentUserId ? '본인 계정은 여기서 삭제할 수 없습니다' : undefined}
+                  style={
+                    u.id === currentUserId
+                      ? undefined
+                      : { borderColor: 'var(--danger)', color: 'var(--danger)' }
+                  }
+                >
+                  삭제
                 </button>
               </div>
             </div>
@@ -298,6 +393,89 @@ export function AdminScreen({ currentUserId, onBack }: AdminScreenProps) {
             </button>
           </div>
         </form>
+      </Modal>
+
+      <Modal
+        open={editTarget !== null}
+        onClose={() => setEditTarget(null)}
+        title={editTarget ? `${editTarget.username} 정보 수정` : undefined}
+      >
+        <form
+          onSubmit={(e) => void handleEditSubmit(e)}
+          style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)', minWidth: 260 }}
+        >
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            <label style={{ fontSize: 12, color: 'var(--text-muted)' }} htmlFor="admin-edit-username">
+              아이디
+            </label>
+            <input
+              id="admin-edit-username"
+              value={editUsername}
+              onChange={(e) => setEditUsername(e.target.value)}
+              required
+              autoFocus
+            />
+          </div>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 13 }}>
+            <input
+              type="checkbox"
+              checked={editIsAdmin}
+              onChange={(e) => setEditIsAdmin(e.target.checked)}
+              disabled={editTarget?.id === currentUserId}
+            />
+            관리자
+            {editTarget?.id === currentUserId && (
+              <span style={{ color: 'var(--text-muted)' }}>(본인 권한은 여기서 해제 불가)</span>
+            )}
+          </label>
+          {editError && (
+            <p role="alert" style={{ margin: 0, color: 'var(--danger)', fontSize: 13 }}>
+              {editError}
+            </p>
+          )}
+          <div style={{ display: 'flex', gap: 'var(--space-2)', justifyContent: 'flex-end' }}>
+            <button type="button" onClick={() => setEditTarget(null)}>
+              취소
+            </button>
+            <button type="submit" disabled={editSubmitting}>
+              {editSubmitting ? <Spinner size={14} /> : '저장'}
+            </button>
+          </div>
+        </form>
+      </Modal>
+
+      <Modal
+        open={deleteTarget !== null}
+        onClose={() => setDeleteTarget(null)}
+        title={deleteTarget ? `${deleteTarget.username} 계정 삭제` : undefined}
+      >
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)', minWidth: 260 }}>
+          <p style={{ margin: 0 }}>
+            정말 <strong>{deleteTarget?.username}</strong> 계정을 삭제하시겠습니까?
+            <br />
+            <span style={{ color: 'var(--text-muted)', fontSize: 13 }}>
+              이 계정이 올린 곡도 함께 삭제되며, 되돌릴 수 없습니다.
+            </span>
+          </p>
+          {deleteError && (
+            <p role="alert" style={{ margin: 0, color: 'var(--danger)', fontSize: 13 }}>
+              {deleteError}
+            </p>
+          )}
+          <div style={{ display: 'flex', gap: 'var(--space-2)', justifyContent: 'flex-end' }}>
+            <button type="button" onClick={() => setDeleteTarget(null)}>
+              취소
+            </button>
+            <button
+              type="button"
+              onClick={() => void handleDelete()}
+              disabled={deleteSubmitting}
+              style={{ background: 'var(--danger)', borderColor: 'var(--danger)', color: '#fff' }}
+            >
+              {deleteSubmitting ? <Spinner size={14} /> : '삭제'}
+            </button>
+          </div>
+        </div>
       </Modal>
 
       {toast && <Toast key={toast.id} message={toast.message} onDismiss={() => setToast(null)} />}

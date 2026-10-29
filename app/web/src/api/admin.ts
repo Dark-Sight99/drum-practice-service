@@ -35,6 +35,25 @@ export async function setUserActive(userId: number, isActive: boolean): Promise<
   })
 }
 
+/** 2026-10-29(의뢰인 요청) — "아이디... 관리자권한이나, 관리자권한제거나"를
+ * 한 번에 — 수정 모달이 바뀐 필드만 담아 보낸다(둘 다 바뀌었으면 한
+ * 요청으로 같이, 하나만 바뀌었으면 그것만). */
+export async function updateUser(
+  userId: number,
+  patch: { username?: string; is_admin?: boolean },
+): Promise<AdminUser> {
+  return apiFetchJson<AdminUser>(`/admin/users/${userId}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(patch),
+  })
+}
+
+/** 2026-10-29(의뢰인 요청) — "삭제... 기능들을 이 페이지에서". */
+export async function deleteUser(userId: number): Promise<void> {
+  await apiFetch(`/admin/users/${userId}`, { method: 'DELETE' })
+}
+
 /** 이메일 발송 없이 관리자가 직접 비밀번호를 재설정(의뢰인 확인, 2026-10-29) —
  * "비번 찾기" 요청에 대한 답. */
 export async function resetUserPassword(userId: number, newPassword: string): Promise<void> {
