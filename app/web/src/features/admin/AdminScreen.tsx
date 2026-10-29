@@ -32,7 +32,10 @@ export function AdminScreen({ currentUserId, onBack }: AdminScreenProps) {
   const [creating, setCreating] = useState(false)
   const [createError, setCreateError] = useState<string | null>(null)
 
-  const [togglingId, setTogglingId] = useState<number | null>(null)
+  // Codex 모드A 지적(권장, 반영) — id 하나만 들고 있으면, 다른 행을 누르는
+  // 순간 그 전 행이 아직 요청 중인데도 버튼이 다시 활성화돼 중복 요청이
+  // 가능했다. Set으로 바꿔 행마다 독립적으로 진행 상태를 추적한다.
+  const [togglingIds, setTogglingIds] = useState<Set<number>>(new Set())
 
   const [resetTarget, setResetTarget] = useState<AdminUser | null>(null)
   const [resetPassword, setResetPassword] = useState('')
@@ -83,14 +86,18 @@ export function AdminScreen({ currentUserId, onBack }: AdminScreenProps) {
   }
 
   async function handleToggleActive(user: AdminUser) {
-    setTogglingId(user.id)
+    setTogglingIds((prev) => new Set(prev).add(user.id))
     try {
       await setUserActive(user.id, !user.is_active)
       await reload()
     } catch (err) {
       setError(err instanceof ApiError ? err.message : '상태 변경에 실패했습니다')
     } finally {
-      setTogglingId(null)
+      setTogglingIds((prev) => {
+        const next = new Set(prev)
+        next.delete(user.id)
+        return next
+      })
     }
   }
 
@@ -228,10 +235,10 @@ export function AdminScreen({ currentUserId, onBack }: AdminScreenProps) {
                 </button>
                 <button
                   onClick={() => void handleToggleActive(u)}
-                  disabled={togglingId === u.id || u.id === currentUserId}
+                  disabled={togglingIds.has(u.id) || u.id === currentUserId}
                   title={u.id === currentUserId ? '본인 계정은 여기서 정지할 수 없습니다' : undefined}
                 >
-                  {togglingId === u.id ? (
+                  {togglingIds.has(u.id) ? (
                     <Spinner size={14} />
                   ) : u.is_active ? (
                     '정지'

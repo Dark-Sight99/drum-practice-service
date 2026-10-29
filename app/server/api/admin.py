@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from api.deps import get_db, require_admin
 from auth.security import hash_password
-from db.models import User
+from db.models import User, UserSession
 
 router = APIRouter(prefix="/admin/users", tags=["admin"])
 
@@ -96,4 +96,11 @@ def reset_password(
     if user is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "사용자를 찾을 수 없습니다")
     user.password_hash = hash_password(body.new_password)
+    # Codex 모드A 지적(필수, 반영) — 비밀번호만 바꾸고 기존 세션을 그대로 두면,
+    # 재설정 전부터 로그인돼 있던 기기는 쿠키가 여전히 유효해 계속 접근할 수
+    # 있었다(get_current_user는 UserSession 행 존재만 확인, 비밀번호는
+    # 로그인 시점에만 봄). 재설정 시 그 계정의 모든 세션을 지워 다음 요청부터
+    # 전부 다시 로그인해야 하게 한다 — REQ-08의 "정지 시 즉시 차단"과 같은
+    # 원칙(deps.py get_current_user 코멘트 참고).
+    db.query(UserSession).filter(UserSession.user_id == user_id).delete()
     db.commit()

@@ -208,6 +208,31 @@ def test_admin_can_reset_password(client: TestClient, db_session) -> None:
     ).status_code == 401
 
 
+def test_reset_password_invalidates_existing_sessions(client: TestClient, db_session) -> None:
+    """Codex 모드A 지적(필수) — 비밀번호를 재설정해도 재설정 전부터 로그인돼
+    있던 기기의 쿠키가 계속 유효하면 안 된다(REQ-08 "정지 시 즉시 차단"과
+    같은 원칙). test_tampered_session_token_rejected와 같은 방식으로 쿠키를
+    client 인스턴스에 직접 심는다(요청별 cookies= 인자는 deprecated)."""
+    _make_user(db_session, "admin", "adminpw", is_admin=True)
+    target = _make_user(db_session, "forgetful", "oldpw")
+
+    # "forgetful"이 먼저 로그인해 세션 쿠키를 들고 있는 상태를 흉내낸다.
+    login_resp = client.post("/auth/login", json={"username": "forgetful", "password": "oldpw"})
+    victim_token = login_resp.cookies[SESSION_COOKIE_NAME]
+    assert client.get("/auth/me").status_code == 200
+
+    # 관리자가 비밀번호를 재설정.
+    client.cookies.clear()
+    client.post("/auth/login", json={"username": "admin", "password": "adminpw"})
+    resp = client.post(f"/admin/users/{target.id}/reset-password", json={"new_password": "newpw"})
+    assert resp.status_code == 204
+
+    # 재설정 전 쿠키는 더 이상 통하지 않아야 한다.
+    client.cookies.clear()
+    client.cookies.set(SESSION_COOKIE_NAME, victim_token)
+    assert client.get("/auth/me").status_code == 401
+
+
 def test_non_admin_cannot_reset_password(client: TestClient, db_session) -> None:
     _make_user(db_session, "jaewoo", "pw1234", is_admin=False)
     target = _make_user(db_session, "someone", "pw1234")
