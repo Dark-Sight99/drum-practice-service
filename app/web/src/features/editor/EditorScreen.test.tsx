@@ -138,6 +138,31 @@ describe('EditorScreen', () => {
     expect(screen.getByText(/1마디 3박 \(틱 960\)/)).toBeInTheDocument()
   })
 
+  it('draws a labeled beat line for every beat within the grid, distinct from bar lines (2026-10-29 의뢰인 재지적 — "실선 사이가 한마디잖아. 그 안에 덜선명한 선 한줄이 얼만큼의 박자인지도 잘 모르겠어")', () => {
+    const { container } = render(
+      <EditorScreen song={song} initialScore={makeScore()} onSaved={() => {}} onCancel={() => {}} />,
+    )
+    // makeScore()는 노트 1개(틱 480, ppq=480, 4/4) — totalBars = 0+1+2 = 3마디,
+    // ROW_LABEL_WIDTH=64·PX_PER_GRID_UNIT=24·기본 격자 8분(unitTicks=240)
+    // 기준으로 0~5760틱까지 480틱마다(=1박) 라벨이 하나씩 — 13개(0,480,…,5760).
+    const labels = Array.from(container.querySelectorAll('[data-testid="beat-label"]'))
+    expect(labels).toHaveLength(13)
+    expect(labels.map((el) => el.textContent)).toEqual([
+      '1', '2', '3', '4', '1', '2', '3', '4', '1', '2', '3', '4', '1',
+    ])
+
+    // 마디 시작 자리(틱 0·1920·3840·5760, "1"번 라벨 4개)는 barLineTicks가
+    // 이미 더 또렷한 선을 그리므로 beat-line을 중복해서 그리지 않는다 —
+    // 13개 중 마디 시작 4개를 뺀 9개만 선이 있어야 한다.
+    expect(container.querySelectorAll('[data-testid="beat-line"]')).toHaveLength(9)
+
+    // 2박째(틱 480)의 라벨이 실제로 그 픽셀 위치(64 + 480/240*24 = 112px,
+    // 선 위에 숫자가 겹치지 않도록 +3px 오프셋) 근처에 있는지 — 격자선과
+    // 숫자가 어긋나 있으면 의미가 없다. (위에서 순서가 1,2,3,4,1,… 로
+    // 이미 확인됐으니 두 번째 항목 = 틱 480 = "2".)
+    expect((labels[1] as HTMLElement).style.left).toBe('115px')
+  })
+
   it('keeps moved notes on an integer tick even when ppq is not divisible by the grid divisor (Codex 모드A 지적)', () => {
     const score: DrumScore = {
       version: 1,

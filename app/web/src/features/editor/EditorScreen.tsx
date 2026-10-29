@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import * as Tone from 'tone'
 import { FastForward, Pause, Play, Redo2, Rewind, RotateCcw, Undo2 } from 'lucide-react'
 import { Spinner } from '../../components/Spinner'
@@ -285,6 +285,26 @@ export function EditorScreen({
     for (let t = 0; t <= totalTicks; t += barTicks) ticks.push(t)
     return ticks
   }, [totalTicks, barTicks])
+
+  // 2026-10-29(의뢰인 재지적 — "실선 사이가 한마디잖아. 그럼 그 안에
+  // 덜선명한 선 한줄이 얼만큼의 박자인지도 잘 모르겠어") — 마디 경계선
+  // (더 또렷)과 격자 단위 선(옅음) 둘뿐이라, 격자를 8분·16분 등으로
+  // 세분화하면 "박"(4분음표) 자리가 어느 옅은 선인지 구분할 길이 없었다.
+  // 박 경계마다 중간 밝기 선 + 몇 박째인지 숫자를 추가로 그려 "선 하나가
+  // 몇 박 간격인지"를 格자 자체에서 바로 읽을 수 있게 한다. ppq가 바로
+  // "4분음표(1박) 1개의 틱 수"라는 정의 그 자체라(audio/timing.ts의
+  // ticksPerBar = beatsPerBar(ts,4) × ppq, beatsPerBar(ts,4) × ppq ÷
+  // beatsPerBar(ts,4) = ppq로 약분됨) 박 간격은 박자표와 무관하게 항상
+  // ppq틱 — 별도 계산 없이 그대로 쓴다.
+  const beatTicks = ppq
+  const beatLines = useMemo(() => {
+    const lines: { tick: number; beatInBar: number; isBarStart: boolean }[] = []
+    for (let t = 0; t <= totalTicks; t += beatTicks) {
+      const beatInBar = Math.round((t % barTicks) / beatTicks) + 1
+      lines.push({ tick: t, beatInBar, isBarStart: t % barTicks === 0 })
+    }
+    return lines
+  }, [totalTicks, beatTicks, barTicks])
 
   // 2026-10-29(의뢰인 재지적, 스크린샷 첨부) — "원하는(빨간) 위치 대신 그
   // 왼쪽 격자의 노트가 찍힌다. 드래그해도 다음 격자로 넘어가 버린다" —
@@ -1620,6 +1640,48 @@ export function EditorScreen({
               pointerEvents: 'none',
             }}
           />
+        ))}
+        {/* 2026-10-29(의뢰인 재지적 — "실선 사이가 한마디잖아. 그럼 그 안에
+         * 덜선명한 선 한줄이 얼만큼의 박자인지도 잘 모르겠어") — 격자 단위
+         * 선(옅음)·마디 경계선(또렷함) 둘로는 "박"(4분음표) 자리가 어느
+         * 옅은 선인지 구분이 안 됐다. 박 경계마다 그 중간 밝기 선과 몇
+         * 박째인지 숫자를 추가로 그린다(마디 시작 자리엔 바로 아래
+         * barLineTicks가 더 또렷한 선을 겹쳐 그리므로 숫자만 "1"로 같이
+         * 보여주고 선은 중복해서 안 그림). */}
+        {beatLines.map(({ tick: t, beatInBar, isBarStart }) => (
+          <Fragment key={`beat-${t}`}>
+            {!isBarStart && (
+              <div
+                aria-hidden="true"
+                data-testid="beat-line"
+                style={{
+                  position: 'absolute',
+                  top: 0,
+                  bottom: 0,
+                  left: tickToPx(t),
+                  width: 1,
+                  background: 'var(--text-muted)',
+                  opacity: 0.6,
+                  pointerEvents: 'none',
+                }}
+              />
+            )}
+            <span
+              aria-hidden="true"
+              data-testid="beat-label"
+              style={{
+                position: 'absolute',
+                top: 2,
+                left: tickToPx(t) + 3,
+                fontSize: '0.65em',
+                color: 'var(--text-muted)',
+                pointerEvents: 'none',
+                zIndex: 3,
+              }}
+            >
+              {beatInBar}
+            </span>
+          </Fragment>
         ))}
         {barLineTicks.map((t) => (
           <div
