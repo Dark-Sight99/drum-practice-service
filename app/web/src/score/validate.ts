@@ -93,20 +93,22 @@ function runChecks(data: Record<string, unknown>, errors: string[]): void {
     errors.push('ppq: 0보다 큰 정수가 아님')
   }
 
-  // T2-8(Codex 모드C 3차 지적, C-001): audioOffsetMs는 Phase 3(T3-5, 오디오-MIDI
-  // 오프셋 정렬 UI)가 생기기 전까지 0만 허용한다 — 0이 아닌 값이 들어오면
-  // scorePlayer.ts가 노트를 A-B 루프 경계 밖으로 밀어낼 수 있는데, 그 상호작용을
-  // 어떻게 처리할지는 아직 없는 T3-5 UI·허용범위가 정해진 뒤에야 설계할 수 있다
-  // (intent/07-open-questions.md Q-23). "유한하기만 하면 통과"였던 예전 검증은
-  // 이 경로를 막지 못해(직접 API 업로드로 0이 아닌 값을 넣을 수 있었음) 지금
-  // 당장 막는다.
-  if (
-    typeof data.audioOffsetMs !== 'number' ||
-    !Number.isFinite(data.audioOffsetMs) ||
-    data.audioOffsetMs !== 0
-  ) {
-    errors.push('audioOffsetMs: 0이어야 함(Phase 3 오디오-MIDI 정렬 전까지 임시 제한, Q-23)')
+  // T3-72(REQ-02, intent/07-open-questions.md Q-43) — 예전엔 "0이어야 함"
+  // (T2-8, Q-23, Phase 3 오디오-MIDI 정렬 UI 전까지 임시 제한)이었는데,
+  // 이제 서버의 다운비트 자동 보정이 이 필드를 실제로 채운다(work/T3-72/
+  // plan.md §6). 설계가 보장하는 범위("다운비트 위상은 항상 0 이상, 한
+  // 박 길이 미만")와 정확히 일치시켜, 그 범위를 벗어나는 값은 지금
+  // 설계가 만들어낼 수 없는 상태이므로 여전히 거부한다(완전 개방 아님).
+  if (typeof data.audioOffsetMs !== 'number' || !Number.isFinite(data.audioOffsetMs)) {
+    errors.push('audioOffsetMs: 유한한 숫자가 아님')
+  } else if (isPlainObject(data.meta) && typeof data.meta.bpm === 'number' && data.meta.bpm > 0) {
+    const periodMs = 60000 / data.meta.bpm
+    if (data.audioOffsetMs < 0 || data.audioOffsetMs >= periodMs) {
+      errors.push(`audioOffsetMs: 0 이상, 한 박 길이(${periodMs.toFixed(3)}ms) 미만이어야 함`)
+    }
   }
+  // meta.bpm 자체가 유효하지 않으면(위 validateMeta가 이미 그 에러를 넣었음)
+  // 범위를 판단할 기준이 없어 이 검사는 건너뛴다 — 이중 에러 방지.
 }
 
 /** DrumScore 구조·범위를 검사한다. 예외를 던지지 않음 — REQ-02 수용 기준

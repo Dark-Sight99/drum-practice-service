@@ -237,4 +237,36 @@ describe('audioTrackPositionSeconds', () => {
     const expectedOriginalFilePositionSeconds = ticksToSeconds(tick, ppq, originalBpm)
     expect(audioFilePositionSeconds).toBeCloseTo(expectedOriginalFilePositionSeconds, 10)
   })
+
+  // T3-72(REQ-02, intent/07-open-questions.md Q-43) — 다운비트 자동 보정 이후,
+  // 틱 0은 원곡 파일 위치 0이 아니라 `audioOffsetSeconds`(다운비트가 원곡
+  // 파일에서 몇 초 지점인지)다.
+  it('defaults the 4th argument to 0, matching the pre-T3-72 behavior exactly', () => {
+    expect(audioTrackPositionSeconds(5, 2, 1)).toBe(audioTrackPositionSeconds(5, 2, 1, 0))
+  })
+
+  it('at song start, position equals the downbeat offset (not 0) when audioOffsetSeconds is set', () => {
+    expect(audioTrackPositionSeconds(2, 2, 1, 0.28)).toBeCloseTo(0.28, 10)
+    expect(audioTrackPositionSeconds(2, 2, 2.5, 0.28)).toBeCloseTo(0.28, 10) // 배속과 무관
+  })
+
+  it('adds the offset on top of the usual elapsed-time calculation', () => {
+    // rate=1, songStart=2, 5초 시점(경과 3초) + 오프셋 0.28초
+    expect(audioTrackPositionSeconds(5, 2, 1, 0.28)).toBeCloseTo(3.28, 10)
+  })
+
+  it('loop re-entry also gets the offset applied (same general formula, work/T3-72/plan.md §5)', () => {
+    const songStartSeconds = 2
+    const loopStartSeconds = 10
+    const position = audioTrackPositionSeconds(loopStartSeconds, songStartSeconds, 1, 0.28)
+    expect(position).toBeCloseTo(8.28, 10)
+  })
+
+  it('never goes negative for any valid (audioStartSeconds >= songStartSeconds, offset in [0, period)) input — plan.md §5 proof', () => {
+    // 다운비트(틱0) 그 자체, 오프셋이 거의 한 박 길이에 가까워도(아직 범위
+    // 안) 음수가 될 수 없다.
+    expect(audioTrackPositionSeconds(2, 2, 1, 0.4999)).toBeGreaterThanOrEqual(0)
+    // audioStartSeconds가 songStartSeconds보다 뒤(루프 재진입)여도 마찬가지.
+    expect(audioTrackPositionSeconds(50, 2, 0.5, 0.0001)).toBeGreaterThanOrEqual(0)
+  })
 })

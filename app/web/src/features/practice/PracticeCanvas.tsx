@@ -350,8 +350,8 @@ export interface PracticeCanvasProps {
   score: DrumScore
   barsVisible?: number
   /** T3-3(REQ-04) — 분리된 오디오 트랙 재생에 필요. `songId`/`availableAudioKinds`
-   * 둘 다 있고 `score.audioOffsetMs===0`일 때만 오디오 트랙을 튼다
-   * (work/T3-3/plan.md §범위경계 — 비0이면 이 재생 세션은 MIDI만, T3-5 범위). */
+   * 둘 다 있어야 오디오 트랙을 튼다(T3-72부터 `audioOffsetMs` 값과 무관 —
+   * 아래 canUseAudioTracks 코멘트 참고). */
   songId?: number
   availableAudioKinds?: string[]
   /** 2026-10-29(의뢰인 요청) — "연주 페이지에서 편집 버튼을 누르면 편집하는
@@ -1031,7 +1031,12 @@ export function PracticeCanvas({
           // "어긋남"으로 오인해 매 750ms마다 되돌려버려 보정이 무력화된다.
           const latencyCompensationSeconds = audioLatencyCompensationMsRef.current / 1000
           const expectedSongPositionSeconds =
-            audioTrackPositionSeconds(positionSeconds, songStartSeconds, playbackRate) +
+            audioTrackPositionSeconds(
+              positionSeconds,
+              songStartSeconds,
+              playbackRate,
+              score.audioOffsetMs / 1000, // T3-72(Q-43)
+            ) +
             latencyCompensationSeconds * playbackRate
           tracks.resync(expectedSongPositionSeconds, TRACK_RESYNC_THRESHOLD_SECONDS)
         }
@@ -1265,10 +1270,7 @@ export function PracticeCanvas({
     transportPositionAppliedRef.current = true
     stopPlayback() // 혹시 이전 재생이 안 끝났으면 먼저 정리(이중 재생 방지) — playSessionIdRef도 여기서 올라감
     const mySessionId = playSessionIdRef.current
-    // T3-3(REQ-04) — audioOffsetMs!==0이면 오디오 트랙 자체를 만들지 않는다
-    // (work/T3-3/plan.md §범위경계 — 가드를 적용하는 단일 지점. scorePlayer.ts에
-    // tracks를 안 넘기면 최초 재생·루프 재진입 전부 기존 MIDI-only 경로를
-    // 그대로 타므로 별도 분기가 더 필요 없음). prime()의 각 트랙 play()+pause()
+    // T3-3(REQ-04) — prime()의 각 트랙 play()+pause()
     // 호출은 아래 await 이전에 동기적으로 시작돼야 모바일 제스처 체인이
     // 보존된다(§3·§6) — 그래서 Promise 자체는 여기서 바로 만들고, 기다리는
     // 건 voices 로딩과 동시에 진행한다.
@@ -1281,11 +1283,13 @@ export function PracticeCanvas({
     // 않으므로 보통 화면 진입 직후 바로 준비됨) 실제로 트랙을 쓸 수 있다.
     // 풀이 아직 없으면(드물게: 생성 실패, 또는 렌더 직후 effect가 아직
     // 안 돈 경우) 기존처럼 신스만 재생되는 경로로 자연 폴백.
+    // 2026-10-29(T3-72, REQ-02, Q-43) — `score.audioOffsetMs === 0` 가드를
+    // 뺐다. 그 가드는 "audioOffsetMs가 0이 아닌 경우를 아직 처리할 수
+    // 없다"는 임시 방어(T3-3 당시)였는데, 이제 다운비트 자동 보정이 이
+    // 값을 실제로 채우고(0이 아닌 값도 정상 범위) `audioTrackPositionSeconds`
+    // 호출부(아래)가 그 값을 올바르게 반영하므로 더 막을 이유가 없다.
     const canUseAudioTracks =
-      songId !== undefined &&
-      score.audioOffsetMs === 0 &&
-      stemKinds.length > 0 &&
-      audioTrackPoolRef.current !== null
+      songId !== undefined && stemKinds.length > 0 && audioTrackPoolRef.current !== null
 
     // T3-4 모드A 1라운드 지적(High/Medium) — 아래 셋업 구간에서 (a) stop()/
     // 다른 handlePlay()가 끼어들거나(세션 id가 바뀜) (b) 생성 자체가 실패하면,
@@ -1432,7 +1436,12 @@ export function PracticeCanvas({
       if (tracks) {
         const playbackRate = playbackBpm / score.meta.bpm
         tracks.playFrom(
-          audioTrackPositionSeconds(positionSeconds, songStartSeconds, playbackRate),
+          audioTrackPositionSeconds(
+            positionSeconds,
+            songStartSeconds,
+            playbackRate,
+            score.audioOffsetMs / 1000, // T3-72(Q-43)
+          ),
           playbackRate,
         )
       }
@@ -1506,7 +1515,12 @@ export function PracticeCanvas({
       // 이유 — 보정 없이 두면 바로 다음 resync()가 "어긋났다"며 되돌려버림).
       const latencyCompensationSeconds = audioLatencyCompensationMsRef.current / 1000
       const positionInTrackSeconds =
-        audioTrackPositionSeconds(target, songStartSeconds, playbackRate) +
+        audioTrackPositionSeconds(
+          target,
+          songStartSeconds,
+          playbackRate,
+          score.audioOffsetMs / 1000, // T3-72(Q-43)
+        ) +
         latencyCompensationSeconds * playbackRate
       // 모드C 3라운드 C-008 반영 — 일시정지 중엔 재생을 시작하면 안 되므로
       // seekTo()(위치만 이동)를, 재생 중엔 기존 playFrom()(위치 이동 + 재생)을.

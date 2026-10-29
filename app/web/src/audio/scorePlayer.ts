@@ -162,12 +162,17 @@ export function playDrumScore(
 
   for (const note of score.notes) {
     // T2-8(Codex 모드C 1차 C-001): laneRenderer.ts의 noteTimeOf와 같은 식이어야
-    // 화면·소리가 맞는다 — audioOffsetMs를 빼먹으면 그 값이 0이 아닐 때(Phase 3
-    // 전까지는 검증에서 항상 0으로 강제돼 있음, Q-23) 둘이 어긋난다.
+    // 화면·소리가 맞는다.
+    //
+    // 2026-10-29(T3-72, REQ-02, Q-43) — 예전엔 여기 `+ score.audioOffsetMs /
+    // 1000`이 더 있었다(Phase 3 전까지 그 값이 항상 0이라 한 번도 실행된 적
+    // 없었던 코드, Q-23). 이제 서버의 다운비트 자동 보정이 노트 틱 자체를
+    // 이미 "틱0=다운비트" 기준으로 재앵커해서 저장하므로(work/T3-72/plan.md
+    // §1), 신스 트리거 시각을 여기서 또 밀면 같은 보정이 두 번 겹친다 —
+    // `audioOffsetMs`는 이제 "음원 트랙 재생 위치"에만 쓰는 값으로 의미가
+    // 바뀌었다(아래 §4, `laneRenderer.ts`도 같은 이유로 더 이상 안 더함).
     const timeSeconds =
-      schedule.songStartSeconds +
-      ticksToSeconds(note.tick, score.ppq, playbackBpm) +
-      score.audioOffsetMs / 1000
+      schedule.songStartSeconds + ticksToSeconds(note.tick, score.ppq, playbackBpm)
     scheduledIds.push(
       transport.schedule((time) => {
         voices[note.piece].trigger(time, note.velocity / 127)
@@ -197,10 +202,15 @@ export function playDrumScore(
         // 재생 위치(파일 안 어디서부터 틀지)는 항상 "진짜" audioStartSeconds
         // 기준 — 트리거만 당겨지고 내용 자체는 안 당겨져야 연속 재생이 맞다
         // (위 audioLatencyCompensationMs 옵션 설명 참고).
+        // T3-72(REQ-02, Q-43) — 4번째 인자(오프셋)로 다운비트가 원곡 파일
+        // 에서 몇 초 지점인지 전달 — 더 이상 "틱0=파일 위치0"이 아니므로
+        // 빠뜨리면 음원 트랙만 다운비트 위치에서 어긋난다(work/T3-72/
+        // plan.md §4). 항상 0 이상이라 별도 클램프 불필요(§5 증명).
         const positionSeconds = audioTrackPositionSeconds(
           audioStartSeconds,
           schedule.songStartSeconds,
           playbackRate,
+          score.audioOffsetMs / 1000,
         )
         tracks.playFrom(positionSeconds, playbackRate)
       }, compensatedTriggerTime(audioStartSeconds)),

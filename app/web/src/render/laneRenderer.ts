@@ -277,8 +277,14 @@ export function createLaneRenderer(
       const speed = pixelsPerSecond(hitLineY, barsVisible, score.meta.timeSignature, playbackBpm)
       const lookaheadSeconds = hitLineY / speed
 
+      // 2026-10-29(T3-72, REQ-02, Q-43) — 예전엔 여기도 `+ score.audioOffsetMs
+      // / 1000`이 있었다(Phase 3 전까지 그 값이 항상 0이라 실행된 적 없던
+      // 코드, Codex 모드C 1차 C-001 지적). 서버의 다운비트 자동 보정이 노트
+      // 틱 자체를 이미 재앵커해서 저장하므로(work/T3-72/plan.md §1), 여기서
+      // 또 더하면 판정선 도달 시각이 이중으로 밀린다 — `scorePlayer.ts`와
+      // 같은 이유로 제거.
       const noteTimeOf = (note: DrumNote) =>
-        songStartSeconds + ticksToSeconds(note.tick, score.ppq, playbackBpm) + score.audioOffsetMs / 1000
+        songStartSeconds + ticksToSeconds(note.tick, score.ppq, playbackBpm)
 
       // 레인 구분선
       ctx.strokeStyle = options.laneBorderColor
