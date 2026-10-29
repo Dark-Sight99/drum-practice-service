@@ -116,6 +116,24 @@ def transcribe_handler(job: Job) -> None:
             final_path = resolve_asset_path(f"{song.id}/{DRUMSCORE_FILENAME}")
             staging_path.replace(final_path)
             staging_rel_path = None  # 승격 성공 — 더 이상 정리 대상 아님
+
+            # 2026-10-29(의뢰인 요청) — 라이브러리 목록이 "BPM 미상"으로만
+            # 나온다는 지적 — 위에서 이미 계산한 `estimate_tempo()` 결과(bpm)가
+            # `DrumScore.meta.bpm`에는 반영돼 연습 화면은 정확한데, 그 값을
+            # `Song.original_bpm`(라이브러리 목록이 읽는 별도 컬럼, 지금까지
+            # 디지털 악보 업로드 경로에서만 채워지던 필드 — api/songs.py 참고)
+            # 에는 한 번도 복사한 적이 없어 음원 업로드 경로(현재 사실상 유일한
+            # 주 경로)의 모든 곡이 늘 null로 남아있었던 누락.
+            # Codex 모드A 지적(P2, 반영) — 처음엔 위 `db.commit()`과 같은
+            # 트랜잭션에 묶어 `staging_path.replace()`보다 먼저 커밋했는데,
+            # 그 사이 replace()가 실패하면(디스크 꽉 참 등) except 블록이
+            # Song을 FAILED로 되돌려도 이미 커밋된 original_bpm은 그대로
+            # 남아 "라이브러리 BPM은 새 값인데 실제 DrumScore 파일은 승격
+            # 안 된 예전 상태"인 불일치가 생길 수 있었다. 파일 승격이 실제로
+            # 성공한 뒤에만 쓰고 커밋하도록 이동 — 이제 "둘 다 성공 아니면
+            # 둘 다 이전 상태 유지"가 보장된다.
+            song.original_bpm = bpm
+            db.commit()
         except Exception:
             db.rollback()
             # 모드A 지적 C-002: 스테이징 정리 자체가 실패해도(예: 파일 잠김)
