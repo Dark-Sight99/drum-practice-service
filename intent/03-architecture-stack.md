@@ -50,7 +50,7 @@
 | MIDI 입출력 | @tonejs/midi | | |
 | GP/MusicXML 가져오기 | alphaTab (MPL-2.0) | `ScoreLoader.loadScoreFromBytes` → `MidiFileGenerator`+`AlphaSynthMidiFileHandler` → `MidiFile.toBinary()`로 표준 MIDI 바이트를 뽑아 @tonejs/midi로 재파싱(퍼커션 채널9·GM 노트번호 전부 실제 MusicXML 파일로 실검증, `work/T2-1/plan.md`) | T0-3/T0-4의 실제 `.musicxml`/`.mxl` 샘플로 검증됨. GP(.gp/.gp3~5/.gpx)는 같은 API를 쓰지만 실제 GP 샘플로는 검증 못함 |
 | UI 아이콘 | lucide-react (ISC, 확인됨 2026-10-27) | 08-design.md 지정, npm 패키지로 설치(T3-25) | |
-| UI 폰트 | Pretendard (SIL OFL ⚠확인) | 08-design.md 지정, 자체 호스팅 | ⚠ 라이선스 확인 |
+| UI 폰트 | Pretendard (SIL OFL-1.1, 확인됨 2026-10-30, npm `pretendard` 레지스트리 `license` 필드 + 배포본 LICENSE.txt) | 08-design.md 지정, 자체 호스팅(T5-0, `app/web/public/fonts/`에 Regular·Bold woff2만, 라이선스 파일 동봉) | 확인됨 |
 | 백엔드 | Python 3.11+ / FastAPI / Uvicorn | ML 모델이 Python | |
 | 작업 큐 | SQLite 테이블 기반 자체 워커(별도 프로세스) | Redis 불필요, 윈도우·맥 동일 | |
 | DB | SQLite | 단일 사용자, 백업 쉬움 | |
@@ -87,7 +87,7 @@
 | tone(Tone.js) | MIT(확인됨, 2026-10-23, npm 레지스트리 `license` 필드) — T2-2에서 빠뜨렸다가 T2-2b에서 기록 | 가능 | 가능(고지) |
 | Virtuosity Drums(드럼 샘플) | CC0(확인됨, 2026-10-23, 공식 페이지 "open source (Creative Commons 0)" 명시, https://versilian-studios.com/virtuosity-drums/) | 가능(고지·로열티 불필요) | 가능(고지·로열티 불필요) |
 | lucide-react | ISC(확인됨, 2026-10-27, npm 레지스트리 `license` 필드, `npm info lucide-react license`) | 가능 | 가능 |
-| Pretendard | SIL OFL ⚠확인 | 가능 | 가능 |
+| Pretendard | SIL OFL-1.1(확인됨, 2026-10-30, `npm view pretendard license` → `OFL-1.1`, 배포본 동봉 LICENSE.txt 대조) | 가능(고지 — 라이선스 파일을 폰트와 함께 배포, `app/web/public/fonts/Pretendard-LICENSE.txt`) | 가능(고지) |
 | pypdfium2 | Apache-2.0/BSD-3-Clause(확인됨, 2026-10-23) | 가능 | 가능 |
 | ADTOF-pytorch(대안 채보 모델) | **없음**(LICENSE 파일·GitHub 라이선스 필드 모두 미표시, Q-15) | Phase 0 내부 테스트만 | 불가(해소 전) — Phase 3 채택 전 재확인 필요 |
 | imageio-ffmpeg(파이썬 패키지, T3-16-feedback 음악 스템 MP3 압축용) | 패키지 자체 BSD-2-Clause(PyPI 확인, 2026-10-26). **단, 번들된 ffmpeg 실행파일은 별도** — 직접 실행해 빌드 설정 확인 결과 `--enable-gpl --enable-version3`(GPLv3) | 가능(배포 아님, 서버에서 돌리기만 함) | ⚠ GPLv3 — 바이너리를 포함해 배포 시 소스 공개 의무 등 재검토 필요(의뢰인 승인, 2026-10-26: 개인 사용 단계는 진행, 상업 배포 전 재확인) |
