@@ -36,6 +36,15 @@ function App() {
   const [editorInitialPositionTicks, setEditorInitialPositionTicks] = useState<
     number | undefined
   >(undefined)
+  // 2026-10-29(의뢰인 요청) — "편집하고나서 연습화면으로 돌아가서 다시 그
+  // 부분부터 치고싶은데". 위 editorInitialPositionTicks(연주→편집)와 대칭인
+  // 반대 방향(편집→연주) 위치 핸드오프. editorOrigin은 "편집 화면에 지금
+  // 어디서 들어왔는지"를 기억해 — 라이브러리에서 바로 편집으로 들어왔을 땐
+  // "연습으로 돌아가기" 버튼 자체를 보여줄 수 없다(돌아갈 연습 세션이 없음).
+  const [practiceInitialPositionTicks, setPracticeInitialPositionTicks] = useState<
+    number | undefined
+  >(undefined)
+  const [editorOrigin, setEditorOrigin] = useState<'library' | 'practice'>('library')
 
   useEffect(() => {
     fetchCurrentUser()
@@ -131,9 +140,11 @@ function App() {
             songId={practiceSong.song.id}
             availableAudioKinds={practiceSong.song.available_audio_kinds}
             song={practiceSong.song}
+            initialPositionTicks={practiceInitialPositionTicks}
             onEditSong={(song, drumScore, positionTicks) => {
               setEditingSong({ song, drumScore })
               setEditorInitialPositionTicks(positionTicks)
+              setEditorOrigin('practice')
               setScreen('editor')
             }}
           />
@@ -165,6 +176,15 @@ function App() {
             setEditorInitialPositionTicks(undefined)
             setScreen('library')
           }}
+          onBackToPractice={
+            editorOrigin === 'practice' && practiceSong
+              ? (positionTicks) => {
+                  setEditorInitialPositionTicks(undefined)
+                  setPracticeInitialPositionTicks(positionTicks)
+                  setScreen('practice')
+                }
+              : undefined
+          }
         />
       </main>
     )
@@ -178,10 +198,14 @@ function App() {
     <LibraryScreen
       onOpenSong={(song, drumScore) => {
         setPracticeSong({ song, drumScore })
+        // 이전 곡에서 "연습으로 돌아가기"로 남겨둔 위치가 새로 여는 곡에
+        // 새어 들어가지 않게 — 라이브러리에서 직접 여는 연습은 항상 0부터.
+        setPracticeInitialPositionTicks(undefined)
         setScreen('practice')
       }}
       onEditSong={(song, drumScore) => {
         setEditingSong({ song, drumScore })
+        setEditorOrigin('library')
         setScreen('editor')
       }}
       onLoggedOut={() => {
