@@ -47,7 +47,6 @@ import {
 import {
   EDITOR_ROWS,
   editorRowIndexForPiece,
-  snapTick,
   tickToBeatLabel,
   ticksPerGridUnit,
   type GridUnit,
@@ -899,7 +898,28 @@ export function EditorScreen({
     const rect = e.currentTarget.getBoundingClientRect()
     const relativeX = e.clientX - rect.left + e.currentTarget.scrollLeft
     if (relativeX < ROW_LABEL_WIDTH) return // 고정 레이블 거터 클릭은 무시
-    const tick = pxToTick(relativeX)
+    const rawTick = pxToTick(relativeX)
+    // 2026-10-30(T3-77, 의뢰인 요청 — "hh랑 mt을 같이 쳐야 하는데 어느
+    // 위치에 찍어야 동시에 소리가 나는지 모르겠다") — 클릭으로 뽑은 틱을
+    // 그대로 쓰면, 화면을 보고 아무리 정확히 클릭해도 픽셀 단위 오차가 틱
+    // 단위로 남아 "같이 치려던" 기존 노트(다른 행)와 실제로는 몇 틱 어긋난
+    // 채 저장된다 — 들어보면 미묘하게 안 맞는 원인. 클릭 지점에서 가장
+    // 가까운 기존 노트(행 무관)가 지금 격자 한 칸의 절반 이내에 있으면,
+    // 그 노트의 "진짜" 틱(절대 격자가 아니라 실제 검출된 값)에 그대로
+    // 맞춰 찍는다 — 그래야 "동시에" 치는 게 보장되고, 그 뒤 화살표로
+    // 1/16씩 옮기면(아래 moveSelected, 더는 절대 격자로 안 돌아감) 그
+    // 실제 기준에서 정확히 상대 이동한다.
+    const snapToleranceTicks = unitTicks / 2
+    let nearestNote: EditableNote | null = null
+    let nearestDist = Infinity
+    for (const n of state.notes) {
+      const d = Math.abs(n.tick - rawTick)
+      if (d < nearestDist) {
+        nearestDist = d
+        nearestNote = n
+      }
+    }
+    const tick = nearestNote && nearestDist <= snapToleranceTicks ? nearestNote.tick : rawTick
     const id = nextIdRef.current++
     const newNote: EditableNote = {
       _editorId: id,
@@ -1081,12 +1101,73 @@ export function EditorScreen({
     })
   }
 
+  // 2026-10-30(T3-77, 모드A 지적) — moveSelected()의 반복 반올림 오차 누적을
+  // 막으려고 "화살표 이동을 시작한 기준 틱 + 그 뒤 누른 횟수"를 따로 든다
+  // (아래 moveSelected 코멘트 참고). gridUnit도 같이 들어 격자 설정이 바뀌면
+  // (모드A 2차 지적 C-002) 우연히 반올림 결과가 같아 보여도 무조건 새로 잡는다.
+  const moveAnchorRef = useRef<{
+    noteId: number
+    anchorTick: number
+    steps: number
+    gridUnit: GridUnit
+  } | null>(null)
+
   function moveSelected(deltaTicks: number, deltaRows: number) {
     if (selectedNote === null) return
-    // ppq가 격자 분할 수로 나누어떨어지지 않으면 unitTicks 자체가 정수가 아닐 수
-    // 있어(Codex 모드A 지적, grid.ts의 snapTick 주석 참고) 더한 뒤 다시 격자에
-    // 스냅해 항상 정수·격자정렬 틱을 보장한다.
-    const nextTick = snapTick(Math.max(0, selectedNote.tick + deltaTicks), gridUnit, ppq)
+    // 2026-10-30(T3-77, 의뢰인 요청) — 예전엔 snapTick()으로 "0틱 기준 절대
+    // 격자"에 매번 다시 맞췄다. 그런데 실제 채보된 노트(HH 등)는 AI가 검출한
+    // 진짜 타이밍이라 그 절대 격자와 몇 틱(T3-72/Q-43) 어긋나 있는 게 정상이다
+    // — 그 노트 옆에 새 노트를 만들어 화살표로 "1/16박 뒤"로 옮기면, 절대
+    // 격자에 다시 스냅되면서 기준 노트의 실제(살짝 어긋난) 위치가 아니라
+    // "이론상 깨끗한" 위치로 끌려가 버려, 실제로 들어보면 둘이 안 맞는
+    // 문제가 있었음(의뢰인이 직접 재생해보고 발견). 절대 격자로 되돌리지
+    // 않고 **지금 틱에서 그대로 더한 값**을 쓴다 — 노트가 새 노트 추가 시
+    // 가까운 기존 노트의 실제 틱에 자동으로 맞춰지면(아래 handleRowClick),
+    // 그 뒤 화살표 이동은 그 실제 기준에서 정확히 1/16박씩 상대 이동한다.
+    //
+    // Codex 모드A 지적(필수, 반영) — unitTicks가 정수가 아닌 경우(예:
+    // ppq=100의 8분음표 셋잇단 격자, unitTicks=33.333…) 매번 "이미 반올림된
+    // 틱"에 33.333…을 더해 다시 반올림하면, 각 단계의 반올림 오차가
+    // 누적돼(round(round(x)+33.333) 반복) 여러 번 누르면 실제 "출발점 +
+    // N*격자폭"에서 점점 멀어진다(직접 재현: 30번 누르면 10틱 차이) — 이동을
+    // 시작한 "기준 틱"과 그 뒤 누른 횟수(정수)를 따로 기억해뒀다가, 매번
+    // "기준 틱 + 누른 횟수*격자폭"을 한 번만 반올림한다. 다른 노트 선택·
+    // 드래그 등으로 틱이 이 추적과 다르게 바뀌면(moveAnchorRef가 예상하는
+    // 값과 실제 selectedNote.tick이 다르면) 그 순간의 실제 틱을 새 기준으로
+    // 다시 잡는다.
+    //
+    // Codex 모드A 2차 지적(필수, 반영) — 틱 0 근처에서 "요청한 이동이 0
+    // 미만으로 클램프됐는지"를 유효성 검사에서도 똑같이 클램프해서 비교하면,
+    // 클램프로 실제 못 움직인 걸 "정상 진행"으로 착각해버린다(예: 틱 0에서
+    // ←를 눌러 steps=-1 기록, 클램프로 실제 틱은 0 그대로 → 그 다음 →를
+    // 누르면 steps가 -1→0이 돼 틱이 또 0에 머물고, 사용자가 기대한 "오른쪽
+    // 으로 한 칸"이 조용히 사라짐). 클램프가 실제로 일어난(반올림한 원시
+    // 값이 음수였던) 순간엔 그 자리를 새 기준점(steps=0)으로 다시 잡아,
+    // 다음 이동이 "지금 실제로 있는 자리"에서 정확히 출발하게 한다 —
+    // 유효성 검사도 클램프 없는 원시 예측값으로 비교해 같은 착시가
+    // 재발하지 않게 한다. gridUnit도 같이 비교해(2차 지적 C-002) 격자
+    // 설정이 바뀐 경우 반올림 결과가 우연히 같아도 무조건 새로 잡는다.
+    let nextTick: number
+    if (deltaTicks === 0) {
+      nextTick = selectedNote.tick
+    } else {
+      const anchor = moveAnchorRef.current
+      const anchorStillValid =
+        anchor !== null &&
+        anchor.noteId === selectedNote._editorId &&
+        anchor.gridUnit === gridUnit &&
+        Math.round(anchor.anchorTick + anchor.steps * unitTicks) === selectedNote.tick
+      const base = anchorStillValid
+        ? anchor
+        : { noteId: selectedNote._editorId, anchorTick: selectedNote.tick, steps: 0, gridUnit }
+      const steps = base.steps + deltaTicks / unitTicks
+      const rawNextTick = Math.round(base.anchorTick + steps * unitTicks)
+      nextTick = Math.max(0, rawNextTick)
+      moveAnchorRef.current =
+        rawNextTick === nextTick
+          ? { noteId: selectedNote._editorId, anchorTick: base.anchorTick, steps, gridUnit }
+          : { noteId: selectedNote._editorId, anchorTick: nextTick, steps: 0, gridUnit }
+    }
     const rowIdx = editorRowIndexForPiece(selectedNote.piece)
     const nextRowIdx = Math.min(EDITOR_ROWS.length - 1, Math.max(0, rowIdx + deltaRows))
     // 지금 행 그대로 머물면(deltaRows===0, 가로 이동만) 피스는 안 바뀐다 —
