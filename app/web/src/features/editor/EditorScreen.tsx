@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import * as Tone from 'tone'
-import { Pause, Play, Redo2, Undo2 } from 'lucide-react'
+import { Pause, Play, Redo2, RotateCcw, Undo2 } from 'lucide-react'
 import { Spinner } from '../../components/Spinner'
 import type { DrumNote, DrumPiece, DrumScore, Hand } from '../../score/types'
 import { alternateHandsByTick, validateDrumScore } from '../../score'
@@ -202,8 +202,10 @@ export function EditorScreen({
   // 막혀있지 않아서, handleSave()가 캡처한 state로 PUT을 보내는 사이
   // 사용자가 노트를 더 바꾸면 그 추가 편집은 서버에 저장되지 않은 채
   // onSaved()가 호출돼 화면을 떠나버릴 수 있었다(조용한 데이터 유실). 모든
-  // 편집 경로(노트 추가·이동·삭제·손 지정·BPM/박자표 등)가 결국 이
+  // 편집 경로(노트 추가·이동·삭제·손 지정·박자표 등)가 결국 이
   // 함수 하나를 거치므로, 여기 한 곳만 막으면 저장 중엔 전부 막힌다.
+  // (2026-10-29부터 BPM은 이 목록에서 빠졌다 — playbackBpm은 commit()을
+  // 거치지 않는 별도 state라 meta.bpm은 이제 어떤 경로로도 안 바뀐다.)
   function commit(next: EditorState) {
     if (isSaving) return
     setHistory((h) => pushHistory(h, next))
@@ -231,9 +233,42 @@ export function EditorScreen({
   }
 
   // --- 재생(2026-10-29 의뢰인 요청) ---------------------------------------
+  // --- 재생 속도(2026-10-29 의뢰인 요청 — "편집기에서 bpm을 건들 수 없었으면
+  // 좋겠어... 조절만할 수 있게하고 그게 원본값에 영향을 주지않도록") ---
+  // meta.bpm(업로드 시점 원곡 BPM)은 이제 이 화면에서 아예 편집할 수 없다 —
+  // PracticeCanvas.tsx의 playbackBpm(REQ-04, 원곡 대비 50~150%)과 완전히 같은
+  // 패턴으로, 저장되지 않는 "연습 속도"만 조절한다. handleSave()는 여전히
+  // state.meta를 그대로 저장하므로 playbackBpm은 commit()/toDrumScore()를
+  // 전혀 거치지 않는다 — 라이브러리에 적힌 BPM(song.original_bpm)은 이제
+  // 어떤 경로로도 바뀔 일이 없다.
+  const minBpm = Math.max(1, Math.round(meta.bpm * 0.5))
+  const maxBpm = Math.round(meta.bpm * 1.5)
+  const [playbackBpm, setPlaybackBpm] = useState(meta.bpm)
+  // 아래 rAF 루프·handlePlay()의 await 이후 구간이 리렌더 없이 최신 값을
+  // 읽어야 해서 ref로도 들고 있는다(stateRef와 같은 이유, PracticeCanvas.tsx의
+  // playbackBpmRef와 동일 패턴). 재생 중엔 이 값이 바뀌지 않도록 아래 입력들을
+  // disabled={isPlaying}로 잠가둔다(PracticeCanvas.tsx와 같은 이유 — 이미
+  // 스케줄된 Transport에 재생 중 반영이 안 돼 혼란을 줄 수 있음).
+  const playbackBpmRef = useRef(playbackBpm)
+  useEffect(() => {
+    playbackBpmRef.current = playbackBpm
+  }, [playbackBpm])
+
+  function clampBpm(value: number): number {
+    if (Number.isNaN(value)) return playbackBpm
+    return Math.min(maxBpm, Math.max(minBpm, Math.round(value)))
+  }
+
+  // PracticeCanvas.tsx의 같은 BPM 입력과 같은 이유(§bpmFieldValue 주석 참고) —
+  // 포커스 중엔 자유 입력을 받는 draft로, 포커스가 아닐 땐 playbackBpm에서
+  // 바로 파생시켜 슬라이더로 바뀐 값도 항상 반영되게 한다.
+  const [isEditingBpm, setIsEditingBpm] = useState(false)
+  const [bpmDraft, setBpmDraft] = useState('')
+  const bpmFieldValue = isEditingBpm ? bpmDraft : String(playbackBpm)
+
   const [isPlaying, setIsPlaying] = useState(false)
   const [currentSeconds, setCurrentSeconds] = useState(() =>
-    ticksToSeconds(initialPositionTicks ?? 0, ppq, meta.bpm),
+    ticksToSeconds(initialPositionTicks ?? 0, ppq, playbackBpm),
   )
   const [cursorTicks, setCursorTicks] = useState(initialPositionTicks ?? 0)
   const cursorTicksRef = useRef(cursorTicks)
@@ -322,14 +357,6 @@ export function EditorScreen({
   const audioTrackPoolRef = useRef<AudioTrackPool | null>(null)
   const [audioTracksLoading, setAudioTracksLoading] = useState(canUseAudioTracks)
   const [audioTracksAvailable, setAudioTracksAvailable] = useState(false)
-  // 재생 시작 시점에 audioOffsetMs=0인 원본 BPM을 "오디오 파일의 실제
-  // 속도 기준"으로 고정(initialScore 기준 — 세션 중 meta.bpm을 편집해도
-  // 음원 파일 자체의 길이·속도는 그대로이므로). scorePlayer.ts가
-  // playbackRate = playbackBpm/score.meta.bpm을 쓰는 것과 같은 원칙 —
-  // 지금 편집 중인 meta.bpm을 "연습 속도"처럼, 로딩 시점 BPM을 "원곡
-  // 속도"처럼 다룬다.
-  const initialBpmRef = useRef(initialScore.meta.bpm)
-
   useEffect(() => {
     if (!canUseAudioTracks) return
     let cancelled = false
@@ -427,8 +454,9 @@ export function EditorScreen({
       const session = playbackSessionRef.current
       if (session?.tracks && ts - lastTrackResyncAtRef.current > TRACK_RESYNC_INTERVAL_MS) {
         lastTrackResyncAtRef.current = ts
-        const latest = stateRef.current
-        const playbackRate = latest.meta.bpm / initialBpmRef.current
+        // meta.bpm은 이제 이 화면에서 편집할 수 없어(위 playbackBpm 주석 참고)
+        // 항상 "원곡 BPM"이다 — PracticeCanvas.tsx의 같은 리싱크 계산과 동일.
+        const playbackRate = playbackBpmRef.current / stateRef.current.meta.bpm
         const expectedSongPositionSeconds = audioTrackPositionSeconds(seconds, 0, playbackRate)
         session.tracks.resync(expectedSongPositionSeconds, TRACK_RESYNC_THRESHOLD_SECONDS)
       }
@@ -438,7 +466,7 @@ export function EditorScreen({
   }
 
   function secondsToTicks(seconds: number): number {
-    return Math.max(0, Math.round(seconds * (meta.bpm / 60) * ppq))
+    return Math.max(0, Math.round(seconds * (playbackBpm / 60) * ppq))
   }
 
   // Codex 모드A 지적(필수, 반영) — createDrumVoices()가 비동기라 (1) 재생
@@ -521,6 +549,10 @@ export function EditorScreen({
       // 땐 0초부터라 어차피 카운트인이 의미 없고, 중간부터면 더더욱).
       countInBars: 0,
       countInVolumeDb: metronomeGainToDb(effectiveGain(mixerStateRef.current.metronome)),
+      // 2026-10-29(의뢰인 요청) — 연습 속도(playbackBpm)만큼 노트도 같이
+      // 빨라지거나 느려져야 스템과 안 어긋난다(scorePlayer.ts는 이 옵션이
+      // 없으면 latestScore.meta.bpm, 즉 원곡 속도로 고정 스케줄해버림).
+      playbackBpm: playbackBpmRef.current,
     })
     playbackSessionRef.current = { handle, metronome, tracks }
 
@@ -529,14 +561,19 @@ export function EditorScreen({
     // "곡 시작"은 0초) — 재생 시작 직후 바로 지금 커서 위치로 점프한다.
     // 이미 지난 노트의 schedule() 콜백은 그 시각을 넘어서면 자동으로
     // 스킵되는 Tone.js 표준 동작이라(실제 설치된 Transport 소스 기준) 안전.
-    const positionSeconds = ticksToSeconds(cursorTicksRef.current, latestState.ppq, latestState.meta.bpm)
+    // ticksToSeconds도 노트 스케줄과 같은 playbackBpm 기준이어야 위치가 맞다.
+    const positionSeconds = ticksToSeconds(
+      cursorTicksRef.current,
+      latestState.ppq,
+      playbackBpmRef.current,
+    )
     clock.setPositionSeconds(positionSeconds)
     if (tracks) {
-      // "원곡 속도" 대비 "지금 편집 중인 BPM"의 비율 — PracticeCanvas.tsx의
-      // playbackRate = playbackBpm/score.meta.bpm과 같은 식(위 initialBpmRef
-      // 코멘트 참고). audioOffsetMs===0일 때만 tracks가 있으므로 곡 시작
-      // 기준점(songStartSeconds)은 항상 0.
-      const playbackRate = latestState.meta.bpm / initialBpmRef.current
+      // "원곡 속도"(meta.bpm, 더는 편집 불가) 대비 "지금 연습 속도"의 비율 —
+      // PracticeCanvas.tsx의 playbackRate = playbackBpm/score.meta.bpm과 같은 식.
+      // audioOffsetMs===0일 때만 tracks가 있으므로 곡 시작 기준점
+      // (songStartSeconds)은 항상 0.
+      const playbackRate = playbackBpmRef.current / latestState.meta.bpm
       tracks.playFrom(audioTrackPositionSeconds(positionSeconds, 0, playbackRate), playbackRate)
     }
     setIsPlaying(true)
@@ -739,22 +776,14 @@ export function EditorScreen({
         }}
       >
         <button onClick={onCancel}>← 라이브러리</button>
-        <label style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-1)' }}>
-          BPM
-          {/* PracticeCanvas.tsx의 BPM 입력과 같은 원칙 — "재생 시작 시점의
-           * BPM으로 이미 스케줄돼 있어, 재생 중 바꿔도 지금 재생엔 반영
-           * 안 됨(다음 재생부터 적용)" — 혼란을 막기 위해 재생 중엔 잠금.
-           * 재생 위치 표시(초→틱 환산)가 재생 중 내내 같은 BPM을 가정하는
-           * 전제이기도 하다. */}
-          <input
-            type="number"
-            min={1}
-            value={meta.bpm}
-            onChange={(e) => commit({ ...state, meta: { ...meta, bpm: Number(e.target.value) } })}
-            disabled={isPlaying}
-            style={{ width: 64 }}
-          />
-        </label>
+        {/* 2026-10-29(의뢰인 요청) — "편집기에서 bpm을 건들 수 없었으면
+         * 좋겠어... 라이브러리에 bpm은 우리가 업로드했을 때의 원본값이
+         * 적히도록". 원곡 BPM은 이제 여기서 조절할 수 없고(읽기 전용
+         * 표시), 재생 속도 조절은 아래 "재생" 영역의 별도 슬라이더로
+         * 옮겼다(PracticeCanvas.tsx와 같은 위치·패턴). */}
+        <span style={{ color: 'var(--text-muted)', fontSize: '0.9em' }}>
+          원곡 BPM {meta.bpm}
+        </span>
         <label style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-1)' }}>
           박자표
           <input
@@ -875,6 +904,55 @@ export function EditorScreen({
             {playbackError}
           </span>
         )}
+        <label style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
+          속도
+          {/* PracticeCanvas.tsx의 BPM(연습 속도) 입력과 완전히 같은 패턴 —
+           * 재생 시작 시점에 이미 스케줄돼 있어 재생 중 바꿔도 지금
+           * 재생엔 반영 안 됨(다음 재생부터 적용) — 혼란을 막기 위해
+           * 재생 중엔 잠금. */}
+          <input
+            type="range"
+            className="mixer-slider"
+            min={minBpm}
+            max={maxBpm}
+            value={playbackBpm}
+            onChange={(e) => setPlaybackBpm(clampBpm(Number(e.target.value)))}
+            disabled={isPlaying}
+          />
+          <input
+            type="number"
+            min={minBpm}
+            max={maxBpm}
+            value={bpmFieldValue}
+            onFocus={() => {
+              setBpmDraft(String(playbackBpm))
+              setIsEditingBpm(true)
+            }}
+            onChange={(e) => setBpmDraft(e.target.value)}
+            onBlur={(e) => {
+              setPlaybackBpm(clampBpm(Number(e.target.value)))
+              setIsEditingBpm(false)
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') e.currentTarget.blur()
+            }}
+            disabled={isPlaying}
+            style={{ width: 56 }}
+          />
+          <button
+            type="button"
+            className="settings-trigger"
+            onClick={() => {
+              setPlaybackBpm(meta.bpm)
+              setIsEditingBpm(false)
+            }}
+            disabled={isPlaying}
+            aria-label={`원곡 BPM(${meta.bpm})으로 재설정`}
+            title={`원곡 BPM(${meta.bpm})으로 재설정`}
+          >
+            <RotateCcw size={14} aria-hidden="true" />
+          </button>
+        </label>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--space-3)', marginLeft: 'auto' }}>
           {(audioTracksAvailable
             ? (['synth_drums', 'metronome', ...stemKinds] as const)

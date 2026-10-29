@@ -204,7 +204,7 @@ describe('EditorScreen', () => {
     expect(grid.scrollLeft).toBeGreaterThan(0)
   })
 
-  it('does not let grid shortcuts interfere with the BPM input', () => {
+  it('does not let grid shortcuts interfere with the playback-speed input (2026-10-29부터 BPM 자체는 편집 불가, 재생 속도만 조절)', () => {
     render(
       <EditorScreen song={song} initialScore={makeScore()} onSaved={() => {}} onCancel={() => {}} />,
     )
@@ -212,8 +212,13 @@ describe('EditorScreen', () => {
     fireEvent.click(kickRow.querySelectorAll('button')[0])
     expect(screen.getByText(/틱 480/)).toBeInTheDocument()
 
-    const bpmInput = screen.getByDisplayValue('120') as HTMLInputElement
-    fireEvent.keyDown(bpmInput, { key: 'ArrowRight' }) // BPM 입력창 안에서 누른 방향키
+    // 재생 속도 입력의 초깃값은 원곡 BPM(120)과 같다(아직 조절 전이므로) —
+    // 슬라이더(type=range)도 같은 값이라 getAllByDisplayValue로 찾아 숫자
+    // 입력창(type=number)만 골라낸다.
+    const speedInput = screen
+      .getAllByDisplayValue('120')
+      .find((el) => (el as HTMLInputElement).type === 'number') as HTMLInputElement
+    fireEvent.keyDown(speedInput, { key: 'ArrowRight' }) // 입력창 안에서 누른 방향키
 
     // 그리드 핸들러는 그리드 컨테이너에만 달려 있어 입력창 키 입력이 거기로
     // 버블링되지 않는다 — 선택된 노트의 틱이 그대로여야 한다.
@@ -263,6 +268,42 @@ describe('EditorScreen', () => {
     const sentScore = JSON.parse(drumscoreCall[1].body as string) as DrumScore
     expect(sentScore.notes).toHaveLength(2)
     expect(sentScore.notes.map((n) => n.piece).sort()).toEqual(['kick', 'snare'])
+  })
+
+  it('adjusting playback speed never touches meta.bpm on save, and alone does not enable 저장 (2026-10-29 의뢰인 요청)', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 204 }))
+    vi.stubGlobal('fetch', fetchMock)
+    const onSaved = vi.fn()
+
+    render(
+      <EditorScreen song={song} initialScore={makeScore()} onSaved={onSaved} onCancel={() => {}} />,
+    )
+
+    // 재생 속도만 바꾸면(실제 편집 없이) 저장 버튼은 계속 비활성 — playbackBpm은
+    // commit()/history를 거치지 않는 별도 state이기 때문. 숫자 입력창만 골라낸다
+    // (슬라이더도 같은 값이라 getByDisplayValue 단독으론 중복 매치됨).
+    const speedInput = screen
+      .getAllByDisplayValue('120')
+      .find((el) => (el as HTMLInputElement).type === 'number') as HTMLInputElement
+    fireEvent.focus(speedInput)
+    fireEvent.change(speedInput, { target: { value: '150' } })
+    fireEvent.blur(speedInput)
+    expect(
+      screen.getAllByDisplayValue('150').find((el) => (el as HTMLInputElement).type === 'number'),
+    ).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '저장' })).toBeDisabled()
+
+    // 실제 노트 편집과 함께 저장해도, 서버로 보내는 meta.bpm은 원곡 그대로.
+    const snareRow = screen.getByTestId('editor-row-snare')
+    fireEvent.click(snareRow, { clientX: 100 })
+    fireEvent.click(screen.getByRole('button', { name: '저장' }))
+
+    await waitFor(() => expect(onSaved).toHaveBeenCalled())
+    const drumscoreCall = fetchMock.mock.calls.find(
+      ([, init]) => (init as RequestInit | undefined)?.method === 'PUT',
+    ) as [string, RequestInit]
+    const sentScore = JSON.parse(drumscoreCall[1].body as string) as DrumScore
+    expect(sentScore.meta.bpm).toBe(120)
   })
 
   it('shows an error message and does not call onSaved when the save request fails', async () => {
