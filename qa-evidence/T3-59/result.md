@@ -86,6 +86,17 @@ REQ-04대로 구현해 둔 "연습 속도(playbackBpm, 원곡 대비 50~150%, �
   그대로 나옴.
 - 실제 브라우저 시각 확인(로그인 필요)은 남은 작업으로 아래에 기록.
 
+## Codex 모드A 검수(읽기 전용)
+- 대상: `task/T3-59-editor-bpm-practice-speed-only` vs `main`(코드 변경분만,
+  `intent/02-requirements.md`는 문서 전용 수정이라 범위 밖).
+- **1차 — APPROVE(지적 없음)**. 확인 범위: `playbackBpm` 선언 순서(먼저
+  선언돼 `currentSeconds` 초기화에서 쓰임)와 rAF 변환, 재생 시작 시 BPM·
+  위치·스템 속도 계산, 리싱크 계산, 입력 잠금(`disabled={isPlaying}`),
+  테스트의 입력 구분(`getAllByDisplayValue` + `type==='number'` 필터)과
+  저장 검증(playbackBpm 변경이 meta.bpm에 영향 없음). `initialBpmRef`의
+  잔여 참조 없음 확인. (검수 범위 밖으로 직접 밝힌 것: 테스트 실행 자체는
+  안 함 — 위 "테스트" 절의 vitest 297/297 통과로 보완됨.)
+
 ## 남은 작업
 - 의뢰인이 직접 로그인해 편집 화면에서 "속도" 슬라이더를 눈으로 확인 필요
   (기능은 테스트로 검증됐으나 레이아웃·간격 등 시각적 확인은 못 함).
