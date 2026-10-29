@@ -565,7 +565,7 @@ describe('EditorScreen', () => {
     expect(kickRow.querySelectorAll('button')).toHaveLength(1) // 새 노트가 안 생겨야 함
   })
 
-  it('does not commit a drag that snaps back to the original tick (no-op move)', () => {
+  it('commits even a small, non-grid-aligned drag — no snapping (2026-10-29 의뢰인 확인 — 자유 배치로 전환)', () => {
     render(
       <EditorScreen song={song} initialScore={makeScore()} onSaved={() => {}} onCancel={() => {}} />,
     )
@@ -573,27 +573,30 @@ describe('EditorScreen', () => {
     const noteButton = kickRow.querySelectorAll('button')[0]
     fireEvent.click(noteButton)
 
+    // +5px — 격자 한 칸(24px)에 한참 못 미치지만, 자유 배치에서는 그래도
+    // 실제로 움직인 거리만큼(5/24*240=50틱) 그대로 반영돼야 한다(스냅이면
+    // 제자리로 돌아갔을 거리).
     fireEvent.mouseDown(noteButton, { clientX: 100 })
-    fireEvent.mouseMove(window, { clientX: 105 }) // 격자 한 칸(24px)에 한참 못 미침 — 스냅되면 원위치
+    fireEvent.mouseMove(window, { clientX: 105 })
     fireEvent.mouseUp(window, { clientX: 105 })
 
-    expect(screen.getByText(/틱 480/)).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '저장' })).toBeDisabled()
+    expect(screen.getByText(/틱 530/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '저장' })).not.toBeDisabled()
   })
 
-  it('snaps a click to the cell it falls inside (floor), not the nearest grid line (2026-10-29 의뢰인 재지적 — 반올림이면 여기선 틱 240으로 갔을 것)', () => {
+  it('places a click at the exact clicked pixel position, not snapped to any grid line (2026-10-29 의뢰인 확인 — 자유 배치로 전환)', () => {
     render(
       <EditorScreen song={song} initialScore={makeScore()} onSaved={() => {}} onCancel={() => {}} />,
     )
     const snareRow = screen.getByTestId('editor-row-snare')
-    // ROW_LABEL_WIDTH(64) + 20px — 0~240틱 칸의 오른쪽(20/24)에 치우친
-    // 지점. "가장 가까운 선"(반올림)이었다면 240으로 갔을 자리.
+    // ROW_LABEL_WIDTH(64) + 20px → (20/24)*240 = 200틱 — 격자(240 단위)의
+    // 배수가 아닌 자리. 자유 배치라면 그대로 200에 찍혀야 한다.
     fireEvent.click(snareRow, { clientX: 84 })
 
-    expect(screen.getByText(/틱 0\b/)).toBeInTheDocument()
+    expect(screen.getByText(/틱 200\b/)).toBeInTheDocument()
   })
 
-  it('keeps a dragged note in its current cell until the drag fully crosses into the next one (바닥 함수 확인)', () => {
+  it('drags a note to an arbitrary non-grid-aligned tick, matching the exact drag distance (2026-10-29 의뢰인 확인 — 자유 배치로 전환)', () => {
     render(
       <EditorScreen song={song} initialScore={makeScore()} onSaved={() => {}} onCancel={() => {}} />,
     )
@@ -601,14 +604,13 @@ describe('EditorScreen', () => {
     const noteButton = kickRow.querySelectorAll('button')[0]
     fireEvent.click(noteButton)
 
-    // +20px — 다음 격자선(+24px)에는 못 미치지만, "가장 가까운 선"
-    // (반올림, 절반인 12px 기준)이었다면 이미 다음 칸(틱 720)으로
-    // 넘어갔을 거리.
+    // +20px → (20/24)*240 = 200틱, 480+200=680 — 격자(240 단위)의 배수가
+    // 아닌 자리로 정확히 옮겨져야 한다.
     fireEvent.mouseDown(noteButton, { clientX: 100 })
     fireEvent.mouseMove(window, { clientX: 120 })
     fireEvent.mouseUp(window, { clientX: 120 })
 
-    expect(screen.getByText(/틱 480/)).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '저장' })).toBeDisabled()
+    expect(screen.getByText(/틱 680/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '저장' })).not.toBeDisabled()
   })
 })
