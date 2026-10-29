@@ -169,7 +169,14 @@ export function EditorScreen({
   const lastSavedStateRef = useRef(state)
   const isDirty = state !== lastSavedStateRef.current
 
+  // Codex 모드A 2차 지적(필수, 반영) — 저장 요청이 오가는 동안에도 편집이
+  // 막혀있지 않아서, handleSave()가 캡처한 state로 PUT을 보내는 사이
+  // 사용자가 노트를 더 바꾸면 그 추가 편집은 서버에 저장되지 않은 채
+  // onSaved()가 호출돼 화면을 떠나버릴 수 있었다(조용한 데이터 유실). 모든
+  // 편집 경로(노트 추가·이동·삭제·손 지정·BPM/박자표 등)가 결국 이
+  // 함수 하나를 거치므로, 여기 한 곳만 막으면 저장 중엔 전부 막힌다.
   function commit(next: EditorState) {
+    if (isSaving) return
     setHistory((h) => pushHistory(h, next))
   }
 
@@ -330,11 +337,14 @@ export function EditorScreen({
     if (voicesSessionRef.current) return voicesSessionRef.current
     if (isStartingVoicesRef.current) return null // 이미 다른 호출이 생성 중
     isStartingVoicesRef.current = true
-    const limiter = new Tone.Limiter(-1).connect(Tone.getDestination())
-    const synthGain = new Tone.Gain(effectiveGain(mixerStateRef.current.synth_drums)).connect(
-      limiter,
-    )
+    // Codex 모드A 2차 지적(권장, 반영) — Limiter/Gain 생성·connect 자체가
+    // 던질 가능성까지 같은 catch가 잡도록 try 블록 안으로 옮긴다(원래는
+    // try 밖이라 여기서 던지면 아무도 안 잡는 처리되지 않은 예외가 됐음).
+    let limiter: Tone.Limiter | undefined
+    let synthGain: Tone.Gain | undefined
     try {
+      limiter = new Tone.Limiter(-1).connect(Tone.getDestination())
+      synthGain = new Tone.Gain(effectiveGain(mixerStateRef.current.synth_drums)).connect(limiter)
       const voices = await createDrumVoices(synthGain)
       if (!isMountedRef.current) {
         // 로딩이 끝나기 전에 화면을 떠남 — 방금 만든 리소스를 그대로 정리.
@@ -349,8 +359,8 @@ export function EditorScreen({
     } catch (err) {
       // eslint-disable-next-line no-console
       console.error('신스 드럼 음색 로딩 실패', err)
-      synthGain.dispose()
-      limiter.dispose()
+      synthGain?.dispose()
+      limiter?.dispose()
       if (isMountedRef.current) setPlaybackError('재생 음색을 불러오지 못했습니다')
       return null
     } finally {
@@ -396,6 +406,13 @@ export function EditorScreen({
 
   // 언마운트 시 오디오 리소스 정리.
   useEffect(() => {
+    // Codex 모드A 2차 지적(필수, 반영) — React StrictMode(개발 모드)는
+    // 마운트 직후 이 effect를 "실행→정리→다시 실행"으로 한 번 더 돌린다.
+    // cleanup에서만 false로 내리고 여기서 다시 true로 안 올리면, 그 뒤
+    // 진짜로 화면에 떠 있는 동안에도 isMountedRef가 영원히 false로 남아
+    // "재생"을 눌러도 ensureVoicesSession()이 매번 언마운트로 오판해
+    // 아무것도 안 하는 채로 조용히 끝나버린다(StrictMode에서만 재현).
+    isMountedRef.current = true
     return () => {
       isMountedRef.current = false
       stopRaf()
