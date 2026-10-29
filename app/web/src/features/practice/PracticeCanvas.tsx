@@ -935,6 +935,17 @@ export function PracticeCanvas({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  // 2026-10-29(의뢰인 재지적 — "편집화면에서 연습으로 넘어가지긴 하는데 그
+  // 상태에서 재생버튼을 누르면 다시 첨부터 시작하는데") — 위 효과는 "멈춰
+  // 있는 동안"의 화면(렌더러가 Transport 위치를 그대로 읽음)만 맞춰줬을 뿐,
+  // handlePlay()의 "새 세션" 경로(아래)가 playDrumScore()를 부르면 그 안에서
+  // transport.position = 0으로 늘 리셋해버려(여러 화면에서 한 Transport를
+  // 공유하므로 항상 그래야 함 — scorePlayer.ts 코멘트 참고) 애써 옮겨둔
+  // 위치를 덮어썼다. handlePlay()가 세션을 만든 "바로 다음"에 한 번 더
+  // 점프시켜야 한다 — 소비형 ref라 이번 "첫 재생"에만 적용되고, 그 뒤
+  // 정지 후 다시 재생하면 평소처럼 0부터 시작한다.
+  const pendingInitialPositionTicksRef = useRef(initialPositionTicks)
+
   // T3-16(성능, 2026-10-26) — 의뢰인이 Safari 실기기 프로파일러로 T3-15 수정
   // 후에도 GC가 여전히 보인다고 재확인 — 원래 이 "바뀐 것만 반영" 체크
   // 자체가(배열 스프레드+map+sort+join으로 매 프레임 문자열을 새로 만듦)
@@ -1341,7 +1352,12 @@ export function PracticeCanvas({
         countInBars: COUNT_IN_BARS,
         playbackBpm,
         loop,
-        tracks: tracks ?? undefined,
+        // 핸드오프 위치로 바로 이동할 때는 tracks를 아예 안 넘긴다 —
+        // EditorScreen.tsx와 같은 이유(실제 Tone.js 15.1.22로 실측 확인):
+        // transport.schedule()로 예약된 트랙 시작 콜백이 시작 직후 같은
+        // 틱에 위치를 점프시키면 전혀 발화하지 않는다. 대신 아래에서 위치를
+        // 옮긴 뒤 tracks.playFrom()을 직접 호출한다(이 경우에만).
+        tracks: pendingInitialPositionTicksRef.current === undefined ? tracks ?? undefined : undefined,
         // 2026-10-27(의뢰인 요청) — 카운트인 클릭이 믹서 "메트로놈" 채널 설정과
         // 무관하게 항상 고정 음량으로 울려 "음악은 작은데 그 소리만 크다"는
         // 불편의 원인이었다 — 재생 시작 시점의 메트로놈 게인을 그대로 넘겨
@@ -1352,6 +1368,27 @@ export function PracticeCanvas({
       playbackRef.current = { handle, voices, tracks, synthGain, limiter, metronome }
       isStartingRef.current = false
       setIsStarting(false)
+
+      // 위 playDrumScore()가 내부적으로 transport.position을 늘 0으로
+      // 리셋하므로, 핸드오프받은 위치가 있으면 세션을 만든 바로 다음(같은
+      // 동기 구간)에 점프시킨다 — EditorScreen.tsx의 handlePlay()와 같은
+      // 패턴. 소비형 ref라 한 번 쓰면 비워 다음 재생부터는 평소처럼 0부터.
+      const pendingTicks = pendingInitialPositionTicksRef.current
+      if (pendingTicks !== undefined) {
+        pendingInitialPositionTicksRef.current = undefined
+        const barSeconds = barDurationSeconds(score.meta.timeSignature, playbackBpm)
+        const songStartSeconds = barSeconds * COUNT_IN_BARS
+        const positionSeconds =
+          songStartSeconds + (pendingTicks / score.ppq) * (60 / playbackBpm)
+        getMasterClock().setPositionSeconds(positionSeconds)
+        if (tracks) {
+          const playbackRate = playbackBpm / score.meta.bpm
+          tracks.playFrom(
+            audioTrackPositionSeconds(positionSeconds, songStartSeconds, playbackRate),
+            playbackRate,
+          )
+        }
+      }
     } catch (err) {
       cleanupAbortedSetup()
       // 2026-10-29(의뢰인 요청) — 예전엔 여기서 그대로 다시 던져 호출부
@@ -1391,7 +1428,14 @@ export function PracticeCanvas({
     // 예약돼 있는 도중에 타이머가 먼저 발동해 disposeDrumVoices가 버퍼를 지워버리는
     // 경쟁 상태를 실제 브라우저로 재현함("buffer is either not set or not loaded"
     // 예외) — qa-evidence/T2-3/result.md. 카운트인 길이를 더하고 여유도 넉넉히 둠.
-    const totalMs = songEndPositionSeconds() * 1000
+    // 2026-10-29 — 위에서 핸드오프 위치로 점프했으면 "곡 전체 길이"가 아니라
+    // "지금 위치부터 끝까지"만 남은 시간이어야 한다(handleSeek()의 같은
+    // 보정과 동일한 이유) — 매번 실제 위치를 다시 읽어 일반적으로 맞게 한다
+    // (점프가 없었던 보통 경우엔 위치가 0 근처라 기존과 동일한 값이 나옴).
+    const totalMs = Math.max(
+      0,
+      songEndPositionSeconds() - getMasterClock().getPositionSeconds(),
+    ) * 1000
     // T3-6(REQ-04) — 일시정지 중 흐른 시간을 나중에 뺄 수 있게 ref로 들고
     // 있는다(work/T3-6/plan.md §4). 기준 시계는 performance.now().
     autoStopRemainingMsRef.current = totalMs

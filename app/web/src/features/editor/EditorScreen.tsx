@@ -1022,22 +1022,29 @@ export function EditorScreen({
         <span style={{ fontFamily: 'monospace', color: 'var(--text-muted)', fontSize: '0.9em' }}>
           {formatMmSs(currentSeconds)}
         </span>
-        <span style={{ color: 'var(--text-muted)', fontSize: '0.85em' }}>
-          {audioTracksAvailable
-            ? '원곡 음원 + 신스 드럼을 함께 재생합니다.'
-            : canUseAudioTracks
+        {/* 2026-10-29(의뢰인 요청) — "원곡 음원 + 신스 드럼을 함께 재생합니다
+         * 이런 말은 필요없어" — 정상 동작 중엔 안내문 없이 조용히, 실제로
+         * 뭔가 평소와 다를 때(로딩 중·실패·분리 자체가 없음)만 이유를 보여준다. */}
+        {!audioTracksAvailable && (
+          <span style={{ color: 'var(--text-muted)', fontSize: '0.85em' }}>
+            {canUseAudioTracks
               ? audioTracksLoading
                 ? '원곡 음원을 불러오는 중…'
                 : '원곡 음원을 불러오지 못해 신스 드럼만 재생됩니다.'
               : '이 곡은 음원 분리가 안 돼 있어 신스 드럼만 재생됩니다.'}
-        </span>
+          </span>
+        )}
         {playbackError && (
           <span role="alert" style={{ color: 'var(--danger)', fontSize: '0.85em' }}>
             {playbackError}
           </span>
         )}
         <label style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
-          속도
+          {/* 2026-10-29(의뢰인 요청) — "속도를 bpm을 바꿔서 표기해줘" —
+           * 표시되는 값 자체가 이미 BPM 숫자라 라벨도 PracticeCanvas.tsx와
+           * 똑같이 "BPM"으로(그동안은 "속도"라는 추상적인 말이라 숫자가
+           * 무슨 단위인지 헷갈릴 수 있었음). */}
+          BPM
           {/* PracticeCanvas.tsx의 BPM(연습 속도) 입력과 완전히 같은 패턴 —
            * 재생 시작 시점에 이미 스케줄돼 있어 재생 중 바꿔도 지금
            * 재생엔 반영 안 됨(다음 재생부터 적용) — 혼란을 막기 위해
