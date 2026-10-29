@@ -212,6 +212,17 @@ export function EditorScreen({
     cursorTicksRef.current = cursorTicks
   }, [cursorTicks])
 
+  // 자체 재검토(Codex 4차 승인 뒤, 5차는 Codex 사용량 한도로 실행 못 함 —
+  // 아래 "남은 작업" 참고) — handlePlay()는 createDrumVoices() 비동기 대기
+  // 중(특히 이번 세션 첫 재생 때, 샘플 로딩 동안) state 클로저를 그대로 쓰면,
+  // 그 사이 사용자가 노트를 편집해도 반영 안 된 옛 상태로 재생될 수 있다.
+  // ref로 최신값을 따로 들고 있다가 await 이후엔 이 ref를 읽는다
+  // (cursorTicksRef와 같은 패턴).
+  const stateRef = useRef(state)
+  useEffect(() => {
+    stateRef.current = state
+  }, [state])
+
   const [mixerState, setMixerStateRaw] = useState<MixerState>(defaultMixerState())
   const mixerStateRef = useRef(mixerState)
   useEffect(() => {
@@ -373,11 +384,17 @@ export function EditorScreen({
     const voicesSession = await ensureVoicesSession()
     if (!voicesSession || !isMountedRef.current) return
 
+    // await 이후엔 이 함수가 호출될 당시(클로저)의 state가 아니라 ref로
+    // 최신값을 읽는다 — 첫 재생이라 샘플 로딩을 기다리는 사이 사용자가
+    // 노트·BPM을 편집했을 수 있다(위 stateRef 코멘트 참고).
+    const latestState = stateRef.current
+    const latestScore = toDrumScore(latestState)
+
     playbackSessionRef.current?.handle.stop()
     playbackSessionRef.current?.metronome.dispose()
-    const metronome = createMetronome({ timeSignature: meta.timeSignature })
+    const metronome = createMetronome({ timeSignature: latestState.meta.timeSignature })
     metronome.setVolume(metronomeGainToDb(effectiveGain(mixerStateRef.current.metronome)))
-    const handle = playDrumScore(toDrumScore(state), voicesSession.voices, {
+    const handle = playDrumScore(latestScore, voicesSession.voices, {
       // 편집 중 임의 위치부터 듣는 용도라 카운트인은 불필요(처음부터 들을
       // 땐 0초부터라 어차피 카운트인이 의미 없고, 중간부터면 더더욱).
       countInBars: 0,
@@ -390,7 +407,9 @@ export function EditorScreen({
     // "곡 시작"은 0초) — 재생 시작 직후 바로 지금 커서 위치로 점프한다.
     // 이미 지난 노트의 schedule() 콜백은 그 시각을 넘어서면 자동으로
     // 스킵되는 Tone.js 표준 동작이라(실제 설치된 Transport 소스 기준) 안전.
-    clock.setPositionSeconds(ticksToSeconds(cursorTicksRef.current, ppq, meta.bpm))
+    clock.setPositionSeconds(
+      ticksToSeconds(cursorTicksRef.current, latestState.ppq, latestState.meta.bpm),
+    )
     setIsPlaying(true)
     startRaf()
   }
@@ -592,11 +611,17 @@ export function EditorScreen({
         <button onClick={onCancel}>← 라이브러리</button>
         <label style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-1)' }}>
           BPM
+          {/* PracticeCanvas.tsx의 BPM 입력과 같은 원칙 — "재생 시작 시점의
+           * BPM으로 이미 스케줄돼 있어, 재생 중 바꿔도 지금 재생엔 반영
+           * 안 됨(다음 재생부터 적용)" — 혼란을 막기 위해 재생 중엔 잠금.
+           * 재생 위치 표시(초→틱 환산)가 재생 중 내내 같은 BPM을 가정하는
+           * 전제이기도 하다. */}
           <input
             type="number"
             min={1}
             value={meta.bpm}
             onChange={(e) => commit({ ...state, meta: { ...meta, bpm: Number(e.target.value) } })}
+            disabled={isPlaying}
             style={{ width: 64 }}
           />
         </label>
@@ -615,6 +640,7 @@ export function EditorScreen({
                 },
               })
             }
+            disabled={isPlaying}
             style={{ width: 48 }}
           />
           /
@@ -631,6 +657,7 @@ export function EditorScreen({
                 },
               })
             }
+            disabled={isPlaying}
             style={{ width: 48 }}
           />
         </label>
