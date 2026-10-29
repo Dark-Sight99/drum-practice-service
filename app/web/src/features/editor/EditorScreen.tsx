@@ -873,6 +873,12 @@ export function EditorScreen({
   }, [])
 
   function handleRowClick(e: React.MouseEvent<HTMLDivElement>, pieces: readonly DrumPiece[]) {
+    // 2026-10-29(T3-76, 의뢰인 요청) — 재생 중엔 그리드가 재생 위치를 따라
+    // 계속 스크롤되므로(T3-75), 그 와중에 클릭으로 노트를 추가하면 클릭한
+    // 화면 좌표와 실제 가리키는 틱이 어긋나기 쉽다. 노트 버튼 자체도
+    // disabled={isPlaying}로 드래그·선택을 막았으니(아래), 새 노트 추가도
+    // 같은 이유로 재생 중엔 막는다.
+    if (isPlaying) return
     if (justDraggedRef.current) {
       // 방금 끝난 드래그가 노트 밖에서 mouseup해 합성된 click — 위
       // justDraggedRef 코멘트 참고. 새 노트를 만들지 않고 소비만 한다.
@@ -1614,6 +1620,12 @@ export function EditorScreen({
                   <button
                     key={note._editorId}
                     aria-label={`${row.label} 노트, 틱 ${note.tick}${note.hand ? ` ${HAND_LABEL[note.hand]}${note.handSource === 'user' ? '(지정)' : '(추천)'}` : ''}${isSelected ? ' (선택됨)' : ''}`}
+                    // 2026-10-29(T3-76, 의뢰인 요청 — "재생 중엔 편집 자체를
+                    // 잠그자") — 재생 중엔 그리드가 계속 스크롤돼(T3-75) 클릭
+                    // 선택·드래그 이동 모두 마우스 아래 좌표가 계속 바뀌어
+                    // 혼란스럽다. 재생 중엔 노트 버튼 자체를 비활성화해 클릭
+                    // (선택)·mousedown(드래그 시작) 둘 다 막는다.
+                    disabled={isPlaying}
                     onClick={(e) => handleNoteClick(e, note._editorId)}
                     onMouseDown={(e) => handleNoteMouseDown(e, note)}
                     style={{
