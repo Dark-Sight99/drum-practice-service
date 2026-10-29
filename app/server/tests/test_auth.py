@@ -168,6 +168,65 @@ def test_non_admin_cannot_access_admin_endpoints(client: TestClient, db_session)
     assert resp.status_code == 403
 
 
+def test_admin_can_list_users(client: TestClient, db_session) -> None:
+    """2026-10-29(의뢰인 요청) — 계정 관리 화면의 "아이디 찾기" 겸 목록."""
+    _make_user(db_session, "admin", "adminpw", is_admin=True)
+    _make_user(db_session, "someone", "pw1234")
+    client.post("/auth/login", json={"username": "admin", "password": "adminpw"})
+
+    resp = client.get("/admin/users")
+    assert resp.status_code == 200
+    usernames = {u["username"] for u in resp.json()}
+    assert usernames == {"admin", "someone"}
+
+
+def test_non_admin_cannot_list_users(client: TestClient, db_session) -> None:
+    _make_user(db_session, "jaewoo", "pw1234", is_admin=False)
+    client.post("/auth/login", json={"username": "jaewoo", "password": "pw1234"})
+
+    resp = client.get("/admin/users")
+    assert resp.status_code == 403
+
+
+def test_admin_can_reset_password(client: TestClient, db_session) -> None:
+    """2026-10-29(의뢰인 요청) — "비번 찾기": 이메일 없이 관리자가 직접 재설정."""
+    _make_user(db_session, "admin", "adminpw", is_admin=True)
+    target = _make_user(db_session, "forgetful", "oldpw")
+    client.post("/auth/login", json={"username": "admin", "password": "adminpw"})
+
+    resp = client.post(f"/admin/users/{target.id}/reset-password", json={"new_password": "newpw"})
+    assert resp.status_code == 204
+
+    # 새 비밀번호로는 로그인되고, 옛 비밀번호로는 안 된다.
+    client.cookies.clear()
+    assert client.post(
+        "/auth/login", json={"username": "forgetful", "password": "newpw"}
+    ).status_code == 200
+    client.cookies.clear()
+    assert client.post(
+        "/auth/login", json={"username": "forgetful", "password": "oldpw"}
+    ).status_code == 401
+
+
+def test_non_admin_cannot_reset_password(client: TestClient, db_session) -> None:
+    _make_user(db_session, "jaewoo", "pw1234", is_admin=False)
+    target = _make_user(db_session, "someone", "pw1234")
+    client.post("/auth/login", json={"username": "jaewoo", "password": "pw1234"})
+
+    resp = client.post(
+        f"/admin/users/{target.id}/reset-password", json={"new_password": "x"}
+    )
+    assert resp.status_code == 403
+
+
+def test_reset_password_unknown_user_returns_404(client: TestClient, db_session) -> None:
+    _make_user(db_session, "admin", "adminpw", is_admin=True)
+    client.post("/auth/login", json={"username": "admin", "password": "adminpw"})
+
+    resp = client.post("/admin/users/999999/reset-password", json={"new_password": "x"})
+    assert resp.status_code == 404
+
+
 def test_login_failures_return_identical_response(client: TestClient, db_session) -> None:
     """Codex 모드A C-001: 존재하지 않는 아이디 / 틀린 비밀번호 / 정지된 계정, 셋 다 상태코드와
     본문이 완전히 같아야 한다(계정 존재·상태를 응답으로 알 수 없게)."""

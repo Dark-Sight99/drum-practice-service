@@ -6,6 +6,7 @@ import { LoginScreen } from './features/auth/LoginScreen'
 import { LibraryScreen } from './features/library/LibraryScreen'
 import { PracticeCanvas } from './features/practice/PracticeCanvas'
 import { EditorScreen } from './features/editor/EditorScreen'
+import { AdminScreen } from './features/admin/AdminScreen'
 import { Skeleton } from './components/Skeleton'
 import type { DrumScore } from './score/types'
 
@@ -15,7 +16,7 @@ import type { DrumScore } from './score/types'
 // 뒤로가기가 필요해지면 이 선택을 재검토).
 // T3-19(2026-10-26) — 업로드는 더 이상 독립 화면이 아니라 LibraryScreen이
 // 내부적으로 띄우는 모달이라 'upload'는 여기서 제거.
-type Screen = 'checking' | 'login' | 'library' | 'practice' | 'editor'
+type Screen = 'checking' | 'login' | 'library' | 'practice' | 'editor' | 'admin'
 
 function App() {
   const [screen, setScreen] = useState<Screen>('checking')
@@ -149,6 +150,10 @@ function App() {
     )
   }
 
+  if (screen === 'admin') {
+    return <AdminScreen currentUserId={user.id} onBack={() => setScreen('library')} />
+  }
+
   return (
     <LibraryScreen
       onOpenSong={(song, drumScore) => {
@@ -163,6 +168,8 @@ function App() {
         setUser(null)
         setScreen('login')
       }}
+      isAdmin={user.is_admin}
+      onOpenAdmin={() => setScreen('admin')}
     />
   )
 }
