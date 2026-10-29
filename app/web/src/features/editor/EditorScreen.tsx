@@ -1103,8 +1103,14 @@ export function EditorScreen({
 
   // 2026-10-30(T3-77, 모드A 지적) — moveSelected()의 반복 반올림 오차 누적을
   // 막으려고 "화살표 이동을 시작한 기준 틱 + 그 뒤 누른 횟수"를 따로 든다
-  // (아래 moveSelected 코멘트 참고).
-  const moveAnchorRef = useRef<{ noteId: number; anchorTick: number; steps: number } | null>(null)
+  // (아래 moveSelected 코멘트 참고). gridUnit도 같이 들어 격자 설정이 바뀌면
+  // (모드A 2차 지적 C-002) 우연히 반올림 결과가 같아 보여도 무조건 새로 잡는다.
+  const moveAnchorRef = useRef<{
+    noteId: number
+    anchorTick: number
+    steps: number
+    gridUnit: GridUnit
+  } | null>(null)
 
   function moveSelected(deltaTicks: number, deltaRows: number) {
     if (selectedNote === null) return
@@ -1128,7 +1134,19 @@ export function EditorScreen({
     // "기준 틱 + 누른 횟수*격자폭"을 한 번만 반올림한다. 다른 노트 선택·
     // 드래그 등으로 틱이 이 추적과 다르게 바뀌면(moveAnchorRef가 예상하는
     // 값과 실제 selectedNote.tick이 다르면) 그 순간의 실제 틱을 새 기준으로
-    // 다시 잡는다 — 격자 설정을 바꾼 경우도 이 비교로 자연히 걸러진다.
+    // 다시 잡는다.
+    //
+    // Codex 모드A 2차 지적(필수, 반영) — 틱 0 근처에서 "요청한 이동이 0
+    // 미만으로 클램프됐는지"를 유효성 검사에서도 똑같이 클램프해서 비교하면,
+    // 클램프로 실제 못 움직인 걸 "정상 진행"으로 착각해버린다(예: 틱 0에서
+    // ←를 눌러 steps=-1 기록, 클램프로 실제 틱은 0 그대로 → 그 다음 →를
+    // 누르면 steps가 -1→0이 돼 틱이 또 0에 머물고, 사용자가 기대한 "오른쪽
+    // 으로 한 칸"이 조용히 사라짐). 클램프가 실제로 일어난(반올림한 원시
+    // 값이 음수였던) 순간엔 그 자리를 새 기준점(steps=0)으로 다시 잡아,
+    // 다음 이동이 "지금 실제로 있는 자리"에서 정확히 출발하게 한다 —
+    // 유효성 검사도 클램프 없는 원시 예측값으로 비교해 같은 착시가
+    // 재발하지 않게 한다. gridUnit도 같이 비교해(2차 지적 C-002) 격자
+    // 설정이 바뀐 경우 반올림 결과가 우연히 같아도 무조건 새로 잡는다.
     let nextTick: number
     if (deltaTicks === 0) {
       nextTick = selectedNote.tick
@@ -1137,13 +1155,18 @@ export function EditorScreen({
       const anchorStillValid =
         anchor !== null &&
         anchor.noteId === selectedNote._editorId &&
-        Math.max(0, Math.round(anchor.anchorTick + anchor.steps * unitTicks)) === selectedNote.tick
+        anchor.gridUnit === gridUnit &&
+        Math.round(anchor.anchorTick + anchor.steps * unitTicks) === selectedNote.tick
       const base = anchorStillValid
         ? anchor
-        : { noteId: selectedNote._editorId, anchorTick: selectedNote.tick, steps: 0 }
+        : { noteId: selectedNote._editorId, anchorTick: selectedNote.tick, steps: 0, gridUnit }
       const steps = base.steps + deltaTicks / unitTicks
-      nextTick = Math.max(0, Math.round(base.anchorTick + steps * unitTicks))
-      moveAnchorRef.current = { noteId: selectedNote._editorId, anchorTick: base.anchorTick, steps }
+      const rawNextTick = Math.round(base.anchorTick + steps * unitTicks)
+      nextTick = Math.max(0, rawNextTick)
+      moveAnchorRef.current =
+        rawNextTick === nextTick
+          ? { noteId: selectedNote._editorId, anchorTick: base.anchorTick, steps, gridUnit }
+          : { noteId: selectedNote._editorId, anchorTick: nextTick, steps: 0, gridUnit }
     }
     const rowIdx = editorRowIndexForPiece(selectedNote.piece)
     const nextRowIdx = Math.min(EDITOR_ROWS.length - 1, Math.max(0, rowIdx + deltaRows))

@@ -217,6 +217,33 @@ describe('EditorScreen', () => {
     expect(tick).toBe(150)
   })
 
+  it('does not lose a move when reversing direction right after clamping at tick 0 (T3-77, 모드A 2차 지적 C-001)', () => {
+    // 틱 0에서 ←를 누르면(요청한 이동은 음수) 실제 틱은 0에 클램프된다.
+    // 그 직후 →를 누르면 "클램프되기 전 가상의 기준점"에서 계속 세던 예전
+    // 버그는 steps가 -1→0이 돼 틱이 또 0에 그대로 머물렀다(사용자가 기대한
+    // "오른쪽으로 한 칸"이 조용히 사라짐) — 클램프가 실제로 일어난 자리를
+    // 새 기준으로 다시 잡아야 그 다음 →가 정확히 한 칸(240틱, 8분음표
+    // 기준) 이동해야 한다.
+    const score: DrumScore = {
+      version: 1,
+      meta: { title: '테스트곡', bpm: 120, timeSignature: [4, 4], source: 'midi' },
+      ppq: 480,
+      audioOffsetMs: 0,
+      notes: [{ tick: 0, piece: 'kick', velocity: 90, hand: null }],
+    }
+    render(<EditorScreen song={song} initialScore={score} onSaved={() => {}} onCancel={() => {}} />)
+
+    const kickRow = screen.getByTestId('editor-row-kick')
+    fireEvent.click(kickRow.querySelectorAll('button')[0])
+    const grid = screen.getByRole('application')
+    fireEvent.keyDown(grid, { key: 'ArrowLeft' }) // 0에 클램프
+    fireEvent.keyDown(grid, { key: 'ArrowRight' }) // 240틱(8분음표 한 칸)으로 이동해야 함
+
+    const text = screen.getByText(/틱 [\d.]+/).textContent ?? ''
+    const tick = Number(/틱 ([\d.]+)/.exec(text)?.[1])
+    expect(tick).toBe(240)
+  })
+
   it('changes the selected note piece with ArrowUp/ArrowDown', () => {
     render(
       <EditorScreen song={song} initialScore={makeScore()} onSaved={() => {}} onCancel={() => {}} />,
