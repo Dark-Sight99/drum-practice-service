@@ -945,6 +945,18 @@ export function PracticeCanvas({
   // 점프시켜야 한다 — 소비형 ref라 이번 "첫 재생"에만 적용되고, 그 뒤
   // 정지 후 다시 재생하면 평소처럼 0부터 시작한다.
   const pendingInitialPositionTicksRef = useRef(initialPositionTicks)
+  // 2026-10-29(의뢰인 지적 — "악보편집하기/연습화면 버튼을 여러 번 눌렀을
+  // 때... 음악이 0:00으로 돌아가버린다") — handleEditClick()(아래)이
+  // playbackRef.current(실제로 이 인스턴스에서 재생을 한 번이라도 시작한
+  // 세션)가 있을 때만 Transport 위치를 믿고 읽었다. 그런데 핸드오프로
+  // 들어온 뒤 "재생"을 한 번도 안 누르고(위 mount 효과가 Transport 위치만
+  // 옮겨둔 채) 바로 다시 "악보 편집하기"를 누르면 playbackRef.current는
+  // 여전히 null이라 — Transport는 실제로 올바른 위치에 있는데도 —
+  // handleEditClick()이 무조건 0을 보낸 것(편집↔연습 왕복을 재생 없이
+  // 반복할 때 재현되는 바로 그 증상). 위 mount 효과가 Transport 위치를
+  // 실제로 옮긴 적이 있는지를 별도로 기억해, handleEditClick()이 이것도
+  // 같이 확인하게 한다.
+  const transportPositionAppliedRef = useRef(initialPositionTicks !== undefined)
 
   // T3-16(성능, 2026-10-26) — 의뢰인이 Safari 실기기 프로파일러로 T3-15 수정
   // 후에도 GC가 여전히 보인다고 재확인 — 원래 이 "바뀐 것만 반영" 체크
@@ -1247,6 +1259,10 @@ export function PracticeCanvas({
     }
     isStartingRef.current = true
     setIsStarting(true)
+    // 이 시점부터 Transport 위치는 항상 이 인스턴스가 의도적으로 정한 값
+    // (0부터든, 아래 핸드오프 점프든)이다 — 위 transportPositionAppliedRef
+    // 코멘트 참고.
+    transportPositionAppliedRef.current = true
     stopPlayback() // 혹시 이전 재생이 안 끝났으면 먼저 정리(이중 재생 방지) — playSessionIdRef도 여기서 올라감
     const mySessionId = playSessionIdRef.current
     // T3-3(REQ-04) — audioOffsetMs!==0이면 오디오 트랙 자체를 만들지 않는다
@@ -1635,7 +1651,11 @@ export function PracticeCanvas({
   function handleEditClick() {
     if (!song || !onEditSong) return
     let positionTicks = 0
-    if (playbackRef.current) {
+    // playbackRef.current(이 인스턴스에서 실제로 재생을 시작한 세션)뿐 아니라
+    // transportPositionAppliedRef(위 핸드오프 mount 효과가 Transport 위치를
+    // 옮겨둔 경우)도 확인 — 둘 다 아니면 Transport는 이 화면과 무관한(다른
+    // 화면이 남긴) 값일 수 있어 믿지 않고 0을 보낸다(기존 안전장치 그대로).
+    if (playbackRef.current || transportPositionAppliedRef.current) {
       const clock = getMasterClock()
       const songStartSeconds = barDurationSeconds(score.meta.timeSignature, playbackBpm) * COUNT_IN_BARS
       const songRelativeSeconds = Math.max(0, clock.getPositionSeconds() - songStartSeconds)

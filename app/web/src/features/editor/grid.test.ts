@@ -44,8 +44,8 @@ describe('EDITOR_ROWS / editorRowIndexForPiece', () => {
     'ride',
   ]
 
-  it('covers every DrumPiece exactly once (Codex 모드C C-009)', () => {
-    const rowPieces = EDITOR_ROWS.map((r) => r.piece)
+  it('covers every DrumPiece exactly once across all rows (2026-10-29부터 HH는 한 행이 닫힘/열림 둘을 공유)', () => {
+    const rowPieces = EDITOR_ROWS.flatMap((r) => r.pieces)
     expect(rowPieces).toHaveLength(ALL_PIECES.length)
     expect(new Set(rowPieces).size).toBe(ALL_PIECES.length)
     for (const piece of ALL_PIECES) {
@@ -55,7 +55,11 @@ describe('EDITOR_ROWS / editorRowIndexForPiece', () => {
 
   it('finds the correct row index for a piece', () => {
     const idx = editorRowIndexForPiece('snare')
-    expect(EDITOR_ROWS[idx]?.piece).toBe('snare')
+    expect(EDITOR_ROWS[idx]?.pieces).toContain('snare')
+  })
+
+  it('finds the same HH row for both hihat_closed and hihat_open (연주 화면과 같은 1행 공유)', () => {
+    expect(editorRowIndexForPiece('hihat_closed')).toBe(editorRowIndexForPiece('hihat_open'))
   })
 
   it('returns -1 for an unknown piece (type-cast to simulate bad data)', () => {

@@ -493,4 +493,91 @@ describe('EditorScreen', () => {
     fireEvent.click(notes[1])
     expect(screen.getByText(/손: 왼손\(지정\)/)).toBeInTheDocument()
   })
+
+  it('creates a closed hihat note by default on the merged HH row, toggleable to open (2026-10-29 의뢰인 요청 — HH 통합)', () => {
+    render(
+      <EditorScreen song={song} initialScore={makeScore()} onSaved={() => {}} onCancel={() => {}} />,
+    )
+    const hhRow = screen.getByTestId('editor-row-hihat_closed')
+    fireEvent.click(hhRow, { clientX: 100 })
+    expect(screen.getByText(/선택됨: HH/)).toBeInTheDocument()
+    expect(hhRow.querySelectorAll('button')).toHaveLength(1)
+
+    fireEvent.click(screen.getByRole('button', { name: '열림' }))
+
+    // 피스가 바뀌어도 여전히 같은 HH 행(닫힘/열림 공유)에 그대로 있다 —
+    // 새 노트가 추가되거나 다른 행으로 옮겨가지 않았는지 확인.
+    expect(hhRow.querySelectorAll('button')).toHaveLength(1)
+    expect(screen.getByRole('button', { name: '열림' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: '닫힘' })).not.toBeDisabled()
+  })
+
+  it('does not reset a HH note back to closed when only nudging it sideways with ArrowRight', () => {
+    render(
+      <EditorScreen song={song} initialScore={makeScore()} onSaved={() => {}} onCancel={() => {}} />,
+    )
+    const hhRow = screen.getByTestId('editor-row-hihat_closed')
+    fireEvent.click(hhRow, { clientX: 100 })
+    fireEvent.click(screen.getByRole('button', { name: '열림' }))
+    expect(screen.getByRole('button', { name: '열림' })).toBeDisabled()
+
+    const grid = screen.getByRole('application')
+    fireEvent.keyDown(grid, { key: 'ArrowRight' })
+
+    // 가로 이동만 했을 뿐인데 행 경계 로직이 "기본 피스(닫힘)"로 되돌리면
+    // 안 된다 — moveSelected()가 같은 행에 머무를 때는 피스를 보존해야 함.
+    expect(screen.getByRole('button', { name: '열림' })).toBeDisabled()
+  })
+
+  it('drags a note to a new tick position with the mouse (2026-10-29 의뢰인 요청 — 드래그로 옮기기)', () => {
+    render(
+      <EditorScreen song={song} initialScore={makeScore()} onSaved={() => {}} onCancel={() => {}} />,
+    )
+    const kickRow = screen.getByTestId('editor-row-kick')
+    const noteButton = kickRow.querySelectorAll('button')[0]
+    fireEvent.click(noteButton)
+    expect(screen.getByText(/틱 480/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '저장' })).toBeDisabled()
+
+    fireEvent.mouseDown(noteButton, { clientX: 100 })
+    fireEvent.mouseMove(window, { clientX: 124 }) // 격자 한 칸(24px) 오른쪽 — 8분(240틱)
+    fireEvent.mouseUp(window, { clientX: 124 })
+
+    expect(screen.getByText(/틱 720/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '저장' })).not.toBeDisabled()
+  })
+
+  it('does not create a spurious extra note when a drag release is followed by a click on the row (Codex 모드A 지적 — mousedown·mouseup 타깃이 다르면 click은 그 공통 조상인 행에서 발생)', () => {
+    render(
+      <EditorScreen song={song} initialScore={makeScore()} onSaved={() => {}} onCancel={() => {}} />,
+    )
+    const kickRow = screen.getByTestId('editor-row-kick')
+    const noteButton = kickRow.querySelectorAll('button')[0]
+
+    fireEvent.mouseDown(noteButton, { clientX: 100 })
+    fireEvent.mouseMove(window, { clientX: 124 })
+    fireEvent.mouseUp(window, { clientX: 124 })
+    // 실제 브라우저에서는 mousedown(노트)·mouseup(행 배경)의 공통 조상인
+    // 행에서 click이 합성돼 handleRowClick이 불릴 수 있다 — jsdom은 이걸
+    // 자동으로 안 해주므로 직접 흉내낸다.
+    fireEvent.click(kickRow, { clientX: 124 })
+
+    expect(kickRow.querySelectorAll('button')).toHaveLength(1) // 새 노트가 안 생겨야 함
+  })
+
+  it('does not commit a drag that snaps back to the original tick (no-op move)', () => {
+    render(
+      <EditorScreen song={song} initialScore={makeScore()} onSaved={() => {}} onCancel={() => {}} />,
+    )
+    const kickRow = screen.getByTestId('editor-row-kick')
+    const noteButton = kickRow.querySelectorAll('button')[0]
+    fireEvent.click(noteButton)
+
+    fireEvent.mouseDown(noteButton, { clientX: 100 })
+    fireEvent.mouseMove(window, { clientX: 105 }) // 격자 한 칸(24px)에 한참 못 미침 — 스냅되면 원위치
+    fireEvent.mouseUp(window, { clientX: 105 })
+
+    expect(screen.getByText(/틱 480/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '저장' })).toBeDisabled()
+  })
 })
