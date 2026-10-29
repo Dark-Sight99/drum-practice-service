@@ -325,7 +325,13 @@ input[type='range'].mixer-slider::-moz-range-thumb {
     color 200ms ease;
 }
 
-.preset-toggle-btn:hover {
+/* Codex 모드A 지적(반영) — 전역 `button:hover:not(:disabled)`(요소
+ * 선택자+가상클래스 2개)가 클래스 선택자 하나짜리 `.preset-toggle-btn:hover`
+ * 보다 CSS 명시도가 높아 그 쪽의 `background`가 이겨버렸다(의도한 틴트
+ * 색이 안 보임). `:not(:disabled)`를 같이 붙여 명시도를 전역 규칙과
+ * 같거나 높게 맞춘다 — 소스 순서상 이 규칙이 더 뒤에 있어 동률이어도
+ * 이쪽이 이긴다. */
+.preset-toggle-btn:hover:not(:disabled) {
   background: color-mix(in srgb, var(--accent) 15%, transparent);
 }
 
@@ -334,6 +340,6 @@ input[type='range'].mixer-slider::-moz-range-thumb {
   color: var(--danger);
 }
 
-.preset-toggle-btn--active:hover {
+.preset-toggle-btn--active:hover:not(:disabled) {
   background: color-mix(in srgb, var(--danger) 15%, transparent);
 }
