@@ -65,15 +65,24 @@ const CHANNEL_LABEL: Record<ChannelKey, string> = {
 // playDrumScore()에 tracks를 넘겨 내부적으로 transport.schedule()이
 // tracks.playFrom()을 "곡 시작 시각"에 예약하게 하는데, 이 화면처럼 재생을
 // 시작하자마자 임의 위치로 점프하면 그 예약된 콜백이 점프 전에 이미
-// 커밋됐는지 불확실하다(이 프로젝트가 과거 겪은 루프 경계 타이밍 버그들
-// (T3-47 등)과 같은 부류의 위험 — 실제 브라우저로 검증 전엔 안전을 단정할
-// 수 없음, CLAUDE.md §1). 대신 **scorePlayer.ts에는 tracks를 아예 안
-// 넘겨**(노트/메트로놈 스케줄링만 맡김) 커서 위치로 점프한 **뒤에 직접**
-// `tracks.playFrom()`을 호출한다 — 이건 handleSeek()(PracticeCanvas.tsx)가
-// 이미 운영 중에 검증된 "먼저 위치를 옮기고, 그 다음 tracks.playFrom()을
-// 직접 호출"과 완전히 같은 패턴이라(재생 중간에 점프하는 것과 세션을
-// 시작하자마자 원하는 위치부터 트는 것은 트랙 쪽 입장에서 동일한 호출) 새
-// 미검증 조합을 쓰지 않는다.
+// 커밋됐는지 불확실했다 — **실제로 Tone.js 15.1.22를 브라우저에서 직접
+// 실행해 확인**(2026-10-29, CLAUDE.md §2 "기억에 의존한 API 사용 금지"):
+// transport.schedule(cb, 0) 후 transport.start() 바로 다음 줄(같은 동기
+// 구간, await 없음)에서 transport.seconds를 점프시키면 그 콜백은 **전혀
+// 발화하지 않는다**(2초 대기 후에도 fired=false로 직접 측정). 그래서
+// scorePlayer.ts에 tracks를 넘기는 설계였다면 원곡 음원이 아예 안 들렸을
+// 것 — 아래처럼 **scorePlayer.ts에는 tracks를 아예 안 넘기고**(노트/
+// 메트로놈 스케줄링만 맡김) 커서 위치로 점프한 **뒤에 직접**
+// `tracks.playFrom()`을 호출하는 지금 방식이 맞는 선택이었음을 실측으로
+// 확인했다.
+//
+// 다만 이 직접 호출 방식은 Tone.js의 정밀한 Web Audio 클록이 아니라 평범한
+// HTMLMediaElement.play()라 시작 시점이 신스 드럼(Tone.js 노트)만큼
+// 정확하진 않다(Codex 모드A 지적, 반영) — handleSeek()(PracticeCanvas.tsx)도
+// 같은 특성이지만 그쪽은 재생 "중" 리싱크(tracks.resync(), 아래 TRACK_RESYNC_*
+// 상수)가 매 750ms 계속 교정해주는 반면 이 화면은 처음엔 그 교정이 빠져
+// 있었다 — 아래 startRaf()의 리싱크 호출로 추가해 시작 오차·재생 중
+// 누적 드리프트 둘 다 PracticeCanvas.tsx와 같은 수준으로 바로잡는다.
 export interface EditorScreenProps {
   song: SongSummary
   initialScore: DrumScore
@@ -151,6 +160,12 @@ const NOTE_SIZE = 16
 // absolute로 떠 있어 오른쪽으로 스크롤하면 전부 사라졌었음). 레이블 전용 고정
 // 거터를 따로 두고 음표 타임라인은 그 오른쪽부터 시작하게 분리한다.
 const ROW_LABEL_WIDTH = 64
+
+// PracticeCanvas.tsx의 같은 상수와 같은 값 — 원곡 음원(HTMLMediaElement)이
+// Tone.js의 Web Audio 클록만큼 정밀하지 않아 생기는 오차를 저빈도로
+// 바로잡는다(T3-3, work/T3-3/plan.md §5).
+const TRACK_RESYNC_INTERVAL_MS = 750
+const TRACK_RESYNC_THRESHOLD_SECONDS = 0.1
 
 export function EditorScreen({
   song,
@@ -365,6 +380,7 @@ export function EditorScreen({
   } | null>(null)
   const rafIdRef = useRef<number | null>(null)
   const lastRafUpdateRef = useRef(0)
+  const lastTrackResyncAtRef = useRef(0)
 
   // 재생 중 믹서가 바뀌면 즉시 반영(practice 화면과 같은 원칙).
   useEffect(() => {
@@ -391,16 +407,30 @@ export function EditorScreen({
   function startRaf() {
     const clock = getMasterClock()
     lastRafUpdateRef.current = 0
+    lastTrackResyncAtRef.current = 0
     function loop(ts: number) {
       // 60fps 그대로 setState하면 노트가 많을 때 매 프레임 전체 그리드가
       // 다시 렌더돼 버벅일 수 있어(PracticeCanvas.tsx가 재생 위치를 React
       // state 대신 DOM ref에 직접 쓰는 것과 같은 이유), 초당 약 10회로
       // 줄인다 — 시간 표시·재생 위치선은 이 정도로도 충분히 매끄럽다.
+      const seconds = clock.getPositionSeconds()
       if (ts - lastRafUpdateRef.current > 100) {
         lastRafUpdateRef.current = ts
-        const seconds = clock.getPositionSeconds()
         setCurrentSeconds(seconds)
         setCursorTicks(secondsToTicks(seconds))
+      }
+      // Codex 지적(필수, 반영) — 원곡 음원(HTMLMediaElement)은 Tone.js의
+      // Web Audio 클록만큼 정밀하게 시작되지 않는다(직접 측정 확인 —
+      // 아래 "자체 재검토" 참고). PracticeCanvas.tsx와 같은 저빈도
+      // 리싱크(TRACK_RESYNC_INTERVAL_MS마다 확인)로 시작 시점 오차뿐
+      // 아니라 재생 중 누적될 수 있는 드리프트까지 계속 바로잡는다.
+      const session = playbackSessionRef.current
+      if (session?.tracks && ts - lastTrackResyncAtRef.current > TRACK_RESYNC_INTERVAL_MS) {
+        lastTrackResyncAtRef.current = ts
+        const latest = stateRef.current
+        const playbackRate = latest.meta.bpm / initialBpmRef.current
+        const expectedSongPositionSeconds = audioTrackPositionSeconds(seconds, 0, playbackRate)
+        session.tracks.resync(expectedSongPositionSeconds, TRACK_RESYNC_THRESHOLD_SECONDS)
       }
       rafIdRef.current = requestAnimationFrame(loop)
     }
