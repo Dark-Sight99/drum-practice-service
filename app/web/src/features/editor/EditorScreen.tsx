@@ -176,6 +176,11 @@ const NOTE_SIZE = 16
 // absolute로 떠 있어 오른쪽으로 스크롤하면 전부 사라졌었음). 레이블 전용 고정
 // 거터를 따로 두고 음표 타임라인은 그 오른쪽부터 시작하게 분리한다.
 const ROW_LABEL_WIDTH = 64
+// 재생 위치를 스크롤로 맞출 때, 그 위치를 화면 맨 왼쪽(레이블 바로 옆)에 딱
+// 붙이지 않고 약간 더 보이게 두는 여유 폭 — 마운트 시 1회 스크롤(아래
+// initialPositionTicks effect)과 재생 중 자동 추적(T3-75, startRaf) 둘 다
+// 같은 값을 써서 "재생 위치가 화면의 같은 자리에 있다"는 인상을 유지한다.
+const PLAYHEAD_SCROLL_LEAD_PX = 80
 
 // PracticeCanvas.tsx의 같은 상수와 같은 값 — 원곡 음원(HTMLMediaElement)이
 // Tone.js의 Web Audio 클록만큼 정밀하지 않아 생기는 오차를 저빈도로
@@ -615,8 +620,26 @@ export function EditorScreen({
       // style.left 직접 쓰기, state·리렌더 없음)으로 매 프레임 갱신해
       // 기술적 한계가 아니라 그려지는 방식만 바꿔 해결했다.
       const seconds = clock.getPositionSeconds()
+      const playheadPx = tickToPx(secondsToTicks(seconds))
       if (playheadRef.current) {
-        playheadRef.current.style.left = `${tickToPx(secondsToTicks(seconds))}px`
+        playheadRef.current.style.left = `${playheadPx}px`
+      }
+      // 2026-10-29(T3-75, 의뢰인 요청) — 연습 화면(PracticeCanvas.tsx)은
+      // "지금"이 항상 화면의 고정된 자리에 있고 그 주변만 보여주는데, 편집
+      // 화면은 재생 중에도 보던 자리가 그대로라 재생 위치선만 화면 위를
+      // 가로질러 지나갔다(의뢰인이 두 화면을 비교하며 지적). 마운트 시
+      // 1회만 스크롤하던 위 initialPositionTicks effect와 똑같은 식을
+      // 매 프레임 재적용해, 재생 중엔 재생 위치가 항상 화면의 같은 자리
+      // (레이블 바로 다음 + PLAYHEAD_SCROLL_LEAD_PX)에 있도록 스크롤을
+      // 같이 따라가게 한다. state를 안 거치고 ref로 직접 scrollLeft만
+      // 바꾸므로 리렌더가 없다(위 playheadRef와 같은 이유). 정지·일시정지
+      // 중에는 이 루프 자체가 안 돌아서(stopRaf) 사용자가 보던 자리를
+      // 멋대로 옮기지 않는다 — 기존 "편집 중엔 스크롤 안 건드림" 원칙 유지.
+      if (gridScrollRef.current) {
+        gridScrollRef.current.scrollLeft = Math.max(
+          0,
+          playheadPx - ROW_LABEL_WIDTH - PLAYHEAD_SCROLL_LEAD_PX,
+        )
       }
       if (ts - lastRafUpdateRef.current > 100) {
         lastRafUpdateRef.current = ts
@@ -845,7 +868,7 @@ export function EditorScreen({
   useEffect(() => {
     if (initialPositionTicks === undefined || !gridScrollRef.current) return
     const targetPx = tickToPx(initialPositionTicks)
-    gridScrollRef.current.scrollLeft = Math.max(0, targetPx - ROW_LABEL_WIDTH - 80)
+    gridScrollRef.current.scrollLeft = Math.max(0, targetPx - ROW_LABEL_WIDTH - PLAYHEAD_SCROLL_LEAD_PX)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
