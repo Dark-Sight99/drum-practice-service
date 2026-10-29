@@ -1568,11 +1568,8 @@ export function EditorScreen({
                 whiteSpace: 'nowrap',
                 pointerEvents: 'none',
                 // Codex 모드A 지적(권장, 반영) — 노트 버튼에 준 zIndex: 2
-                // (위 코멘트) 때문에, 틱 0(또는 근처) 노트는 절반이
-                // ROW_LABEL_WIDTH 안쪽까지 걸쳐지는데(디자인상 원래도 그랬음
-                // — tickToPx(0) - NOTE_SIZE/2가 음수) 라벨이 2보다 낮은
-                // zIndex면 그 노트가 라벨 글자를 가려버린다. 라벨을 항상
-                // 가장 위로.
+                // (아래 코멘트)보다 라벨이 낮으면 겹칠 때 라벨이 가려질 수
+                // 있다. 라벨을 항상 가장 위로.
                 zIndex: 3,
               }}
             >
@@ -1598,7 +1595,19 @@ export function EditorScreen({
                     onMouseDown={(e) => handleNoteMouseDown(e, note)}
                     style={{
                       position: 'absolute',
-                      left: tickToPx(displayTick) - NOTE_SIZE / 2,
+                      // 2026-10-29(T3-74, 의뢰인 요청) — 연습 화면(laneRenderer.ts)은
+                      // 노트 도형을 "정확한 박자 위치 = 도형의 판정 쪽 모서리"에
+                      // 맞춰 그린다(아래로 떨어지는 방향이라 하단 모서리, 모드A
+                      // 지적 반영분 — shapeBottomExtent 참고). 편집 화면은 그동안
+                      // "정확한 위치 = 도형 정중앙"으로 그려서, 두 화면에서 같은
+                      // 노트를 비교하면 도형 폭의 절반(8px)만큼 더 벌어져 보였다
+                      // (의뢰인이 두 화면을 나란히 비교하며 직접 발견). 편집 화면의
+                      // 시간축(왼쪽→오른쪽)에서 "이른 시간 쪽 모서리"는 왼쪽이므로,
+                      // 연습 화면과 같은 기준으로 맞추려면 왼쪽 모서리를 정확한
+                      // 위치에 맞춘다(중앙 정렬 제거) — tickToPx(0)이 항상
+                      // ROW_LABEL_WIDTH 이상이라 틱 0 노트가 음수 위치로 라벨
+                      // 영역을 침범하던 문제도 같이 없어짐.
+                      left: tickToPx(displayTick),
                       top: (ROW_HEIGHT - NOTE_SIZE) / 2,
                       width: NOTE_SIZE,
                       height: NOTE_SIZE,
