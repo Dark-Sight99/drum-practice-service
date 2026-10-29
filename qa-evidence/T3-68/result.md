@@ -41,6 +41,20 @@ hidden`은 `display: none`과 달리 텍스트 검색엔 걸림) 테스트의
 같은 쿼리가 "여러 개 찾음" 에러를 냈다 — 더 단순하고 테스트와 안 부딪히는
 고정값(`minHeight`)으로 바꿨다.
 
+## Codex 모드A 검수(읽기 전용)
+- 대상: `task/T3-68-editor-free-placement-and-layout-stability` vs `main`.
+- **1차 — APPROVE(지적 없음)**. `floorSnapTick`·`pxToSnappedTick`
+  잔여 참조 없음, 클릭·드래그 결과가 항상 0 이상 정수 틱으로 반올림됨,
+  `validateDrumScore`는 틱의 정수·비음수 여부만 확인해 격자 배수를
+  요구하지 않아 자유 배치와 충돌 없음, 테스트 기대값이 실제 상수
+  (`PX_PER_GRID_UNIT=24`, `ROW_LABEL_WIDTH=64`, 8분음표 240틱)와 일치,
+  선택 패널이 일반 흐름 안에 정상 렌더링됨을 확인. 참고(지적은 아님) —
+  래퍼의 `position: relative`가 이제 불필요(되돌린 접근법의 잔재) — 바로
+  반영해 제거. `minHeight: 96`보다 패널이 커지는 아주 좁은 화면에서는
+  예약 공간을 넘어설 수 있으나 잘림·겹침 없이 그리드가 추가로 조금
+  밀리는 정도의 레이아웃 한계일 뿐.
+- `npx tsc -b`·`npx vitest run`(309/309) 재확인.
+
 ## 테스트
 - `app/web`: `npx tsc -b` 통과(에러 0). `npx oxlint` 통과(기존 경고
   4건만). `npx vitest run` — **309/309 통과**. T3-66에서 추가했던

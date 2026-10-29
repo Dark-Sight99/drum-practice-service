@@ -1306,7 +1306,7 @@ export function EditorScreen({
        * (처음엔 선택 패널과 똑같은 내용을 안 보이게 숨겨 자동으로 공간을
        * 재는 방식을 시도했는데, 숨긴 쪽 텍스트가 테스트의 getByText와
        * 겹쳐 "여러 개 찾음" 에러가 나서 더 단순한 고정값으로 바꿨다). */}
-      <div style={{ minHeight: 96, position: 'relative' }}>
+      <div style={{ minHeight: 96 }}>
         {selectedNote && (
           <div
             style={{
