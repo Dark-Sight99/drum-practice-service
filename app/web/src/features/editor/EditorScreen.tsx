@@ -311,26 +311,16 @@ export function EditorScreen({
   // 2개뿐이라 채널별 세밀한 병합까진 필요 없다고 판단).
   const mixerEditedRef = useRef(false)
 
-  // 계정 전체 공유 믹서(의뢰인 요청 "믹서 동일하게 사용") — practice 화면과
-  // 같은 `/auth/me/mixer-setting`을 그대로 쓴다. practice의 채널별 편집-추적·
-  // 저장 직렬화 같은 정교한 경합 방지(PracticeCanvas.tsx 참고)는 이 화면
-  // 세션이 짧고 단순해 생략 — 단순 디바운스 저장으로 충분하다고 판단.
-  useEffect(() => {
-    let cancelled = false
-    fetchMixerSetting()
-      .then(({ volumes }) => {
-        if (cancelled || !volumes || mixerEditedRef.current) return
-        const merged = defaultMixerState()
-        for (const key of CHANNEL_KEYS) if (volumes[key]) merged[key] = volumes[key]
-        setMixerStateRaw(merged)
-      })
-      .catch(() => {
-        // 못 불러와도 기본값으로 계속 — practice 화면 로드 실패와 같은 원칙.
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [])
+  // 2026-10-29(의뢰인 요청) — "연주화면에서 가상드럼을 켜고있었더라도 (드럼
+  // 원곡으로) 소리를 맞춰줘. 가상드럼소리가 80이었으면 편집페이지에선
+  // 원곡드럼소리가 80으로". 계정 전체 공유 믹서 설정(위 주석)에는 손대지
+  // 않는다(의뢰인 확인 — "편집 중에만 적용, 저장 안 함": 연습 화면으로
+  // 돌아가면 가상드럼 80이 그대로 들려야 함) — 이 화면 안에서만 "드럼원곡"
+  // 슬라이더의 표시값·실제 재생 게인을 아래로 바꿔 보여주는 세션 전용
+  // 오버레이. 드럼원곡·가상드럼 둘 중 하나라도 사용자가 직접 슬라이더를
+  // 움직이면 해제(그 뒤로는 평소처럼 둘 다 독립적으로 동작·저장됨).
+  const [drumOverrideActive, setDrumOverrideActive] = useState(false)
+  const [drumOverrideVolume, setDrumOverrideVolume] = useState(0)
 
   const mixerSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   function updateChannel(key: ChannelKey, patch: Partial<ChannelState>) {
@@ -378,6 +368,50 @@ export function EditorScreen({
     [song.available_audio_kinds],
   )
   const canUseAudioTracks = initialScore.audioOffsetMs === 0 && stemKinds.length > 0
+
+  // 계정 전체 공유 믹서(의뢰인 요청 "믹서 동일하게 사용") — practice 화면과
+  // 같은 `/auth/me/mixer-setting`을 그대로 쓴다. practice의 채널별 편집-추적·
+  // 저장 직렬화 같은 정교한 경합 방지(PracticeCanvas.tsx 참고)는 이 화면
+  // 세션이 짧고 단순해 생략 — 단순 디바운스 저장으로 충분하다고 판단.
+  // (stemKinds·canUseAudioTracks가 선언된 바로 다음에 둔다 — 아래 드럼원곡
+  // 오버레이 계산이 그 값들을 참조한다.)
+  useEffect(() => {
+    let cancelled = false
+    fetchMixerSetting()
+      .then(({ volumes }) => {
+        if (cancelled || !volumes || mixerEditedRef.current) return
+        const merged = defaultMixerState()
+        for (const key of CHANNEL_KEYS) if (volumes[key]) merged[key] = volumes[key]
+        setMixerStateRaw(merged)
+        // 원곡 드럼이 꺼져있고(0) 신스 드럼만 들리고 있었다면 — 연습 화면의
+        // "원곡 드럼 켜기/끄기" 프리셋(toggleDrumlessPreset)이 만드는 바로
+        // 그 상태 — 신스 드럼 음량을 "드럼원곡" 쪽으로 빌려와 보여준다.
+        // 둘 다 조절돼 있거나 원곡 드럼이 이미 뭔가로 설정돼 있으면(의도적
+        // 조합일 수 있어) 그대로 둔다. 이 곡에 실제로 쓸 수 있는 원곡 드럼
+        // 트랙이 없으면(이 곡은 음원 분리가 안 됐거나 드럼만 빠져있는 경우)
+        // 절대 켜지 않는다 — 대체할 소리가 없는데 신스만 무음 처리하면
+        // 편집 중 드럼이 완전히 안 들리는 회귀가 생긴다.
+        const hasStemDrumsTrack = canUseAudioTracks && stemKinds.includes('stem_drums')
+        if (
+          hasStemDrumsTrack &&
+          effectiveGain(merged.stem_drums) === 0 &&
+          effectiveGain(merged.synth_drums) > 0
+        ) {
+          setDrumOverrideActive(true)
+          setDrumOverrideVolume(merged.synth_drums.volume)
+        }
+      })
+      .catch(() => {
+        // 못 불러와도 기본값으로 계속 — practice 화면 로드 실패와 같은 원칙.
+      })
+    return () => {
+      cancelled = true
+    }
+    // stemKinds·canUseAudioTracks 둘 다 이 화면 안에서 song이 안 바뀌어
+    // 사실상 고정값이라(위 stemKinds useMemo 주석과 같은 근거), 의존성
+    // 배열에 넣어도 정직하게(eslint-disable 없이) 마운트 1회만 실행된다.
+  }, [canUseAudioTracks, stemKinds])
+
   const audioTrackPoolRef = useRef<AudioTrackPool | null>(null)
   const [audioTracksLoading, setAudioTracksLoading] = useState(canUseAudioTracks)
   const [audioTracksAvailable, setAudioTracksAvailable] = useState(false)
@@ -437,20 +471,35 @@ export function EditorScreen({
   // progressBarRef와 같은 이유.
   const playheadRef = useRef<HTMLDivElement | null>(null)
 
-  // 재생 중 믹서가 바뀌면 즉시 반영(practice 화면과 같은 원칙).
+  // drumOverrideActive는 "마운트 시점 믹서 값으로 봐서 켜도 되는 상황"일
+  // 뿐 — 실제로 원곡 드럼을 대체 재생할 수 있으려면 그 트랙이 진짜로
+  // 로딩까지 끝나 있어야 한다(audioTracksAvailable). 이 둘을 안 묶으면,
+  // 트랙이 아직 로딩 중이거나 결국 로딩에 실패했을 때도 신스 드럼만
+  // 무음 처리돼 드럼이 완전히 안 들리는 회귀가 생긴다.
+  const drumOverrideEngaged = drumOverrideActive && audioTracksAvailable
+
+  // 재생 중 믹서가 바뀌면 즉시 반영(practice 화면과 같은 원칙). 드럼원곡
+  // 오버레이가 적용 중이면 신스 드럼은 실제로는 무음 처리하고(저장된
+  // synth_drums 값은 그대로 둔 채), 원곡 드럼은 그 빌려온 음량으로 —
+  // 실제로 들리는 소리만 바뀔 뿐 저장되는 mixerState는 전혀 안 건드린다.
   useEffect(() => {
+    const synthGainValue = drumOverrideEngaged ? 0 : effectiveGain(mixerState.synth_drums)
     const voicesSession = voicesSessionRef.current
-    if (voicesSession) voicesSession.synthGain.gain.value = effectiveGain(mixerState.synth_drums)
+    if (voicesSession) voicesSession.synthGain.gain.value = synthGainValue
     const session = playbackSessionRef.current
     if (session) {
       session.metronome.setVolume(metronomeGainToDb(effectiveGain(mixerState.metronome)))
       if (session.tracks) {
         for (const key of stemKinds) {
-          session.tracks.setChannelGain(key, effectiveGain(mixerState[key]))
+          const gain =
+            key === 'stem_drums' && drumOverrideEngaged
+              ? drumOverrideVolume
+              : effectiveGain(mixerState[key])
+          session.tracks.setChannelGain(key, gain)
         }
       }
     }
-  }, [mixerState, stemKinds])
+  }, [mixerState, stemKinds, drumOverrideEngaged, drumOverrideVolume])
 
   function stopRaf() {
     if (rafIdRef.current !== null) {
@@ -529,7 +578,14 @@ export function EditorScreen({
     let synthGain: Tone.Gain | undefined
     try {
       limiter = new Tone.Limiter(-1).connect(Tone.getDestination())
-      synthGain = new Tone.Gain(effectiveGain(mixerStateRef.current.synth_drums)).connect(limiter)
+      // Codex 모드A 지적(필수, 반영) — 드럼원곡 오버레이(위 drumOverrideEngaged)가
+      // 이미 켜져 있는 상태에서 처음 재생을 누르면, 아래 믹서-재생 동기화
+      // effect는 voicesSessionRef(ref라 effect 재실행을 안 유발)가 막 채워진
+      // 것만으로는 다시 안 돌아 생성 시점 게인이 그대로 남는다 — 생성 시점에
+      // 바로 오버레이를 반영해야 "처음 재생"부터 신스가 겹쳐 들리지 않는다.
+      synthGain = new Tone.Gain(
+        drumOverrideEngaged ? 0 : effectiveGain(mixerStateRef.current.synth_drums),
+      ).connect(limiter)
       const voices = await createDrumVoices(synthGain)
       if (!isMountedRef.current) {
         // 로딩이 끝나기 전에 화면을 떠남 — 방금 만든 리소스를 그대로 정리.
@@ -1035,11 +1091,23 @@ export function EditorScreen({
             : (['synth_drums', 'metronome'] as const)
           ).map((key) => {
             const label = key === 'music' ? '음악(베이스·보컬·그 외)' : CHANNEL_LABEL[key]
-            const volume = key === 'music' ? musicVolume(mixerState) : mixerState[key].volume
+            const volume =
+              key === 'music'
+                ? musicVolume(mixerState)
+                : key === 'stem_drums' && drumOverrideEngaged
+                  ? drumOverrideVolume
+                  : key === 'synth_drums' && drumOverrideEngaged
+                    ? 0
+                    : mixerState[key].volume
             return (
               <label
                 key={key}
                 style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-1)', fontSize: '0.85em' }}
+                title={
+                  (key === 'stem_drums' || key === 'synth_drums') && drumOverrideEngaged
+                    ? '연습 화면에서 듣던 드럼 음량에 맞춰 보여줌(저장 안 됨) — 직접 조절하면 해제'
+                    : undefined
+                }
               >
                 {label}
                 <input
@@ -1049,6 +1117,9 @@ export function EditorScreen({
                   value={Math.round(volume * 100)}
                   onChange={(e) => {
                     const next = Number(e.target.value) / 100
+                    // 드럼원곡·신스 드럼 둘 중 하나라도 직접 건드리면 위
+                    // 오버레이 해제 — 그 뒤로는 평소처럼 저장되는 실제 값만 씀.
+                    if (key === 'stem_drums' || key === 'synth_drums') setDrumOverrideActive(false)
                     if (key === 'music') updateMusicVolume(next)
                     else updateChannel(key, { volume: next })
                   }}

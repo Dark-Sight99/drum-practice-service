@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { EditorScreen } from './EditorScreen'
 import type { DrumScore } from '../../score/types'
 import type { SongSummary } from '../../api/songs'
+import { defaultMixerState } from '../../audio'
 
 // Canvas·Tone.js가 아니라 순수 DOM 이벤트라 jsdom에서 실제로 테스트 가능
 // (work/T2-6/plan.md §테스트계획 — T2-3·T2-4·T2-5와 다른 지점).
@@ -171,6 +172,33 @@ describe('EditorScreen', () => {
     ).toBeInTheDocument()
     // 음원이 없으므로 원곡 채널 슬라이더는 안 뜸.
     expect(screen.queryByText('베이스')).not.toBeInTheDocument()
+  })
+
+  it('never silences synth_drums for a song with no stems at all, even if the shared account mixer favors synth over a silent original drum (2026-10-29 의뢰인 요청 — 드럼원곡 음량 가져오기, 회귀 방지)', async () => {
+    const volumes = defaultMixerState()
+    volumes.stem_drums.volume = 0
+    volumes.synth_drums.volume = 0.8
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockImplementation((url: string) =>
+        typeof url === 'string' && url.includes('mixer-setting')
+          ? Promise.resolve(new Response(JSON.stringify({ volumes }), { status: 200 }))
+          : Promise.resolve(new Response(null, { status: 204 })),
+      ),
+    )
+    // 이 곡은 음원 분리가 전혀 안 돼 있다 — "드럼원곡으로 대체할 트랙"
+    // 자체가 없으므로, 계정 설정이 "원곡 드럼=0, 신스 드럼=80%"이어도
+    // 신스 드럼을 무음 처리하면(대체할 소리가 없으니) 편집 중 드럼이
+    // 전혀 안 들리는 회귀가 된다 — 절대 건드리지 않아야 함.
+    render(
+      <EditorScreen song={song} initialScore={makeScore()} onSaved={() => {}} onCancel={() => {}} />,
+    )
+    await waitFor(() => {
+      const slider = screen
+        .getAllByDisplayValue('80')
+        .find((el) => (el as HTMLInputElement).type === 'range')
+      expect(slider).toBeInTheDocument()
+    })
   })
 
   it('does not attempt to load audio tracks when audioOffsetMs is non-zero, even if stems exist', () => {
