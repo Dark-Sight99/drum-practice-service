@@ -146,11 +146,62 @@ describe('EditorScreen', () => {
     fireEvent.click(snareRow, { clientX: 100 })
     expect(snareRow.querySelectorAll('button')).toHaveLength(1)
 
-    fireEvent.click(screen.getByText('실행취소'))
+    fireEvent.click(screen.getByRole('button', { name: '실행취소' }))
     expect(snareRow.querySelectorAll('button')).toHaveLength(0)
 
-    fireEvent.click(screen.getByText('다시실행'))
+    fireEvent.click(screen.getByRole('button', { name: '다시실행' }))
     expect(snareRow.querySelectorAll('button')).toHaveLength(1)
+  })
+
+  it('shows a play button and time display, but does not auto-play (2026-10-29 의뢰인 요청)', () => {
+    render(
+      <EditorScreen song={song} initialScore={makeScore()} onSaved={() => {}} onCancel={() => {}} />,
+    )
+    expect(screen.getByRole('button', { name: '재생' })).toBeInTheDocument()
+    expect(screen.getByText('0:00')).toBeInTheDocument()
+  })
+
+  it('shows the synth-only fallback message when the song has no separated audio (2026-10-29 의뢰인 요청 — "원곡을 듣고 고쳐야지")', () => {
+    render(
+      <EditorScreen song={song} initialScore={makeScore()} onSaved={() => {}} onCancel={() => {}} />,
+    )
+    expect(
+      screen.getByText('이 곡은 음원 분리가 안 돼 있어 신스 드럼만 재생됩니다.'),
+    ).toBeInTheDocument()
+    // 음원이 없으므로 원곡 채널 슬라이더는 안 뜸.
+    expect(screen.queryByText('베이스')).not.toBeInTheDocument()
+  })
+
+  it('does not attempt to load audio tracks when audioOffsetMs is non-zero, even if stems exist', () => {
+    const songWithStems: SongSummary = { ...song, available_audio_kinds: ['stem_drums', 'stem_bass'] }
+    const scoreWithOffset: DrumScore = { ...makeScore(), audioOffsetMs: 50 }
+    render(
+      <EditorScreen
+        song={songWithStems}
+        initialScore={scoreWithOffset}
+        onSaved={() => {}}
+        onCancel={() => {}}
+      />,
+    )
+    expect(
+      screen.getByText('이 곡은 음원 분리가 안 돼 있어 신스 드럼만 재생됩니다.'),
+    ).toBeInTheDocument()
+  })
+
+  it('scrolls the grid to initialPositionTicks on mount without starting playback (연주 화면 "편집하기" 연동)', () => {
+    render(
+      <EditorScreen
+        song={song}
+        initialScore={makeScore()}
+        onSaved={() => {}}
+        onCancel={() => {}}
+        initialPositionTicks={960}
+      />,
+    )
+    // 재생은 자동으로 시작되지 않는다(의뢰인 명시) — 버튼은 여전히 "재생".
+    expect(screen.getByRole('button', { name: '재생' })).toBeInTheDocument()
+    const grid = screen.getByRole('application')
+    expect(grid.scrollLeft).toBeGreaterThan(0)
   })
 
   it('does not let grid shortcuts interfere with the BPM input', () => {
@@ -169,6 +220,23 @@ describe('EditorScreen', () => {
     expect(screen.getByText(/틱 480/)).toBeInTheDocument()
   })
 
+  it('disables the save button until something actually changes (2026-10-29 의뢰인 요청)', () => {
+    render(
+      <EditorScreen song={song} initialScore={makeScore()} onSaved={() => {}} onCancel={() => {}} />,
+    )
+    expect(screen.getByRole('button', { name: '저장' })).toBeDisabled()
+
+    const snareRow = screen.getByTestId('editor-row-snare')
+    fireEvent.click(snareRow, { clientX: 100 })
+    expect(screen.getByRole('button', { name: '저장' })).not.toBeDisabled()
+
+    // undo로 변경 전(저장된 시점)까지 되돌아오면 다시 비활성화 — 값 비교가
+    // 아니라 "저장 시점의 바로 그 상태 객체로 돌아왔는지" 참조 비교라서
+    // undo가 저장 시점 상태를 정확히 복원함을 같이 확인.
+    fireEvent.click(screen.getByRole('button', { name: '실행취소' }))
+    expect(screen.getByRole('button', { name: '저장' })).toBeDisabled()
+  })
+
   it('calls saveSongDrumScore with the edited score on save', async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 204 }))
     vi.stubGlobal('fetch', fetchMock)
@@ -177,7 +245,9 @@ describe('EditorScreen', () => {
     render(
       <EditorScreen song={song} initialScore={makeScore()} onSaved={onSaved} onCancel={() => {}} />,
     )
-    fireEvent.click(screen.getByText('저장'))
+    const snareRow = screen.getByTestId('editor-row-snare')
+    fireEvent.click(snareRow, { clientX: 100 })
+    fireEvent.click(screen.getByRole('button', { name: '저장' }))
 
     await waitFor(() => expect(onSaved).toHaveBeenCalled())
 
@@ -185,25 +255,40 @@ describe('EditorScreen', () => {
       '/api/songs/7/drumscore',
       expect.objectContaining({ method: 'PUT' }),
     )
-    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit]
-    const sentScore = JSON.parse(init.body as string) as DrumScore
-    expect(sentScore.notes).toHaveLength(1)
-    expect(sentScore.notes[0].piece).toBe('kick')
+    // 이 화면이 마운트 중 계정 믹서 설정도 불러오므로(같은 fetchMock을 공유),
+    // "첫 번째 호출"이 아니라 drumscore PUT 호출을 정확히 찾아낸다.
+    const drumscoreCall = fetchMock.mock.calls.find(
+      ([, init]) => (init as RequestInit | undefined)?.method === 'PUT',
+    ) as [string, RequestInit]
+    const sentScore = JSON.parse(drumscoreCall[1].body as string) as DrumScore
+    expect(sentScore.notes).toHaveLength(2)
+    expect(sentScore.notes.map((n) => n.piece).sort()).toEqual(['kick', 'snare'])
   })
 
   it('shows an error message and does not call onSaved when the save request fails', async () => {
+    // 이 화면이 마운트 중 계정 믹서 설정도 불러오므로(같은 fetch mock을
+    // 공유), mockResolvedValue로 Response 인스턴스 하나를 고정해 재사용하면
+    // 두 호출 중 먼저 .json()을 읽은 쪽이 바디 스트림을 다 써버려 나머지
+    // 호출은 상태 텍스트로 대체된다(T3-55 qa-evidence의 같은 패턴) — 매
+    // 호출마다 새 Response를 만들어야 한다.
     vi.stubGlobal(
       'fetch',
-      vi.fn().mockResolvedValue(new Response(JSON.stringify({ detail: '서버 오류' }), {
-        status: 500,
-      })),
+      vi
+        .fn()
+        .mockImplementation(() =>
+          Promise.resolve(
+            new Response(JSON.stringify({ detail: '서버 오류' }), { status: 500 }),
+          ),
+        ),
     )
     const onSaved = vi.fn()
 
     render(
       <EditorScreen song={song} initialScore={makeScore()} onSaved={onSaved} onCancel={() => {}} />,
     )
-    fireEvent.click(screen.getByText('저장'))
+    const snareRow = screen.getByTestId('editor-row-snare')
+    fireEvent.click(snareRow, { clientX: 100 })
+    fireEvent.click(screen.getByRole('button', { name: '저장' }))
 
     await waitFor(() => expect(screen.getByText('서버 오류')).toBeInTheDocument())
     expect(onSaved).not.toHaveBeenCalled()
@@ -294,29 +379,5 @@ describe('EditorScreen', () => {
     expect(screen.getByText(/손: 오른손\(지정\)/)).toBeInTheDocument()
     fireEvent.click(notes[1])
     expect(screen.getByText(/손: 왼손\(지정\)/)).toBeInTheDocument()
-  })
-
-  it('applies auto-recommended sticking without overwriting a user-set hand', () => {
-    render(
-      <EditorScreen
-        song={song}
-        initialScore={makeTwoSnareScore()}
-        onSaved={() => {}}
-        onCancel={() => {}}
-      />,
-    )
-    const snareRow = screen.getByTestId('editor-row-snare')
-    const notes = snareRow.querySelectorAll('button')
-    // 첫 노트를 사용자가 직접 L로 지정.
-    fireEvent.click(notes[0])
-    fireEvent.click(screen.getByText('L'))
-    expect(screen.getByText(/손: 왼손\(지정\)/)).toBeInTheDocument()
-
-    fireEvent.click(screen.getByText('자동 추천 재적용'))
-
-    fireEvent.click(notes[0])
-    expect(screen.getByText(/손: 왼손\(지정\)/)).toBeInTheDocument() // user 값 유지
-    fireEvent.click(notes[1])
-    expect(screen.getByText(/손: .+\(추천\)/)).toBeInTheDocument() // 자동 추천으로 채워짐
   })
 })

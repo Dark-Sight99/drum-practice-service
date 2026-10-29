@@ -29,6 +29,13 @@ function App() {
     song: SongSummary
     drumScore: DrumScore
   } | null>(null)
+  // 2026-10-29(의뢰인 요청) — 연주 화면 "편집하기" 버튼이 넘긴 위치(틱).
+  // LibraryScreen의 "편집" 버튼으로 들어올 땐 이 값이 없어야(undefined)
+  // EditorScreen이 0부터 시작한다 — onSaved/onCancel에서 되돌려 다음 번
+  // 편집 진입(다른 경로)에 새지 않게 한다.
+  const [editorInitialPositionTicks, setEditorInitialPositionTicks] = useState<
+    number | undefined
+  >(undefined)
 
   useEffect(() => {
     fetchCurrentUser()
@@ -123,6 +130,12 @@ function App() {
             score={practiceSong.drumScore}
             songId={practiceSong.song.id}
             availableAudioKinds={practiceSong.song.available_audio_kinds}
+            song={practiceSong.song}
+            onEditSong={(song, drumScore, positionTicks) => {
+              setEditingSong({ song, drumScore })
+              setEditorInitialPositionTicks(positionTicks)
+              setScreen('editor')
+            }}
           />
         </div>
       </main>
@@ -143,8 +156,15 @@ function App() {
         <EditorScreen
           song={editingSong.song}
           initialScore={editingSong.drumScore}
-          onSaved={() => setScreen('library')}
-          onCancel={() => setScreen('library')}
+          initialPositionTicks={editorInitialPositionTicks}
+          onSaved={() => {
+            setEditorInitialPositionTicks(undefined)
+            setScreen('library')
+          }}
+          onCancel={() => {
+            setEditorInitialPositionTicks(undefined)
+            setScreen('library')
+          }}
         />
       </main>
     )
