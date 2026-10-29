@@ -61,6 +61,16 @@ resume()`도 트랙을 모르는 채로 Transport만 재개하고, 계속 흐르
   단위 테스트가 없음(Canvas 렌더링, work/T2-6/plan.md §테스트계획에 이미
   명시된 기존 방침) — 1번 수정은 코드 리뷰(Codex)·수동 QA로만 검증 가능.
 
+## Codex 모드A 검수(읽기 전용)
+- 대상: `task/T3-63-practice-pause-and-drum-override-fix` vs `main`.
+- **1차 — APPROVE(지적 없음)**. 확인 범위: 두 수정 모두 동작상 회귀 없음.
+  편집기 쪽은 `canUseAudioTracks && stemKinds.includes('stem_drums')` 게이트
+  유지, 신스 볼륨을 빌려오는 동작 자체는 이전과 동일. (검수 범위 밖으로
+  직접 밝힌 것: `trackPlayer.ts` 파일을 못 찾아 중복 pause()/resume() 세부
+  동작은 직접 확인 못 함 — 표준 HTMLMediaElement 중복 pause()는 무해하다는
+  일반 지식과, 수정된 resume() 호출이 이미 필요한 경우에만 실행되는 기존
+  분기 안에 있다는 점으로 판단.)
+
 ## 브라우저 QA
 로그인 정보가 없어(이전 작업들과 같은 사정) 실제로 확인하지 못했다.
 
