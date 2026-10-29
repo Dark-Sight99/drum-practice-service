@@ -578,7 +578,14 @@ export function EditorScreen({
     let synthGain: Tone.Gain | undefined
     try {
       limiter = new Tone.Limiter(-1).connect(Tone.getDestination())
-      synthGain = new Tone.Gain(effectiveGain(mixerStateRef.current.synth_drums)).connect(limiter)
+      // Codex 모드A 지적(필수, 반영) — 드럼원곡 오버레이(위 drumOverrideEngaged)가
+      // 이미 켜져 있는 상태에서 처음 재생을 누르면, 아래 믹서-재생 동기화
+      // effect는 voicesSessionRef(ref라 effect 재실행을 안 유발)가 막 채워진
+      // 것만으로는 다시 안 돌아 생성 시점 게인이 그대로 남는다 — 생성 시점에
+      // 바로 오버레이를 반영해야 "처음 재생"부터 신스가 겹쳐 들리지 않는다.
+      synthGain = new Tone.Gain(
+        drumOverrideEngaged ? 0 : effectiveGain(mixerStateRef.current.synth_drums),
+      ).connect(limiter)
       const voices = await createDrumVoices(synthGain)
       if (!isMountedRef.current) {
         // 로딩이 끝나기 전에 화면을 떠남 — 방금 만든 리소스를 그대로 정리.

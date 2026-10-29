@@ -61,6 +61,25 @@ dead zone) 런타임 에러가 날 상황이었음 — effect 전체를 그 두 
   못함 — 아래 "남은 작업" 참고.
 - `app/server`: 프런트엔드 전용 — 재실행 생략.
 
+## Codex 모드A 검수(읽기 전용)
+- 대상: `task/T3-61-editor-drum-volume-takeover` vs `main`(코드 변경분만).
+- **1차 — REQUEST_CHANGES(필수 1건)**: `ensureVoicesSession()`이 새
+  `Tone.Gain`을 만들 때 `effectiveGain(mixerStateRef.current.synth_drums)`로
+  초기화해, 오버레이가 이미 켜져 있는 상태에서 "처음" 재생을 누르면(아직
+  `voicesSessionRef`가 비어 있던 시점) 신스 드럼이 오버레이를 무시하고
+  원래 음량 그대로 생성돼 원곡 드럼과 겹쳐 들림 — 믹서-재생 동기화 effect는
+  `voicesSessionRef`가 ref라 그 세션이 막 채워진 것만으론 재실행되지 않아
+  스스로 안 고쳐짐(사용자가 믹서를 한 번이라도 더 만져야 비로소 바로잡힘).
+  **반영**: `synthGain` 생성 시점에 `drumOverrideEngaged ? 0 : effectiveGain(...)`
+  로 바로 오버레이를 적용 — "처음 재생"부터 정확.
+  확인된 사항(그 외): TDZ 문제 없음(effect 위치 재확인), `drumOverrideEngaged`가
+  실제 쓰이는 모든 곳(게인 적용·슬라이더 표시)에서 raw `drumOverrideActive`
+  대신 쓰이고 있음, 수동 조작 시 오버레이가 해제되고 다시 안 켜짐(마운트
+  1회 효과라 재진입 경로 없음), 회귀 테스트가 고치기 전 코드로는 실제로
+  실패했을 것(무음 트랙 게이트 검증에 의미 있음).
+- `npx tsc -b`·`npx oxlint`(기존 경고 4건만)·`npx vitest run`(301/301) 재확인.
+- **2차 — 아래 결과 반영 예정.**
+
 ## 남은 작업
 - 실제 로그인 후 브라우저에서: 연습 화면에서 가상드럼 음량을 올려두고 →
   "악보 편집하기"로 편집 화면 진입 → "드럼원곡" 슬라이더가 그 음량으로 보이고
