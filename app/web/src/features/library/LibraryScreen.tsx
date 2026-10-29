@@ -21,6 +21,11 @@ export interface LibraryScreenProps {
   onOpenSong: (song: SongSummary, drumScore: DrumScore) => void
   onEditSong: (song: SongSummary, drumScore: DrumScore) => void
   onLoggedOut: () => void
+  /** 2026-10-29(의뢰인 요청) — 관리자 계정 관리 화면 진입점. 관리자가 아니면
+   * (isAdmin=false) 버튼 자체를 숨긴다. 기존 테스트가 전부 이 두 prop을 몰라도
+   * 되게 선택값(기본 false/no-op)으로 둔다. */
+  isAdmin?: boolean
+  onOpenAdmin?: () => void
 }
 
 // 2026-10-26 — 종이 악보(OMR) 경로 드롭으로 'omr' 제거(intent/01-vision.md
@@ -46,7 +51,13 @@ const STATUS_LABEL: Record<string, string> = {
   failed: '실패',
 }
 
-export function LibraryScreen({ onOpenSong, onEditSong, onLoggedOut }: LibraryScreenProps) {
+export function LibraryScreen({
+  onOpenSong,
+  onEditSong,
+  onLoggedOut,
+  isAdmin = false,
+  onOpenAdmin,
+}: LibraryScreenProps) {
   // T3-19(2026-10-26 의뢰인 요청) — 업로드를 별도 화면(전체 페이지 전환)이
   // 아니라 모달로 띄운다. 업로드 완료 시 목록을 다시 불러와 새 곡이 바로
   // 보이게 한다.
@@ -350,6 +361,7 @@ export function LibraryScreen({ onOpenSong, onEditSong, onLoggedOut }: LibrarySc
         <h1 style={{ margin: 0, fontSize: '1.3rem' }}>라이브러리</h1>
         <div style={{ display: 'flex', gap: 'var(--space-2)' }}>
           <button onClick={() => setUploadOpen(true)}>+ 업로드</button>
+          {isAdmin && onOpenAdmin && <button onClick={onOpenAdmin}>계정 관리</button>}
           <button onClick={() => void handleLogout()}>로그아웃</button>
         </div>
       </div>
