@@ -259,6 +259,16 @@ export function EditorScreen({
   }, [state.notes, meta.timeSignature, ppq])
 
   const unitTicks = ticksPerGridUnit(gridUnit, ppq)
+  // 2026-10-30(T3-79, 의뢰인 요청 — "16격자인데 1/4씩 움직이는거 같다,
+  // 어느 격자에서든 키보드 이동 최소 단위를 1/16으로 해달라") — 화살표
+  // 이동은 지금까지 화면에 보이는 "격자"(unitTicks, 4분/8분/16분/셋잇단
+  // 중 선택)와 같은 간격으로 움직였다. 16분을 선택했을 때 한 칸(55틱,
+  // ppq=220 기준)은 실제로 정확히 16분음표 한 칸이 맞지만(55/220=1/4박,
+  // "+1/4"로 표시되는 건 "1박의 1/4"이라는 뜻이라 수치 자체는 맞았음),
+  // 의뢰인 기대는 "격자 설정과 무관하게 화살표는 항상 1/16 단위로"였다 —
+  // 격자(보기용 확대 배율·스냅 허용오차)와 화살표 이동 간격을 분리해,
+  // 후자는 항상 16분음표 한 칸으로 고정한다.
+  const keyboardNudgeTicks = ticksPerGridUnit('16n', ppq)
   const barTicks = ticksPerBar(meta.timeSignature, ppq)
   const totalTicks = totalBars * barTicks
   const gridWidthPx = ROW_LABEL_WIDTH + (totalTicks / unitTicks) * PX_PER_GRID_UNIT
@@ -1120,13 +1130,13 @@ export function EditorScreen({
 
   // 2026-10-30(T3-77, 모드A 지적) — moveSelected()의 반복 반올림 오차 누적을
   // 막으려고 "화살표 이동을 시작한 기준 틱 + 그 뒤 누른 횟수"를 따로 든다
-  // (아래 moveSelected 코멘트 참고). gridUnit도 같이 들어 격자 설정이 바뀌면
-  // (모드A 2차 지적 C-002) 우연히 반올림 결과가 같아 보여도 무조건 새로 잡는다.
+  // (아래 moveSelected 코멘트 참고). T3-79부터 화살표 이동 간격이 항상
+  // keyboardNudgeTicks(16분음표 고정)라 격자 설정(gridUnit)과 무관해져,
+  // 더는 anchor에 gridUnit을 같이 안 둬도 된다(어차피 안 바뀜).
   const moveAnchorRef = useRef<{
     noteId: number
     anchorTick: number
     steps: number
-    gridUnit: GridUnit
   } | null>(null)
 
   function moveSelected(deltaTicks: number, deltaRows: number) {
@@ -1172,18 +1182,17 @@ export function EditorScreen({
       const anchorStillValid =
         anchor !== null &&
         anchor.noteId === selectedNote._editorId &&
-        anchor.gridUnit === gridUnit &&
-        Math.round(anchor.anchorTick + anchor.steps * unitTicks) === selectedNote.tick
+        Math.round(anchor.anchorTick + anchor.steps * keyboardNudgeTicks) === selectedNote.tick
       const base = anchorStillValid
         ? anchor
-        : { noteId: selectedNote._editorId, anchorTick: selectedNote.tick, steps: 0, gridUnit }
-      const steps = base.steps + deltaTicks / unitTicks
-      const rawNextTick = Math.round(base.anchorTick + steps * unitTicks)
+        : { noteId: selectedNote._editorId, anchorTick: selectedNote.tick, steps: 0 }
+      const steps = base.steps + deltaTicks / keyboardNudgeTicks
+      const rawNextTick = Math.round(base.anchorTick + steps * keyboardNudgeTicks)
       nextTick = Math.max(0, rawNextTick)
       moveAnchorRef.current =
         rawNextTick === nextTick
-          ? { noteId: selectedNote._editorId, anchorTick: base.anchorTick, steps, gridUnit }
-          : { noteId: selectedNote._editorId, anchorTick: nextTick, steps: 0, gridUnit }
+          ? { noteId: selectedNote._editorId, anchorTick: base.anchorTick, steps }
+          : { noteId: selectedNote._editorId, anchorTick: nextTick, steps: 0 }
     }
     const rowIdx = editorRowIndexForPiece(selectedNote.piece)
     const nextRowIdx = Math.min(EDITOR_ROWS.length - 1, Math.max(0, rowIdx + deltaRows))
@@ -1213,10 +1222,10 @@ export function EditorScreen({
     if (selectedNote === null) return
     if (e.key === 'ArrowLeft') {
       e.preventDefault()
-      moveSelected(-unitTicks, 0)
+      moveSelected(-keyboardNudgeTicks, 0)
     } else if (e.key === 'ArrowRight') {
       e.preventDefault()
-      moveSelected(unitTicks, 0)
+      moveSelected(keyboardNudgeTicks, 0)
     } else if (e.key === 'ArrowUp') {
       e.preventDefault()
       moveSelected(0, -1)
