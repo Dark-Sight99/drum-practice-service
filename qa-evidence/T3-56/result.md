@@ -74,7 +74,37 @@ API는 T1-3부터 이미 있었지만, 그걸 쓸 수 있는 화면이 프런트
 `AdminScreen.test.tsx`(6개 시나리오)로 대체 — 정적 HTML 재현보다 더 강한
 증거라고 판단.
 
+## Codex 모드A 검수
+
+**1차 — REQUEST_CHANGES** (job `task-mvt09kcb-d8av3v`)
+- C-001(필수): 비밀번호 재설정 시 대상 계정의 기존 `UserSession`을 폐기하지
+  않아, 재설정 전부터 로그인돼 있던 기기의 쿠키가 계속 유효했음(REQ-08
+  "정지 시 즉시 차단"과 같은 원칙 위반) → `reset_password`에서
+  `UserSession` 삭제 추가, `test_reset_password_invalidates_existing_sessions`
+  신규(재설정 전 쿠키가 401로 거부되는지 확인).
+- C-002(권장): `togglingId`(단일값)가 행 여러 개의 진행 상태를 같이
+  관리해, 다른 행을 누르면 이전 행 버튼이 아직 요청 중인데도 다시
+  활성화됨 → `togglingIds: Set<number>`로 교체, 행마다 독립적으로 추적.
+- 긍정 확인 사항: 관리자 라우트 전부 `require_admin`, `UserOut`이
+  `password_hash` 미노출, 프런트 API 메서드·필드가 백엔드와 일치, 생성/
+  재설정 성공 후 폼·모달 정상 초기화, 본인 정지 버튼 비활성화 정상,
+  `LibraryScreen`의 선택적 prop 처리 안전.
+
+**2차 — APPROVE(잔여 권장 1건 추가 반영)** (job `task-mvt0dib0-zxinnj`)
+두 수정 모두 확인. 남은 권장(C-001, 2차 라운드 번호 재사용): 계정
+생성·정지·재설정이 거의 동시에 일어나면 `reload()` 응답이 시작 순서와
+다르게 도착해 더 오래된 조회가 최신 상태를 덮어쓸 수 있음 → APPROVE라
+병합을 막는 수준은 아니었지만, `LibraryScreen.tsx`의
+`songsFetchGenerationRef`와 같은 패턴(이 화면은 곡별 로컬 병합까지는
+필요 없어 generation 번호만)으로 `reloadGenerationRef` 추가해 즉시 반영.
+
+## 테스트(최종)
+- `app/server`: `pytest -q` — 213/213 통과(신규 7개: 위 6개 +
+  `test_reset_password_invalidates_existing_sessions`). `ruff check` — 통과.
+- `app/web`: `npx tsc -b`·`npx oxlint`(기존 경고 4건만) 통과. `npx vitest
+  run` — 288/288 통과.
+
 ## 남은 작업
-- Codex 모드A 검수 → APPROVE 후 `main` 병합.
+- 없음. `main` 병합 완료.
 - 의뢰인이 실제로 로그인해 "계정 관리" 버튼·화면을 한 번 직접 눌러봐야
   진짜 UI 확인(자동 테스트는 로직·접근성 수준까지만 보장).

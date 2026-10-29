@@ -45,12 +45,22 @@ export function AdminScreen({ currentUserId, onBack }: AdminScreenProps) {
   const [toast, setToast] = useState<{ id: number; message: string } | null>(null)
   const toastIdRef = useRef(0)
 
+  // Codex 모드A 2차 지적(권장, 반영) — 계정 생성·정지·재설정이 거의 동시에
+  // 일어나면 각자 끝에서 reload()를 부르는데, 응답이 시작 순서와 다르게
+  // 도착하면 더 오래된 조회가 나중에 와서 최신 상태를 덮어쓸 수 있었다
+  // (LibraryScreen.tsx의 songsFetchGenerationRef와 같은 패턴 — 이 화면은
+  // 곡별 로컬 병합까지는 필요 없어 generation 번호만으로 충분).
+  const reloadGenerationRef = useRef(0)
+
   async function reload() {
+    const generation = ++reloadGenerationRef.current
     try {
       const list = await listUsers()
+      if (generation !== reloadGenerationRef.current) return
       setUsers(list)
       setError(null)
     } catch (err) {
+      if (generation !== reloadGenerationRef.current) return
       setError(err instanceof ApiError ? err.message : '계정 목록을 불러오지 못했습니다')
     }
   }
