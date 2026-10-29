@@ -645,7 +645,10 @@ export function EditorScreen({
         </label>
         <button
           onClick={() => setHistory((h) => undo(h))}
-          disabled={!canUndo(history)}
+          // Codex 모드A 3차 지적(필수, 반영) — commit()의 "저장 중엔 편집
+          // 금지" 가드는 실행취소/다시실행처럼 setHistory()를 직접 부르는
+          // 경로는 안 거쳐 못 막았다 — 여기도 같이 막는다.
+          disabled={!canUndo(history) || isSaving}
           aria-label="실행취소"
           title="실행취소"
         >
@@ -653,7 +656,7 @@ export function EditorScreen({
         </button>
         <button
           onClick={() => setHistory((h) => redo(h))}
-          disabled={!canRedo(history)}
+          disabled={!canRedo(history) || isSaving}
           aria-label="다시실행"
           title="다시실행"
         >
