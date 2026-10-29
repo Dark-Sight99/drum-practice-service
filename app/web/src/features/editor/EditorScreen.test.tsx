@@ -102,6 +102,42 @@ describe('EditorScreen', () => {
     expect(screen.getByText(/틱 720/)).toBeInTheDocument()
   })
 
+  it('shows the selected note\'s position in bar/beat units next to the raw tick (2026-10-29 의뢰인 요청 — "어떤 간격으로 찍어야할지 감이 안 온다")', () => {
+    render(
+      <EditorScreen song={song} initialScore={makeScore()} onSaved={() => {}} onCancel={() => {}} />,
+    )
+    const kickRow = screen.getByTestId('editor-row-kick')
+    fireEvent.click(kickRow.querySelectorAll('button')[0])
+    // makeScore()의 유일한 노트는 틱 480(ppq=480, 4/4) — 정확히 2박째.
+    expect(screen.getByText(/1마디 2박 \(틱 480\)/)).toBeInTheDocument()
+
+    // 격자를 16분으로 바꾸면(분모가 달라짐) 분수의 분모도 같이 바뀐다 —
+    // 16분 격자에서 480틱은 여전히 "정확히 2박"이라 분수 없이 그대로.
+    fireEvent.change(screen.getByDisplayValue('8분'), { target: { value: '16n' } })
+    expect(screen.getByText(/1마디 2박 \(틱 480\)/)).toBeInTheDocument()
+
+    const grid = screen.getByRole('application')
+    fireEvent.keyDown(grid, { key: 'ArrowLeft' }) // 16분 격자 1칸 = 120틱
+    expect(screen.getByText(/1마디 1박 \+3\/4 \(틱 360\)/)).toBeInTheDocument()
+  })
+
+  it('updates the bar/beat label live while dragging, not just after the drag commits', () => {
+    render(
+      <EditorScreen song={song} initialScore={makeScore()} onSaved={() => {}} onCancel={() => {}} />,
+    )
+    const kickNote = screen.getByRole('button', { name: /KK 노트, 틱 480/ })
+    fireEvent.mouseDown(kickNote, { clientX: 100, button: 0 })
+    fireEvent.mouseMove(window, { clientX: 148 }) // +48px = +1그리드칸(24px)*2 = +480틱
+
+    // 드래그가 아직 끝나지 않아(mouseup 전) 커밋도 안 됐지만, 패널은
+    // 미리보기 틱(960)을 바로 반영해야 한다 — state.notes의 커밋된 값(480)
+    // 그대로였다면 여기서 "1마디 2박"으로 멈춰 있었을 것.
+    expect(screen.getByText(/1마디 3박 \(틱 960\)/)).toBeInTheDocument()
+
+    fireEvent.mouseUp(window)
+    expect(screen.getByText(/1마디 3박 \(틱 960\)/)).toBeInTheDocument()
+  })
+
   it('keeps moved notes on an integer tick even when ppq is not divisible by the grid divisor (Codex 모드A 지적)', () => {
     const score: DrumScore = {
       version: 1,

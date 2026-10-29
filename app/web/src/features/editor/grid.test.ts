@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import type { DrumPiece } from '../../score/types'
-import { EDITOR_ROWS, editorRowIndexForPiece, snapTick, ticksPerGridUnit } from './grid'
+import {
+  EDITOR_ROWS,
+  editorRowIndexForPiece,
+  snapTick,
+  tickToBeatLabel,
+  ticksPerGridUnit,
+} from './grid'
 
 describe('ticksPerGridUnit', () => {
   it('computes ticks for each grid unit at ppq=480', () => {
@@ -28,6 +34,37 @@ describe('snapTick', () => {
     // 있었음(score/validate.ts는 정수가 아닌 tick을 거부).
     const result = snapTick(50, '8nt', 100)
     expect(Number.isInteger(result)).toBe(true)
+  })
+})
+
+describe('tickToBeatLabel (2026-10-29 의뢰인 요청 — "노트를 어떤 간격으로 찍어야할지 감이 잘 안오더라")', () => {
+  it('labels a tick exactly on a beat with no fraction', () => {
+    expect(tickToBeatLabel(0, [4, 4], 480, '8n')).toBe('1마디 1박')
+    expect(tickToBeatLabel(480, [4, 4], 480, '8n')).toBe('1마디 2박')
+  })
+
+  it('shows a half-beat offset under the 8분 grid', () => {
+    expect(tickToBeatLabel(240, [4, 4], 480, '8n')).toBe('1마디 1박 +1/2')
+  })
+
+  it('shows quarter-beat offsets under the 16분 grid, simplifying 2/4 to 1/2', () => {
+    expect(tickToBeatLabel(120, [4, 4], 480, '16n')).toBe('1마디 1박 +1/4')
+    expect(tickToBeatLabel(240, [4, 4], 480, '16n')).toBe('1마디 1박 +1/2')
+    expect(tickToBeatLabel(360, [4, 4], 480, '16n')).toBe('1마디 1박 +3/4')
+  })
+
+  it('shows thirds under the 8분음표 셋잇단 grid', () => {
+    expect(tickToBeatLabel(160, [4, 4], 480, '8nt')).toBe('1마디 1박 +1/3')
+    expect(tickToBeatLabel(320, [4, 4], 480, '8nt')).toBe('1마디 1박 +2/3')
+  })
+
+  it('rolls over into the next bar correctly', () => {
+    expect(tickToBeatLabel(1920, [4, 4], 480, '8n')).toBe('2마디 1박')
+  })
+
+  it('respects a non-4/4 time signature (3/4 — 한 마디에 3박만)', () => {
+    expect(tickToBeatLabel(1440, [3, 4], 480, '8n')).toBe('2마디 1박')
+    expect(tickToBeatLabel(960, [3, 4], 480, '8n')).toBe('1마디 3박')
   })
 })
 
