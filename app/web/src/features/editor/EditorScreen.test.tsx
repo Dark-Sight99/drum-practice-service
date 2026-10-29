@@ -443,6 +443,49 @@ describe('EditorScreen', () => {
     expect(onCancel).not.toHaveBeenCalled()
   })
 
+  it('ignores Esc/배경 클릭 while saving from the leave modal (Codex 모드A 지적, 2026-10-29) — 저장 중엔 모달이 임의로 닫히면 안 됨', async () => {
+    // drumscore 저장(PUT) 요청만 붙잡아 "저장 중" 상태를 직접 관찰한다 —
+    // 마운트 중 같은 fetch로 함께 불리는 계정 믹서 설정 GET은 평소처럼
+    // 바로 끝나야 화면이 정상 렌더링된다.
+    let resolveSave: (value: Response) => void = () => {}
+    const fetchMock = vi.fn((_url: string, init?: RequestInit) => {
+      if (init?.method === 'PUT') {
+        return new Promise<Response>((resolve) => {
+          resolveSave = resolve
+        })
+      }
+      return Promise.resolve(new Response(JSON.stringify({ volumes: null }), { status: 200 }))
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    const onBackToPractice = vi.fn()
+    render(
+      <EditorScreen
+        song={song}
+        initialScore={makeScore()}
+        onSaved={() => {}}
+        onCancel={() => {}}
+        initialPositionTicks={960}
+        onBackToPractice={onBackToPractice}
+      />,
+    )
+    const snareRow = screen.getByTestId('editor-row-snare')
+    fireEvent.click(snareRow, { clientX: 100 })
+    fireEvent.click(screen.getByRole('button', { name: '← 연습 화면' }))
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: '저장' }))
+
+    // 저장 요청이 아직 안 끝난 상태(fetch가 붙잡혀 있음) — Esc를 눌러도
+    // 모달이 "취소된 것처럼" 사라지면 안 된다. 예전엔 Modal의 onClose가
+    // isSaving을 몰라 여기서 모달이 닫혔는데, 저장은 성공 시 뒤늦게
+    // 그대로 "연습 화면"으로 이동해버려 사용자가 취소했다고 생각한
+    // 상태에서 갑자기 화면이 바뀌는 문제가 있었다.
+    fireEvent.keyDown(window, { key: 'Escape' })
+    expect(screen.getByRole('dialog')).toBeInTheDocument()
+    expect(onBackToPractice).not.toHaveBeenCalled()
+
+    resolveSave(new Response(null, { status: 204 }))
+    await waitFor(() => expect(onBackToPractice).toHaveBeenCalledWith(960))
+  })
+
   it('calls saveSongDrumScore with the edited score on save', async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 204 }))
     vi.stubGlobal('fetch', fetchMock)

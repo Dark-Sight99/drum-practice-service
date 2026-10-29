@@ -1427,7 +1427,17 @@ export function EditorScreen({
 
       <Modal
         open={pendingNav !== null}
-        onClose={() => setPendingNav(null)}
+        // Codex 모드A 지적(필수, 반영) — 모달 안 버튼 3개는 isSaving일 때
+        // 비활성화되지만, Modal 자신의 onClose(배경 클릭·Esc)는 그 가드를
+        // 안 거친다. "저장" 진행 중에 Esc를 누르면 모달은 닫혀서 취소한
+        // 것처럼 보이지만, handleSaveThenLeave는 이미 그 시점의 nav를
+        // 붙잡고 있어 저장이 성공하면 그대로 이동해버린다(취소했다고
+        // 생각한 사용자가 갑자기 다른 화면으로 넘어감). 저장 중엔 배경
+        // 클릭·Esc 모두 무시한다.
+        onClose={() => {
+          if (isSaving) return
+          setPendingNav(null)
+        }}
         title="저장하지 않은 변경사항"
       >
         <p>편집한 내용을 저장하지 않았습니다. 저장할까요?</p>

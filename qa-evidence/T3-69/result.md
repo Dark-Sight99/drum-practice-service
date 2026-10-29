@@ -71,7 +71,26 @@ handSource 5개 필드를 기존 선택된 노트와 비교해 하나도 안 바
 공통 경로라 한 곳만 고치면 전부 해결된다.
 
 ## Codex 모드A 검수(읽기 전용)
-(아래 진행 예정 — 실행 중)
+- 대상: `task/T3-69-editor-unsaved-guard-and-noop-dirty-fix` vs `main`.
+- **1차 — REQUEST_CHANGES(Medium, 반영)**: 모달 안 버튼 3개는 `isSaving`일
+  때 비활성화되지만, `Modal` 컴포넌트 자신의 `onClose`(배경 클릭·Esc)는
+  그 가드를 거치지 않았다 — "저장" 진행 중(fetch가 아직 안 끝남)에 Esc를
+  누르면 모달은 "취소된 것처럼" 사라지는데, `handleSaveThenLeave`는 이미
+  그 시점의 `nav`(가려던 곳)를 붙잡고 있어서 저장이 성공하면 뒤늦게
+  그대로 이동해버린다 — 사용자는 취소했다고 생각한 상태에서 갑자기
+  화면이 바뀌는 문제. **반영**: `Modal`의 `onClose`에서 `isSaving`이면
+  아무것도 안 하도록 가드 추가(`onClose={() => { if (isSaving) return;
+  setPendingNav(null) }}`). 그 외엔 "DrumNote 필드는 no-op 비교에 전부
+  포함됨", "나가기 버튼을 모달 열린 채로 또 눌러도 모달 오버레이가 막아
+  이중 처리 안 됨", "저장 실패 시 saveError가 모달 바깥(닫힌 뒤의
+  페이지)에 그대로 남아 안 보이게 안 됨", "툴바의 기존 저장 버튼은
+  여전히 onSaved() 경유로 라이브러리 이동"까지 전부 확인됨 — 지적은 위
+  1건뿐.
+- 수정 후 `npx tsc -b`·`npx oxlint`(기존 경고 4건만)·`npx vitest run`
+  (316/316) 재확인 — "저장 중엔 Esc·배경 클릭 모두 무시"를 직접 검증하는
+  테스트 1개 추가(fetch의 PUT 요청만 의도적으로 붙잡아 "저장 중" 상태를
+  만든 뒤 Esc를 눌러 모달이 그대로 떠 있는지, 이후 저장이 실제로 끝나야
+  비로소 이동하는지 확인).
 
 ## 테스트
 - `app/web`: `npx tsc -b` 통과(에러 0). `npx oxlint` 통과(기존 경고
