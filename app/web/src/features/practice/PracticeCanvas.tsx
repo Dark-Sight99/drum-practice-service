@@ -427,6 +427,12 @@ export function PracticeCanvas({
   // gap에서 사용(위 useCompactHeaderLayout 코멘트 참고). 짧은 창에서만 두
   // 지점의 세로 여백을 줄여 캔버스(최소 300px 고정)에 공간을 더 돌려준다.
   const isCompactHeader = useCompactHeaderLayout()
+  // 2026-10-30(T5-1) — Codex 모드A 지적(C-002/C-003, 반영) — "짧은 창"만으로는
+  // 사이드바가 있는 넓은 화면(짧고 넓은 데스크톱 창 등)까지 걸려, 거기선 굳이
+  // 안 줄여도 되는 구분선 간격까지 줄이거나 블루투스 안내문이 사라지는
+  // 부작용이 있었다. 실제 버그 재현 조건(폰 가로)은 "짧고 좁음"의 조합이라,
+  // 그 조합에만 적용할 전용 플래그로 분리.
+  const isPhoneLandscape = isCompactHeader && isNarrowSettingsLayout
   // 재생 중인 핸들·보이스를 들고 있다가 정지/언마운트 시 반드시 정리한다 —
   // 안 그러면 Transport에 예약된 이벤트가 남아 있다가 재생을 다시 시작했을 때
   // 이미 폐기된(또는 아직 로드 전인) 버퍼로 Player.start()를 호출해 실제로
@@ -1979,8 +1985,13 @@ export function PracticeCanvas({
         flexDirection: isNarrowSettingsLayout ? 'column' : 'row',
         // 2026-10-30(T5-1) — 짧은 창(폰 가로, isCompactHeader)에서는 믹서
         // 트리거 버튼↔레인 사이 간격을 줄여 레인(최소 300px 고정)에 공간을
-        // 더 돌려준다(위 useCompactHeaderLayout 코멘트 참고).
-        gap: isCompactHeader ? 'var(--space-1)' : 'var(--space-4)',
+        // 더 돌려준다(위 useCompactHeaderLayout 코멘트 참고). Codex 모드A
+        // 지적(C-002, 반영) — 이 gap은 넓은 화면(!isNarrowSettingsLayout,
+        // 사이드바 모드)에서는 사이드바↔레인 사이 간격이기도 한데, 거기엔
+        // 세로 구분선(아래 alignItems:stretch 코멘트)이 있어 4px로 줄이면
+        // 어색해질 수 있다 — isNarrowSettingsLayout(트리거 버튼 모드, 구분선
+        // 없음)일 때만 줄인다. 짧고 넓은 창(가로모드가 아닌)은 그대로 16px.
+        gap: isPhoneLandscape ? 'var(--space-1)' : 'var(--space-4)',
         // 2026-10-28(의뢰인 요청, 3차) — "박스 치지 말고 좌측 하단까지 쭉
         // 선 그어서 영역을 구분" — 아래 사이드바의 세로 구분선(borderRight)이
         // 레인·킷을 포함한 메인 영역과 같은 높이까지 내려가려면 이 행의
@@ -2613,10 +2624,15 @@ export function PracticeCanvas({
              * 보조 설명(괄호 문장)을 빼고 핵심(블루투스 지연·믹서에서 보정)만
              * 남겨 절반 가까이 줄임.
              * 2026-10-30(T5-1, 폰 가로 레인 겹침 버그 수정) — 가로모드
-             * (isCompactHeader)는 이 문구 한 줄(36px)조차 뺄 공간이 없어
+             * (isPhoneLandscape)는 이 문구 한 줄(36px)조차 뺄 공간이 없어
              * (위 canvas minHeight 코멘트 참고) 그 화면에서만 생략 — 세로·
-             * 태블릿·PC는 그대로 상시 노출. 의뢰인 선택대로. */}
-            {!isCompactHeader && (
+             * 태블릿·PC는 그대로 상시 노출. 의뢰인 선택대로.
+             * Codex 모드A 지적(C-003, 반영) — isCompactHeader(높이만 기준)
+             * 였으면 "짧지만 넓은" 데스크톱 창에서도 이 안내가 사라지는
+             * 의도치 않은 부작용이 있어, "짧고 좁음"(isPhoneLandscape)으로
+             * 좁혔다 — 블루투스 안내는 실제로 폰에서 자주 겪는 문제라 폰
+             * 모양 화면에서만 생략하는 게 맞다. */}
+            {!isPhoneLandscape && (
               <p
                 style={{
                   color: 'var(--text-muted)',

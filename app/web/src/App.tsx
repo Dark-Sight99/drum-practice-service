@@ -145,6 +145,17 @@ function App() {
             ← 라이브러리
           </button>
           <h1
+            // 2026-10-30(T5-1) — Codex 모드A 지적(C-004, 반영) — 가로모드에서
+            // 말줄임표로 잘릴 때 전체 제목을 확인할 방법이 없었다. title
+            // 속성으로 전체 텍스트(아티스트 포함)를 제공 — 호버 툴팁은 물론,
+            // 스크린리더도 title을 읽을 수 있다.
+            title={
+              isCompactHeader
+                ? `${practiceSong.song.title}${
+                    practiceSong.song.artist ? ` — ${practiceSong.song.artist}` : ''
+                  }`
+                : undefined
+            }
             style={{
               fontSize: '1.3rem',
               margin: 0,
