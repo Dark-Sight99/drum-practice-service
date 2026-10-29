@@ -257,9 +257,10 @@ export function EditorScreen({
 
   // 2026-10-29(의뢰인 요청 — "sn와 mt와 같은 위치에 노트를 찍고싶었는데
   // 원하는 위치에 노트는 찍을 수 없었다... 드래그로 옮겨서 위치라도
-  // 맞추려 했지만 그럴 수 없었다") — 클릭·드래그의 스냅 계산 자체(위
-  // pxToSnappedTick/handleNoteMouseDown의 mousemove 처리)는 다시 확인해도
-  // 틀린 데가 없었다. 실제 원인은 **격자선이 화면에 전혀 안 그려져 있어서**
+  // 맞추려 했지만 그럴 수 없었다") — 당시 클릭·드래그의 스냅 계산 자체
+  // (아래 pxToTick/handleNoteMouseDown의 mousemove 처리 — 그땐 격자에
+  // 스냅했음, 지금은 자유 배치로 바뀜)는 다시 확인해도 틀린 데가 없었다.
+  // 그 시점의 실제 원인은 **격자선이 화면에 전혀 안 그려져 있어서**
   // (`EDITOR_ROWS.map()`이 만드는 각 행은 그냥 단색 배경일 뿐 세로선이
   // 없음) — 사용자가 어디를 클릭해야 어느 틱에 스냅될지, 기존 노트와
   // 같은 세로줄인지 눈으로 전혀 확인할 수 없었던 것(캡처 화면으로 직접
@@ -286,18 +287,18 @@ export function EditorScreen({
   // 아니었다는 것 — 눈에 보이는 "칸" 안 아무 데나 클릭하면 그 칸으로
   // 들어가길 기대하는데(칸의 오른쪽 절반을 클릭하면 반올림 때문에 다음
   // 칸 선으로 넘어가 버림), 이건 대부분의 DAW/피아노롤 편집기가 쓰는
-  // "칸 기준"(바닥 함수) 스냅과 다르다. 그래서 반올림 대신 바닥 함수로
-  // 바꾼다 — 클릭(또는 드래그로 가리키는) 지점이 속한 칸의 왼쪽 선으로
-  // 항상 스냅. (snapTick() 자체는 화살표 키 이동(moveSelected, 이미
-  // 격자에 맞는 값끼리 더해 스냅은 사실상 항상 제자리 확인용)이 여전히
-  // 쓰고 grid.test.ts가 "가장 가까운 선" 동작을 직접 검증하므로 안
-  // 건드림 — 마우스 입력 전용으로 바닥 함수 버전을 따로 둔다.)
-  function floorSnapTick(rawTick: number): number {
-    return Math.max(0, Math.round(Math.floor(rawTick / unitTicks) * unitTicks))
-  }
-
-  function pxToSnappedTick(px: number): number {
-    return floorSnapTick(((px - ROW_LABEL_WIDTH) / PX_PER_GRID_UNIT) * unitTicks)
+  // "칸 기준"(바닥 함수) 스냅과 다르다 — 그래서 바닥 함수로 바꿨었는데,
+  // 의뢰인이 이후에도 재차 "격자 선에만 찍힌다"고 재지적(스크린샷 — 빨간
+  // 지점이 격자선이 아닌 자리였음)하면서, 직접 확인한 결과 **격자에 전혀
+  // 안 맞고 클릭·드래그한 정확한 픽셀 위치에 그대로 놓이길** 원한다고
+  // 확정(2026-10-29, 대화로 확인) — 스냅 자체를 끈다. 격자선은 그대로
+  // 두되(보기용 기준선 — 몇 분음표 간격인지 눈대중하는 용도) 더는 클릭·
+  // 드래그 결과를 그 선에 붙이지 않는다. (snapTick()/floorSnapTick 둘 다
+  // 더는 안 쓰여 지운다 — 화살표 키 이동(moveSelected)은 격자 단위로
+  // "몇 칸 이동" 개념이라 여전히 격자에 맞는 게 자연스러워 그대로 둠,
+  // grid.ts의 snapTick()은 그쪽에서 계속 씀.)
+  function pxToTick(px: number): number {
+    return Math.max(0, Math.round(((px - ROW_LABEL_WIDTH) / PX_PER_GRID_UNIT) * unitTicks))
   }
 
   // --- 재생(2026-10-29 의뢰인 요청) ---------------------------------------
@@ -809,7 +810,7 @@ export function EditorScreen({
     const rect = e.currentTarget.getBoundingClientRect()
     const relativeX = e.clientX - rect.left + e.currentTarget.scrollLeft
     if (relativeX < ROW_LABEL_WIDTH) return // 고정 레이블 거터 클릭은 무시
-    const tick = pxToSnappedTick(relativeX)
+    const tick = pxToTick(relativeX)
     const id = nextIdRef.current++
     const newNote: EditableNote = {
       _editorId: id,
@@ -879,9 +880,9 @@ export function EditorScreen({
     function handleMouseMove(ev: MouseEvent) {
       const deltaPx = ev.clientX - drag.startClientX
       const deltaTicks = (deltaPx / PX_PER_GRID_UNIT) * unitTicks
-      // 위 pxToSnappedTick과 같은 이유(바닥 함수) — 클릭과 드래그가 서로
-      // 다른 스냅 규칙을 쓰면 더 헷갈리므로 반드시 같은 함수를 쓴다.
-      const nextTick = floorSnapTick(drag.startTick + deltaTicks)
+      // 위 pxToTick과 같은 이유 — 클릭과 드래그가 서로 다른 규칙을 쓰면
+      // 더 헷갈리므로 반드시 같은 방식(격자 무시, 정수 틱으로만 반올림)을 쓴다.
+      const nextTick = Math.max(0, Math.round(drag.startTick + deltaTicks))
       const preview = { noteId: drag.noteId, tick: nextTick }
       dragPreviewRef.current = preview
       setDragPreview(preview)
@@ -1294,47 +1295,67 @@ export function EditorScreen({
         </div>
       </div>
 
-      {selectedNote && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', flexWrap: 'wrap' }}>
-          <span>
-            선택됨: {EDITOR_ROWS[editorRowIndexForPiece(selectedNote.piece)]?.label} · 틱{' '}
-            {selectedNote.tick} · 셈여림 {velocityTierOf(selectedNote.velocity)} · 손:{' '}
-            {selectedNote.hand
-              ? `${HAND_LABEL[selectedNote.hand]}${selectedNote.handSource === 'user' ? '(지정)' : '(추천)'}`
-              : '미지정'}
-          </span>
-          <button onClick={() => setSelectedVelocityTier('soft')}>약</button>
-          <button onClick={() => setSelectedVelocityTier('mid')}>중</button>
-          <button onClick={() => setSelectedVelocityTier('strong')}>강</button>
-          {/* 2026-10-29(의뢰인 요청) — HH 닫힘/열림을 한 행으로 합치면서(grid.ts
-           * 참고) 행만으로는 더 이상 구분이 안 되니, 선택된 노트가 HH일 때
-           * 여기서 직접 전환할 수 있게 둔다. */}
-          {(selectedNote.piece === 'hihat_closed' || selectedNote.piece === 'hihat_open') && (
-            <>
-              <button
-                onClick={() => updateSelectedNote({ piece: 'hihat_closed' })}
-                aria-pressed={selectedNote.piece === 'hihat_closed'}
-                disabled={selectedNote.piece === 'hihat_closed'}
-              >
-                닫힘
-              </button>
-              <button
-                onClick={() => updateSelectedNote({ piece: 'hihat_open' })}
-                aria-pressed={selectedNote.piece === 'hihat_open'}
-                disabled={selectedNote.piece === 'hihat_open'}
-              >
-                열림
-              </button>
-            </>
-          )}
-          <button onClick={() => setSelectedHand('R')}>R</button>
-          <button onClick={() => setSelectedHand('L')}>L</button>
-          <button onClick={() => setSelectedHand('RF')}>RF</button>
-          <button onClick={() => setSelectedHand('LF')}>LF</button>
-          <button onClick={() => setSelectedHand(null)}>손 지우기</button>
-          <button onClick={deleteSelectedNote}>삭제</button>
-        </div>
-      )}
+      {/* 2026-10-29(의뢰인 확인 — "네, 그리드가 안 밀리게 고쳐주세요") — 노트를
+       * 선택할 때마다 이 패널이 나타나면서 그리드 전체가 아래로 밀렸다(실측
+       * 100px 안팎). "클릭해서 노트를 놓고 바로 그 자리를 드래그로 고치려는"
+       * 실제 사용 패턴에서, 화면이 훅 밀리는 순간을 사람이 못 따라가 드래그
+       * 시작점이 엉뚱한 자리를 잡을 수 있었다 — minHeight로 항상 공간을
+       * 미리 예약해 그리드 위치를 선택 여부와 무관하게 고정한다. 값은 가장
+       * 넓은 경우(HH 선택 시 닫힘/열림 버튼 2개 추가 — 줄바꿈될 수 있는
+       * 폭)를 실제로 띄워 측정한 높이(86px)에 여유를 두고 반올림한 값 —
+       * (처음엔 선택 패널과 똑같은 내용을 안 보이게 숨겨 자동으로 공간을
+       * 재는 방식을 시도했는데, 숨긴 쪽 텍스트가 테스트의 getByText와
+       * 겹쳐 "여러 개 찾음" 에러가 나서 더 단순한 고정값으로 바꿨다). */}
+      <div style={{ minHeight: 96, position: 'relative' }}>
+        {selectedNote && (
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 'var(--space-2)',
+              flexWrap: 'wrap',
+            }}
+          >
+            <span>
+              선택됨: {EDITOR_ROWS[editorRowIndexForPiece(selectedNote.piece)]?.label} · 틱{' '}
+              {selectedNote.tick} · 셈여림 {velocityTierOf(selectedNote.velocity)} · 손:{' '}
+              {selectedNote.hand
+                ? `${HAND_LABEL[selectedNote.hand]}${selectedNote.handSource === 'user' ? '(지정)' : '(추천)'}`
+                : '미지정'}
+            </span>
+            <button onClick={() => setSelectedVelocityTier('soft')}>약</button>
+            <button onClick={() => setSelectedVelocityTier('mid')}>중</button>
+            <button onClick={() => setSelectedVelocityTier('strong')}>강</button>
+            {/* 2026-10-29(의뢰인 요청) — HH 닫힘/열림을 한 행으로 합치면서
+             * (grid.ts 참고) 행만으로는 더 이상 구분이 안 되니, 선택된
+             * 노트가 HH일 때 여기서 직접 전환할 수 있게 둔다. */}
+            {(selectedNote.piece === 'hihat_closed' || selectedNote.piece === 'hihat_open') && (
+              <>
+                <button
+                  onClick={() => updateSelectedNote({ piece: 'hihat_closed' })}
+                  aria-pressed={selectedNote.piece === 'hihat_closed'}
+                  disabled={selectedNote.piece === 'hihat_closed'}
+                >
+                  닫힘
+                </button>
+                <button
+                  onClick={() => updateSelectedNote({ piece: 'hihat_open' })}
+                  aria-pressed={selectedNote.piece === 'hihat_open'}
+                  disabled={selectedNote.piece === 'hihat_open'}
+                >
+                  열림
+                </button>
+              </>
+            )}
+            <button onClick={() => setSelectedHand('R')}>R</button>
+            <button onClick={() => setSelectedHand('L')}>L</button>
+            <button onClick={() => setSelectedHand('RF')}>RF</button>
+            <button onClick={() => setSelectedHand('LF')}>LF</button>
+            <button onClick={() => setSelectedHand(null)}>손 지우기</button>
+            <button onClick={deleteSelectedNote}>삭제</button>
+          </div>
+        )}
+      </div>
 
       {selectedMulti.length >= 2 && (
         <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
