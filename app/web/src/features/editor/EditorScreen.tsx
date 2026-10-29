@@ -377,6 +377,17 @@ export function EditorScreen({
   useEffect(() => {
     cursorTicksRef.current = cursorTicks
   }, [cursorTicks])
+  // 2026-10-29(T3-76, 모드A 2차 지적 C-002 반영) — handleNoteMouseDown의
+  // handleMouseUp은 mousedown 시점에 만들어진 클로저라, 그 안에서 isPlaying을
+  // 그냥 읽으면 드래그 시작 당시(항상 false — 재생 중엔 노트 버튼 자체가
+  // disabled라 드래그가 시작될 수 없음)의 값에 멈춰있다. 드래그 도중(마우스
+  // 버튼을 누른 채) 재생이 시작되는 극단적 경우(키보드 단축키 등)에도
+  // mouseup 시점의 "지금" 값을 읽어야 커밋을 막을 수 있어, ref로 최신값을
+  // 따로 든다(cursorTicksRef와 같은 패턴).
+  const isPlayingRef = useRef(isPlaying)
+  useEffect(() => {
+    isPlayingRef.current = isPlaying
+  }, [isPlaying])
 
   // 자체 재검토(Codex 4차 승인 뒤, 5차는 Codex 사용량 한도로 실행 못 함 —
   // 아래 "남은 작업" 참고) — handlePlay()는 createDrumVoices() 비동기 대기
@@ -873,6 +884,12 @@ export function EditorScreen({
   }, [])
 
   function handleRowClick(e: React.MouseEvent<HTMLDivElement>, pieces: readonly DrumPiece[]) {
+    // 2026-10-29(T3-76, 의뢰인 요청) — 재생 중엔 그리드가 재생 위치를 따라
+    // 계속 스크롤되므로(T3-75), 그 와중에 클릭으로 노트를 추가하면 클릭한
+    // 화면 좌표와 실제 가리키는 틱이 어긋나기 쉽다. 노트 버튼 자체도
+    // disabled={isPlaying}로 드래그·선택을 막았으니(아래), 새 노트 추가도
+    // 같은 이유로 재생 중엔 막는다.
+    if (isPlaying) return
     if (justDraggedRef.current) {
       // 방금 끝난 드래그가 노트 밖에서 mouseup해 합성된 click — 위
       // justDraggedRef 코멘트 참고. 새 노트를 만들지 않고 소비만 한다.
@@ -964,7 +981,11 @@ export function EditorScreen({
       const preview = dragPreviewRef.current
       dragPreviewRef.current = null
       setDragPreview(null)
-      if (preview && preview.tick !== drag.startTick) {
+      // 2026-10-29(T3-76, 모드A 2차 지적 C-002) — 드래그 도중 재생이 시작된
+      // 극단적인 경우, 재생 중 커밋을 막는다(위 isPlayingRef 코멘트 참고).
+      // 미리보기만 버리고 실제 노트는 안 옮긴다 — "재생 중 편집 잠금"과
+      // 일관되게, 시작 당시엔 허용됐던 드래그라도 끝날 때 재생 중이면 무효.
+      if (!isPlayingRef.current && preview && preview.tick !== drag.startTick) {
         commit({
           ...state,
           notes: state.notes.map((n) =>
@@ -1086,6 +1107,11 @@ export function EditorScreen({
   // 그리드 안에 있다는 뜻이라, 별도의 "input이면 무시" 분기 없이도 바깥 요소의
   // 키보드 동작(타이핑, 버튼 Enter/Space)을 건드리지 않는다.
   function handleGridKeyDown(e: React.KeyboardEvent<HTMLDivElement>) {
+    // 2026-10-29(T3-76, 의뢰인 요청) — 화살표 키 이동·Delete/Backspace 삭제·
+    // 숫자 키 셈여림 단축키 전부 선택된 노트를 그리드 버튼(disabled={isPlaying})
+    // 없이도 직접 바꾸는 경로라, 재생 중엔 똑같이 막아야 "편집 잠금"이
+    // 완전해진다.
+    if (isPlaying) return
     if (selectedNote === null) return
     if (e.key === 'ArrowLeft') {
       e.preventDefault()
@@ -1462,9 +1488,21 @@ export function EditorScreen({
                 ? `${HAND_LABEL[selectedNote.hand]}${selectedNote.handSource === 'user' ? '(지정)' : '(추천)'}`
                 : '미지정'}
             </span>
-            <button onClick={() => setSelectedVelocityTier('soft')}>약</button>
-            <button onClick={() => setSelectedVelocityTier('mid')}>중</button>
-            <button onClick={() => setSelectedVelocityTier('strong')}>강</button>
+            {/* 2026-10-29(T3-76, 의뢰인 요청 — "재생 중엔 편집 자체를
+             * 잠그자") — 재생 시작 전에 이미 선택돼 있던 노트라면 그리드의
+             * disabled={isPlaying}(노트 버튼 자체)를 거치지 않고 바로 이
+             * 패널 버튼들로 수정·삭제할 수 있었다 — 그리드만 잠그고 이
+             * 패널을 빠뜨리면 "재생 중엔 편집 잠금"이 반쪽짜리가 된다.
+             * 아래 버튼 전부 isPlaying일 때 같이 잠근다. */}
+            <button disabled={isPlaying} onClick={() => setSelectedVelocityTier('soft')}>
+              약
+            </button>
+            <button disabled={isPlaying} onClick={() => setSelectedVelocityTier('mid')}>
+              중
+            </button>
+            <button disabled={isPlaying} onClick={() => setSelectedVelocityTier('strong')}>
+              강
+            </button>
             {/* 2026-10-29(의뢰인 요청) — HH 닫힘/열림을 한 행으로 합치면서
              * (grid.ts 참고) 행만으로는 더 이상 구분이 안 되니, 선택된
              * 노트가 HH일 때 여기서 직접 전환할 수 있게 둔다. */}
@@ -1473,25 +1511,37 @@ export function EditorScreen({
                 <button
                   onClick={() => updateSelectedNote({ piece: 'hihat_closed' })}
                   aria-pressed={selectedNote.piece === 'hihat_closed'}
-                  disabled={selectedNote.piece === 'hihat_closed'}
+                  disabled={isPlaying || selectedNote.piece === 'hihat_closed'}
                 >
                   닫힘
                 </button>
                 <button
                   onClick={() => updateSelectedNote({ piece: 'hihat_open' })}
                   aria-pressed={selectedNote.piece === 'hihat_open'}
-                  disabled={selectedNote.piece === 'hihat_open'}
+                  disabled={isPlaying || selectedNote.piece === 'hihat_open'}
                 >
                   열림
                 </button>
               </>
             )}
-            <button onClick={() => setSelectedHand('R')}>R</button>
-            <button onClick={() => setSelectedHand('L')}>L</button>
-            <button onClick={() => setSelectedHand('RF')}>RF</button>
-            <button onClick={() => setSelectedHand('LF')}>LF</button>
-            <button onClick={() => setSelectedHand(null)}>손 지우기</button>
-            <button onClick={deleteSelectedNote}>삭제</button>
+            <button disabled={isPlaying} onClick={() => setSelectedHand('R')}>
+              R
+            </button>
+            <button disabled={isPlaying} onClick={() => setSelectedHand('L')}>
+              L
+            </button>
+            <button disabled={isPlaying} onClick={() => setSelectedHand('RF')}>
+              RF
+            </button>
+            <button disabled={isPlaying} onClick={() => setSelectedHand('LF')}>
+              LF
+            </button>
+            <button disabled={isPlaying} onClick={() => setSelectedHand(null)}>
+              손 지우기
+            </button>
+            <button disabled={isPlaying} onClick={deleteSelectedNote}>
+              삭제
+            </button>
           </div>
         )}
       </div>
@@ -1499,8 +1549,14 @@ export function EditorScreen({
       {selectedMulti.length >= 2 && (
         <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
           <span>선택: {selectedMulti.length}개 노트</span>
-          <button onClick={() => applyAlternateHands('R')}>RLRL 교대</button>
-          <button onClick={() => applyAlternateHands('L')}>LRLR 교대</button>
+          {/* 2026-10-29(T3-76, 모드A 2차 지적 C-001 반영) — 다중 선택 패널도
+           * commit()으로 노트를 바꾸는 경로라 단일 선택 패널과 똑같이 잠근다. */}
+          <button disabled={isPlaying} onClick={() => applyAlternateHands('R')}>
+            RLRL 교대
+          </button>
+          <button disabled={isPlaying} onClick={() => applyAlternateHands('L')}>
+            LRLR 교대
+          </button>
         </div>
       )}
 
@@ -1614,6 +1670,12 @@ export function EditorScreen({
                   <button
                     key={note._editorId}
                     aria-label={`${row.label} 노트, 틱 ${note.tick}${note.hand ? ` ${HAND_LABEL[note.hand]}${note.handSource === 'user' ? '(지정)' : '(추천)'}` : ''}${isSelected ? ' (선택됨)' : ''}`}
+                    // 2026-10-29(T3-76, 의뢰인 요청 — "재생 중엔 편집 자체를
+                    // 잠그자") — 재생 중엔 그리드가 계속 스크롤돼(T3-75) 클릭
+                    // 선택·드래그 이동 모두 마우스 아래 좌표가 계속 바뀌어
+                    // 혼란스럽다. 재생 중엔 노트 버튼 자체를 비활성화해 클릭
+                    // (선택)·mousedown(드래그 시작) 둘 다 막는다.
+                    disabled={isPlaying}
                     onClick={(e) => handleNoteClick(e, note._editorId)}
                     onMouseDown={(e) => handleNoteMouseDown(e, note)}
                     style={{
