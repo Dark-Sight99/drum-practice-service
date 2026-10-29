@@ -1,5 +1,6 @@
 // 편집기 격자(피아노롤) 순수 로직. 근거: REQ-03, work/T2-6/plan.md §설계 2.
 import type { DrumPiece } from '../../score/types'
+import { beatsPerBar, ticksPerBar, type TimeSignature } from '../../audio/timing'
 
 /** 4분/8분/16분/8분음표 셋잇단. */
 export type GridUnit = '4n' | '8n' | '16n' | '8nt'
@@ -48,4 +49,41 @@ export const EDITOR_ROWS: readonly { pieces: readonly DrumPiece[]; label: string
 
 export function editorRowIndexForPiece(piece: DrumPiece): number {
   return EDITOR_ROWS.findIndex((row) => row.pieces.includes(piece))
+}
+
+function gcd(a: number, b: number): number {
+  return b === 0 ? a : gcd(b, a % b)
+}
+
+/** 틱을 "N마디 M박(+분수박)" 형태의 사람이 읽을 수 있는 위치로 바꾼다.
+ * 2026-10-29(의뢰인 요청) — T3-68에서 클릭·드래그를 격자 스냅 없는 자유
+ * 배치로 바꾼 뒤, "노트를 어떤 간격으로 찍어야할지 감이 안 온다"는
+ * 재지적. 분수의 분모는 지금 선택된 격자 단위(gridUnit)의 세분 수를
+ * 그대로 쓴다 — 16분 격자면 "+1/4"(16분음표 1칸 간격), 8분음표
+ * 셋잇단이면 "+1/3" 식으로, "반박자든 한박자든 그 간격"이라는 의뢰인의
+ * 표현과 바로 연결되게(격자선 자체도 이 단위로 그려지므로 화면에 보이는
+ * 선 몇 칸짜리 간격인지와 숫자가 일치한다). */
+export function tickToBeatLabel(
+  tick: number,
+  timeSignature: TimeSignature,
+  ppq: number,
+  gridUnit: GridUnit,
+): string {
+  const barTicks = ticksPerBar(timeSignature, ppq)
+  const beatTicks = barTicks / beatsPerBar(timeSignature, 4)
+  const unitTicks = ticksPerGridUnit(gridUnit, ppq)
+
+  const barUnits = Math.max(1, Math.round(barTicks / unitTicks))
+  const beatUnits = Math.max(1, Math.round(beatTicks / unitTicks))
+  const totalUnits = Math.max(0, Math.round(tick / unitTicks))
+
+  const bar0 = Math.floor(totalUnits / barUnits)
+  const unitsIntoBar = totalUnits - bar0 * barUnits
+  const beat0 = Math.floor(unitsIntoBar / beatUnits)
+  const subdivision = unitsIntoBar - beat0 * beatUnits
+
+  const base = `${bar0 + 1}마디 ${beat0 + 1}박`
+  if (subdivision === 0) return base
+  const divisor = gcd(subdivision, beatUnits)
+  return `${base} +${subdivision / divisor}/${beatUnits / divisor}`
 }

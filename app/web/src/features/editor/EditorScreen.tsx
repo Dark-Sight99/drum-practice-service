@@ -44,7 +44,14 @@ import {
   undo,
   type EditHistory,
 } from './editHistory'
-import { EDITOR_ROWS, editorRowIndexForPiece, snapTick, ticksPerGridUnit, type GridUnit } from './grid'
+import {
+  EDITOR_ROWS,
+  editorRowIndexForPiece,
+  snapTick,
+  tickToBeatLabel,
+  ticksPerGridUnit,
+  type GridUnit,
+} from './grid'
 import { VELOCITY_TIERS, velocityTierOf, type VelocityTier } from './velocity'
 
 const HAND_LABEL: Record<Exclude<Hand, null>, string> = { R: '오른손', L: '왼손', RF: '오른발', LF: '왼발' }
@@ -924,6 +931,15 @@ export function EditorScreen({
 
   const selectedNote =
     selectedIds.size === 1 ? (state.notes.find((n) => selectedIds.has(n._editorId)) ?? null) : null
+  // 2026-10-29(의뢰인 요청) — 드래그로 노트를 옮기는 동안에도 "선택됨" 패널의
+  // 마디/박 표시가 실시간으로 바뀌어야 "지금 몇 박 간격인지" 감을 잡는 데
+  // 쓸모가 있다 — 아래 노트 렌더링의 isBeingDragged/displayTick과 같은 패턴
+  // (state.notes의 커밋된 tick은 mouseup 때까지 그대로라, 그것만 읽으면
+  // 드래그 중엔 얼어붙은 값을 보여주게 된다).
+  const selectedDisplayTick =
+    selectedNote && dragPreview?.noteId === selectedNote._editorId
+      ? dragPreview.tick
+      : selectedNote?.tick
   const selectedMulti = useMemo(
     () =>
       selectedIds.size >= 2
@@ -1375,8 +1391,9 @@ export function EditorScreen({
             }}
           >
             <span>
-              선택됨: {EDITOR_ROWS[editorRowIndexForPiece(selectedNote.piece)]?.label} · 틱{' '}
-              {selectedNote.tick} · 셈여림 {velocityTierOf(selectedNote.velocity)} · 손:{' '}
+              선택됨: {EDITOR_ROWS[editorRowIndexForPiece(selectedNote.piece)]?.label} ·{' '}
+              {tickToBeatLabel(selectedDisplayTick ?? selectedNote.tick, meta.timeSignature, ppq, gridUnit)}{' '}
+              (틱 {selectedDisplayTick}) · 셈여림 {velocityTierOf(selectedNote.velocity)} · 손:{' '}
               {selectedNote.hand
                 ? `${HAND_LABEL[selectedNote.hand]}${selectedNote.handSource === 'user' ? '(지정)' : '(추천)'}`
                 : '미지정'}
