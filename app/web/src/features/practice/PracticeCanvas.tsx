@@ -1368,27 +1368,6 @@ export function PracticeCanvas({
       playbackRef.current = { handle, voices, tracks, synthGain, limiter, metronome }
       isStartingRef.current = false
       setIsStarting(false)
-
-      // 위 playDrumScore()가 내부적으로 transport.position을 늘 0으로
-      // 리셋하므로, 핸드오프받은 위치가 있으면 세션을 만든 바로 다음(같은
-      // 동기 구간)에 점프시킨다 — EditorScreen.tsx의 handlePlay()와 같은
-      // 패턴. 소비형 ref라 한 번 쓰면 비워 다음 재생부터는 평소처럼 0부터.
-      const pendingTicks = pendingInitialPositionTicksRef.current
-      if (pendingTicks !== undefined) {
-        pendingInitialPositionTicksRef.current = undefined
-        const barSeconds = barDurationSeconds(score.meta.timeSignature, playbackBpm)
-        const songStartSeconds = barSeconds * COUNT_IN_BARS
-        const positionSeconds =
-          songStartSeconds + (pendingTicks / score.ppq) * (60 / playbackBpm)
-        getMasterClock().setPositionSeconds(positionSeconds)
-        if (tracks) {
-          const playbackRate = playbackBpm / score.meta.bpm
-          tracks.playFrom(
-            audioTrackPositionSeconds(positionSeconds, songStartSeconds, playbackRate),
-            playbackRate,
-          )
-        }
-      }
     } catch (err) {
       cleanupAbortedSetup()
       // 2026-10-29(의뢰인 요청) — 예전엔 여기서 그대로 다시 던져 호출부
@@ -1402,6 +1381,32 @@ export function PracticeCanvas({
       console.error('재생 시작 실패', err)
       setPlayStartFailed(true)
       return
+    }
+
+    // Codex 모드A 지적(필수, 반영) — 아래 핸드오프 위치 복원은 위 try/catch
+    // 안에 있으면, 여기서 뭔가 던질 때 "세션 생성 자체가 실패"한 것처럼
+    // cleanupAbortedSetup()이 playbackRef.current(이미 유효하게 대입된 살아있는
+    // 세션)를 도중에 지워버리고 "재생 시작 실패" 배너까지 띄우는 오진단이 될
+    // 수 있었다 — 세션은 이미 성공적으로 만들어졌으므로 try/catch 밖으로
+    // 옮긴다. 위 playDrumScore()가 내부적으로 transport.position을 늘 0으로
+    // 리셋하므로, 핸드오프받은 위치가 있으면 세션을 만든 바로 다음(같은
+    // 동기 구간, await 없음)에 점프시킨다 — EditorScreen.tsx의 handlePlay()와
+    // 같은 패턴. 소비형 ref라 한 번 쓰면 비워 다음 재생부터는 평소처럼 0부터.
+    const pendingTicks = pendingInitialPositionTicksRef.current
+    if (pendingTicks !== undefined) {
+      pendingInitialPositionTicksRef.current = undefined
+      const barSeconds = barDurationSeconds(score.meta.timeSignature, playbackBpm)
+      const songStartSeconds = barSeconds * COUNT_IN_BARS
+      const positionSeconds =
+        songStartSeconds + (pendingTicks / score.ppq) * (60 / playbackBpm)
+      getMasterClock().setPositionSeconds(positionSeconds)
+      if (tracks) {
+        const playbackRate = playbackBpm / score.meta.bpm
+        tracks.playFrom(
+          audioTrackPositionSeconds(positionSeconds, songStartSeconds, playbackRate),
+          playbackRate,
+        )
+      }
     }
 
     // 방금 만든 세션에 지금 믹서 상태를 바로 적용(처음부터 맞게 시작 —
