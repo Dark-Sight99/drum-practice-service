@@ -195,6 +195,20 @@ export function EditorScreen({
   const [isSaving, setIsSaving] = useState(false)
   const nextIdRef = useRef(initialScore.notes.length)
 
+  // 2026-10-29(의뢰인 요청 — "생성된 노트를 드래그 해서 옮길수도 없다보니까
+  // 편집이 굉장히 어렵던데") — 노트를 마우스로 눌러 가로(시간축)로 드래그해
+  // 옮길 수 있게 한다. 세로(행/피스) 이동은 기존 화살표 위/아래 키로도 이미
+  // 가능해(moveSelected) 드래그는 가로 이동만으로 범위를 좁힌다 — 그래야
+  // 드래그 중 미리보기(dragPreview)가 "자기 행 안에서만 위치가 바뀐다"는
+  // 단순한 가정으로 렌더링될 수 있다(행이 바뀌면 다른 행의 필터된 목록으로
+  // 옮겨 그려야 해서 훨씬 복잡해짐).
+  const [isDragging, setIsDragging] = useState(false)
+  const [dragPreview, setDragPreview] = useState<{ noteId: number; tick: number } | null>(null)
+  const dragStateRef = useRef<{ noteId: number; startClientX: number; startTick: number } | null>(
+    null,
+  )
+  const dragPreviewRef = useRef<{ noteId: number; tick: number } | null>(null)
+
   const state = history.present
   const { meta, ppq } = state
 
@@ -740,7 +754,7 @@ export function EditorScreen({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  function handleRowClick(e: React.MouseEvent<HTMLDivElement>, piece: DrumPiece) {
+  function handleRowClick(e: React.MouseEvent<HTMLDivElement>, pieces: readonly DrumPiece[]) {
     const rect = e.currentTarget.getBoundingClientRect()
     const relativeX = e.clientX - rect.left + e.currentTarget.scrollLeft
     if (relativeX < ROW_LABEL_WIDTH) return // 고정 레이블 거터 클릭은 무시
@@ -749,7 +763,10 @@ export function EditorScreen({
     const newNote: EditableNote = {
       _editorId: id,
       tick,
-      piece,
+      // 2026-10-29(의뢰인 요청 — HH 닫힘/열림을 한 행으로 합침) — 새 노트는
+      // 그 행의 "기본" 피스로 만든다(HH 행은 닫힘이 기본 — 실제로 더 자주
+      // 쓰이는 타격). 열림으로 바꾸려면 선택 후 아래 "닫힘/열림" 버튼.
+      piece: pieces[0],
       velocity: VELOCITY_TIERS.mid,
       hand: null,
     }
@@ -771,6 +788,60 @@ export function EditorScreen({
       return next
     })
   }
+
+  function handleNoteMouseDown(e: React.MouseEvent, note: EditableNote) {
+    e.stopPropagation()
+    // Ctrl/Cmd+클릭은 다중 선택 토글 전용(기존 onClick이 처리) — 드래그를
+    // 같이 시작하면 "토글하려고 눌렀는데 옮겨짐"이 되므로 건너뛴다.
+    if (e.ctrlKey || e.metaKey || isSaving) return
+    setSelectedIds(new Set([note._editorId]))
+    dragStateRef.current = { noteId: note._editorId, startClientX: e.clientX, startTick: note.tick }
+    dragPreviewRef.current = { noteId: note._editorId, tick: note.tick }
+    setDragPreview(dragPreviewRef.current)
+    setIsDragging(true)
+  }
+
+  // 드래그 중에만 window에 리스너를 건다 — isDragging(불리언)만 의존성으로
+  // 둬서 매 mousemove마다(dragPreview가 바뀔 때마다) 떼고 다시 다는 걸
+  // 피한다. 그 대신 핸들러 안에서는 항상 ref(dragStateRef/dragPreviewRef)의
+  // 최신값을 읽는다 — state는 이 effect가 다시 만들어지기 전까지 드래그
+  // 시작 시점 값에 고정되므로(의도적 — 드래그 중엔 다른 편집이 안 일어남).
+  useEffect(() => {
+    if (!isDragging) return
+    function handleMouseMove(e: MouseEvent) {
+      const drag = dragStateRef.current
+      if (!drag) return
+      const deltaPx = e.clientX - drag.startClientX
+      const deltaTicks = (deltaPx / PX_PER_GRID_UNIT) * unitTicks
+      const nextTick = snapTick(Math.max(0, drag.startTick + deltaTicks), gridUnit, ppq)
+      const preview = { noteId: drag.noteId, tick: nextTick }
+      dragPreviewRef.current = preview
+      setDragPreview(preview)
+    }
+    function handleMouseUp() {
+      const drag = dragStateRef.current
+      const preview = dragPreviewRef.current
+      dragStateRef.current = null
+      dragPreviewRef.current = null
+      setDragPreview(null)
+      setIsDragging(false)
+      if (drag && preview && preview.tick !== drag.startTick) {
+        commit({
+          ...state,
+          notes: state.notes.map((n) =>
+            n._editorId === drag.noteId ? { ...n, tick: preview.tick } : n,
+          ),
+        })
+      }
+    }
+    window.addEventListener('mousemove', handleMouseMove)
+    window.addEventListener('mouseup', handleMouseUp)
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove)
+      window.removeEventListener('mouseup', handleMouseUp)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isDragging])
 
   const selectedNote =
     selectedIds.size === 1 ? (state.notes.find((n) => selectedIds.has(n._editorId)) ?? null) : null
@@ -823,7 +894,13 @@ export function EditorScreen({
     const nextTick = snapTick(Math.max(0, selectedNote.tick + deltaTicks), gridUnit, ppq)
     const rowIdx = editorRowIndexForPiece(selectedNote.piece)
     const nextRowIdx = Math.min(EDITOR_ROWS.length - 1, Math.max(0, rowIdx + deltaRows))
-    updateSelectedNote({ tick: nextTick, piece: EDITOR_ROWS[nextRowIdx].piece })
+    // 지금 행 그대로 머물면(deltaRows===0, 가로 이동만) 피스는 안 바뀐다 —
+    // HH 행이 닫힘/열림 둘을 공유하므로 그대로 두지 않으면 가로로만 옮겨도
+    // 매번 "기본값"(닫힘)으로 되돌아가 버린다. 실제로 다른 행으로 넘어갈
+    // 때만 그 행의 기본 피스를 쓴다.
+    const nextPiece =
+      nextRowIdx === rowIdx ? selectedNote.piece : EDITOR_ROWS[nextRowIdx].pieces[0]
+    updateSelectedNote({ tick: nextTick, piece: nextPiece })
   }
 
   function setSelectedVelocityTier(tier: VelocityTier) {
@@ -1152,6 +1229,27 @@ export function EditorScreen({
           <button onClick={() => setSelectedVelocityTier('soft')}>약</button>
           <button onClick={() => setSelectedVelocityTier('mid')}>중</button>
           <button onClick={() => setSelectedVelocityTier('strong')}>강</button>
+          {/* 2026-10-29(의뢰인 요청) — HH 닫힘/열림을 한 행으로 합치면서(grid.ts
+           * 참고) 행만으로는 더 이상 구분이 안 되니, 선택된 노트가 HH일 때
+           * 여기서 직접 전환할 수 있게 둔다. */}
+          {(selectedNote.piece === 'hihat_closed' || selectedNote.piece === 'hihat_open') && (
+            <>
+              <button
+                onClick={() => updateSelectedNote({ piece: 'hihat_closed' })}
+                aria-pressed={selectedNote.piece === 'hihat_closed'}
+                disabled={selectedNote.piece === 'hihat_closed'}
+              >
+                닫힘
+              </button>
+              <button
+                onClick={() => updateSelectedNote({ piece: 'hihat_open' })}
+                aria-pressed={selectedNote.piece === 'hihat_open'}
+                disabled={selectedNote.piece === 'hihat_open'}
+              >
+                열림
+              </button>
+            </>
+          )}
           <button onClick={() => setSelectedHand('R')}>R</button>
           <button onClick={() => setSelectedHand('L')}>L</button>
           <button onClick={() => setSelectedHand('RF')}>RF</button>
@@ -1186,9 +1284,9 @@ export function EditorScreen({
       >
         {EDITOR_ROWS.map((row) => (
           <div
-            key={row.piece}
-            data-testid={`editor-row-${row.piece}`}
-            onClick={(e) => handleRowClick(e, row.piece)}
+            key={row.label}
+            data-testid={`editor-row-${row.pieces[0]}`}
+            onClick={(e) => handleRowClick(e, row.pieces)}
             style={{
               position: 'relative',
               height: ROW_HEIGHT,
@@ -1218,25 +1316,39 @@ export function EditorScreen({
               {row.label}
             </span>
             {state.notes
-              .filter((n) => n.piece === row.piece)
+              .filter((n) => row.pieces.includes(n.piece))
               .map((note) => {
                 const isSelected = selectedIds.has(note._editorId)
+                // 2026-10-29(의뢰인 요청) — HH 닫힘/열림이 이제 한 행을
+                // 공유하므로(grid.ts 참고), PracticeCanvas.tsx가 같은 레인
+                // 안에서 모양(채움/고리)으로 구분하는 것과 같은 원리로 열림은
+                // 속을 비운 고리로 그려 닫힘과 구분한다.
+                const isHihatOpen = note.piece === 'hihat_open'
+                const pieceColor = readPieceColor(note.piece)
+                const isBeingDragged = dragPreview?.noteId === note._editorId
+                const displayTick = isBeingDragged ? dragPreview.tick : note.tick
                 return (
                   <button
                     key={note._editorId}
                     aria-label={`${row.label} 노트, 틱 ${note.tick}${note.hand ? ` ${HAND_LABEL[note.hand]}${note.handSource === 'user' ? '(지정)' : '(추천)'}` : ''}${isSelected ? ' (선택됨)' : ''}`}
                     onClick={(e) => handleNoteClick(e, note._editorId)}
+                    onMouseDown={(e) => handleNoteMouseDown(e, note)}
                     style={{
                       position: 'absolute',
-                      left: tickToPx(note.tick) - NOTE_SIZE / 2,
+                      left: tickToPx(displayTick) - NOTE_SIZE / 2,
                       top: (ROW_HEIGHT - NOTE_SIZE) / 2,
                       width: NOTE_SIZE,
                       height: NOTE_SIZE,
                       borderRadius: '50%',
-                      border: isSelected ? '2px solid var(--warning)' : '1px solid var(--border)',
-                      background: readPieceColor(note.piece),
+                      border: isSelected
+                        ? '2px solid var(--warning)'
+                        : isHihatOpen
+                          ? `2px solid ${pieceColor}`
+                          : '1px solid var(--border)',
+                      background: isHihatOpen ? 'transparent' : pieceColor,
                       padding: 0,
-                      cursor: 'pointer',
+                      cursor: isBeingDragged ? 'grabbing' : 'grab',
+                      opacity: isBeingDragged ? 0.7 : 1,
                     }}
                   >
                     {note.hand && (
