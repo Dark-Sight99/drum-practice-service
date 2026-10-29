@@ -95,10 +95,29 @@ App.tsx 내부 상태로만 화면을 전환하는 구조(work/T2-5/plan.md §�
   같은 패턴이라 별도 이슈 없음.
 
 ## Codex 모드A 검수
-(진행 예정)
+
+**1차 — REQUEST_CHANGES** (job `task-mvsxf5rb-bpqf48`)
+- C-001(권장): ⑤⑥ 배너가 동적으로 나타나는데 `aria-live`/`role="alert"`가
+  없어 스크린 리더 사용자가 실패·재시도 버튼을 못 들을 수 있음 → 두
+  배너 `<div>`에 `role="alert"` 추가.
+- C-002(권장): `client.test.ts`의 404 테스트가 같은 `Response` 인스턴스로
+  `apiFetch()`를 두 번 호출 — 첫 호출이 이미 본문 스트림을 소비해 두
+  번째는 "JSON 파싱 실패" 경로만 우연히 재확인(의도 불명확) → 한 번만
+  호출해 캡처한 에러 하나로 `instanceof`·`message` 둘 다 단언하도록 수정.
+- 긍정 확인 사항(수정 불필요, 그대로 승인): 502 JSON detail 우선순위
+  정상(상태 코드 분기보다 JSON 파싱 성공이 먼저), 오디오 풀 재시도
+  토큰의 cleanup+cancelled 가드 정상, handlePlay() 호출부 어디도 반환
+  Promise를 따로 처리하지 않음(그래서 기존 throw가 진짜 문제였음) 확인,
+  ErrorBoundary 재시도에 key 기반 remount 없이도 결함 없음, 배너
+  flex 레이아웃 구체적 깨짐 없음.
+
+**2차(최종) — APPROVE** (job `task-mvsxhgz8-1icif4`)
+두 수정 모두 확인, 전체 diff 재검토에서 추가 문제 없음. "확인하지 못한 것"
+(Codex 명시): 모드A 지침대로 테스트 직접 실행·qa-evidence 확인은 안 함 —
+위 "테스트" 섹션의 282/282 통과 결과로 보완됨.
 
 ## 남은 작업
-- Codex 모드A 검수 → APPROVE 후 `main` 병합.
+- 없음. `main` 병합 완료.
 - 의뢰인이 실제 느린/끊기는 네트워크에서 재시도 버튼 체감 확인 필요
   (로컬 환경에선 실패 자체를 인위적으로 유도해야 재현 가능 — 이번엔
   코드 리뷰와 격리 CSS 미리보기로 검증, 실제 실패 상황 재현은 못 함).
