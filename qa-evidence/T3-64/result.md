@@ -86,11 +86,35 @@ Transport가 올바른 위치에 있는데도 `handleEditClick()`이 "믿을 수
 높다고 보지만(재생 없이 오래 멈춰 있다가 편집으로 넘어가는 경로도 결국
 "재생을 안 누른" 경로와 같음), 확정은 못 해 "남은 작업"에 남긴다.
 
+## Codex 모드A 검수(읽기 전용)
+- 대상: `task/T3-64-hh-merge-note-drag-position-fix` vs `main`.
+- **1차 — REQUEST_CHANGES(필수 1건, High)**: mousedown이 노트에서
+  시작했는데 드래그로 커서가 옮겨가 mouseup이 노트 밖(행 배경)에서
+  끝나면, 브라우저는 그 뒤에 click을 "mousedown·mouseup 타깃의 가장
+  가까운 공통 조상"(노트의 부모인 행 자체!)에서 합성한다(UI Events
+  스펙) — 그러면 행의 onClick(handleRowClick)이 그 자리에 **새 노트를
+  또 만들어버린다**. 드래그 중엔 노트가 스냅 단위(24px)로 점프하며
+  커서를 따라가므로, 커서가 아직 다음 스냅 지점으로 안 넘어간 노트
+  바깥(빈 행 배경)에 있을 때 mouseup하면 실제로 재현 가능.
+  **반영**: `justDraggedRef` 추가 — 드래그가 있었으면(실제 틱 변경
+  여부와 무관) `true`로 남기고, `handleRowClick()`이 그 다음 호출에서
+  한 번 소비하면 바로 꺼진다. click이 전혀 안 오는 경로까지 대비해
+  `setTimeout(..., 0)`으로도 한 번 더 안전하게 끈다(click은 mouseup과
+  같은 틱에 동기적으로 합성되므로 이 타임아웃보다 항상 먼저 처리됨).
+  회귀 테스트 추가(아래 "테스트" 참고 — mousedown·mouseup 뒤 행에 직접
+  click을 흉내내 새 노트가 안 생기는지 확인, 수정 전엔 실패했을 것).
+  확인된 사항(그 외): 행 분할·테스트ID·가로 이동 시 피스 보존·핸드오프
+  위치 가드 모두 다른 지적 없음.
+- `npx tsc -b`·`npx oxlint`(기존 경고 4건만)·`npx vitest run`(307/307)
+  재확인.
+- **2차 — 아래 결과 반영 예정.**
+
 ## 테스트
 - `app/web`: `npx tsc -b` 통과(에러 0). `npx oxlint` 통과(기존 경고 4건만).
-  `npx vitest run` — **306/306 통과**(신규 6개: HH 행 통합·기본 피스·가로
+  `npx vitest run` — **307/307 통과**(신규 7개: HH 행 통합·기본 피스·가로
   이동 시 피스 보존·그 외 `grid.ts`의 EDITOR_ROWS 커버리지 재작성 2건 +
-  드래그 이동 커밋/무시 각 1건). `PracticeCanvas.tsx`의 핸들러 로직은 이
+  드래그 이동 커밋/무시 각 1건 + Codex 1차 지적 회귀 테스트 1건).
+  `PracticeCanvas.tsx`의 핸들러 로직은 이
   프로젝트 전체에서 처음부터 단위 테스트가 없음(Canvas 렌더링) — 3번
   수정은 코드 리뷰(Codex)·수동 QA로만 검증 가능.
 

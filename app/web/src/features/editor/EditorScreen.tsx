@@ -208,6 +208,13 @@ export function EditorScreen({
     null,
   )
   const dragPreviewRef = useRef<{ noteId: number; tick: number } | null>(null)
+  // Codex 모드A 지적(필수, 반영) — mousedown이 노트에서 시작했는데 mouseup이
+  // (드래그로 옮겨서) 노트 밖 — 즉 행 배경 — 에서 끝나면, 브라우저가 그 뒤에
+  // 합성하는 click 이벤트는 mousedown·mouseup 타깃의 가장 가까운 공통 조상
+  // (노트의 부모인 행 자체!)에서 발생한다(UI Events 스펙) — 그러면 행의
+  // onClick(handleRowClick)이 그 자리에 새 노트를 또 만들어버린다. 드래그가
+  // 있었으면 그 뒤에 올 수 있는 단 한 번의 click만 소비해 무시한다.
+  const justDraggedRef = useRef(false)
 
   const state = history.present
   const { meta, ppq } = state
@@ -755,6 +762,12 @@ export function EditorScreen({
   }, [])
 
   function handleRowClick(e: React.MouseEvent<HTMLDivElement>, pieces: readonly DrumPiece[]) {
+    if (justDraggedRef.current) {
+      // 방금 끝난 드래그가 노트 밖에서 mouseup해 합성된 click — 위
+      // justDraggedRef 코멘트 참고. 새 노트를 만들지 않고 소비만 한다.
+      justDraggedRef.current = false
+      return
+    }
     const rect = e.currentTarget.getBoundingClientRect()
     const relativeX = e.clientX - rect.left + e.currentTarget.scrollLeft
     if (relativeX < ROW_LABEL_WIDTH) return // 고정 레이블 거터 클릭은 무시
@@ -832,6 +845,17 @@ export function EditorScreen({
             n._editorId === drag.noteId ? { ...n, tick: preview.tick } : n,
           ),
         })
+      }
+      if (drag) {
+        // 위 justDraggedRef 코멘트 참고 — 뒤이어 올 수 있는 click 한 번만
+        // 소비하면 되므로 handleRowClick이 먼저 읽으면 바로 꺼진다. click이
+        // 전혀 안 오는 경로(그리드 밖에서 mouseup 등)까지 대비해 다음
+        // 매크로태스크에서 한 번 더 안전하게 꺼준다(click은 mouseup과 같은
+        // 틱에 동기적으로 합성되므로 이 타임아웃보다 항상 먼저 처리된다).
+        justDraggedRef.current = true
+        setTimeout(() => {
+          justDraggedRef.current = false
+        }, 0)
       }
     }
     window.addEventListener('mousemove', handleMouseMove)

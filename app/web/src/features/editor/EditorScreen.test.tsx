@@ -547,6 +547,24 @@ describe('EditorScreen', () => {
     expect(screen.getByRole('button', { name: '저장' })).not.toBeDisabled()
   })
 
+  it('does not create a spurious extra note when a drag release is followed by a click on the row (Codex 모드A 지적 — mousedown·mouseup 타깃이 다르면 click은 그 공통 조상인 행에서 발생)', () => {
+    render(
+      <EditorScreen song={song} initialScore={makeScore()} onSaved={() => {}} onCancel={() => {}} />,
+    )
+    const kickRow = screen.getByTestId('editor-row-kick')
+    const noteButton = kickRow.querySelectorAll('button')[0]
+
+    fireEvent.mouseDown(noteButton, { clientX: 100 })
+    fireEvent.mouseMove(window, { clientX: 124 })
+    fireEvent.mouseUp(window, { clientX: 124 })
+    // 실제 브라우저에서는 mousedown(노트)·mouseup(행 배경)의 공통 조상인
+    // 행에서 click이 합성돼 handleRowClick이 불릴 수 있다 — jsdom은 이걸
+    // 자동으로 안 해주므로 직접 흉내낸다.
+    fireEvent.click(kickRow, { clientX: 124 })
+
+    expect(kickRow.querySelectorAll('button')).toHaveLength(1) // 새 노트가 안 생겨야 함
+  })
+
   it('does not commit a drag that snaps back to the original tick (no-op move)', () => {
     render(
       <EditorScreen song={song} initialScore={makeScore()} onSaved={() => {}} onCancel={() => {}} />,
