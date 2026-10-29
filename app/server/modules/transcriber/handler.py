@@ -100,6 +100,15 @@ def transcribe_handler(job: Job) -> None:
             # 확정된 뒤에만 교체한다. 재채보든 최초 채보든 동일하게 보호됨.
             staging_rel_path = write_song_file(song.id, STAGING_FILENAME, content)
 
+            # 2026-10-29(의뢰인 요청) — 라이브러리 목록이 "BPM 미상"으로만
+            # 나온다는 지적 — 위에서 이미 계산한 `estimate_tempo()` 결과(bpm)가
+            # `DrumScore.meta.bpm`에는 반영돼 연습 화면은 정확한데, 그 값을
+            # `Song.original_bpm`(라이브러리 목록이 읽는 별도 컬럼, 지금까지
+            # 디지털 악보 업로드 경로에서만 채워지던 필드 — api/songs.py 참고)
+            # 에는 한 번도 복사한 적이 없어 음원 업로드 경로(현재 사실상 유일한
+            # 주 경로)의 모든 곡이 늘 null로 남아있었던 누락.
+            song.original_bpm = bpm
+
             existing_raw = _find_raw_asset(db, song.id)
             if existing_raw is None:
                 db.add(

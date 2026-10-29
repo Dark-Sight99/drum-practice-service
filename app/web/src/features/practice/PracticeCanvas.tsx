@@ -1543,6 +1543,25 @@ export function PracticeCanvas({
           disabled={isPlaying || isPaused}
           style={{ width: 56 }}
         />
+        {/* 2026-10-29(의뢰인 요청) — "BPM을 임의로 조절하다가 원본이 몇이었는지
+         * 기억이 안 나면 돌아갈 방법이 없다" — 오디오 지연 보정 재설정
+         * 버튼과 같은 패턴(.settings-trigger + RotateCcw). 기본값은
+         * `score.meta.bpm`(채보 당시 원곡 BPM — 위 min/maxBpm 계산에 쓰는
+         * 바로 그 값) — 0 같은 고정값이 아니라 "이 곡의 원래 BPM"이라 곡마다
+         * 다름. */}
+        <button
+          type="button"
+          className="settings-trigger"
+          onClick={() => {
+            setPlaybackBpm(score.meta.bpm)
+            setIsEditingBpm(false)
+          }}
+          disabled={isPlaying || isPaused}
+          aria-label={`원곡 BPM(${score.meta.bpm})으로 재설정`}
+          title={`원곡 BPM(${score.meta.bpm})으로 재설정`}
+        >
+          <RotateCcw size={14} aria-hidden="true" />
+        </button>
       </label>
 
       {/* 2026-10-28(의뢰인 요청) — 오디오 지연 보정: 사용자가 자기 출력 장치의

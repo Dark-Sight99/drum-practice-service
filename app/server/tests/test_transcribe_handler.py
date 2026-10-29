@@ -129,6 +129,9 @@ def test_transcribe_handler_passes_estimated_tempo_to_midi_to_drumscore(db, monk
     assert len(estimate_tempo_calls) == 1
     assert estimate_tempo_calls[0].name == "stem_drums.wav"
     assert midi_to_drumscore_bpm_calls == [FIXED_BPM]
+    # 2026-10-29(의뢰인 요청) — 라이브러리 목록이 읽는 Song.original_bpm도
+    # 같은 추정값으로 채워져야 "BPM 미상"이 안 뜬다(T3-52).
+    assert song.original_bpm == FIXED_BPM
 
 
 def test_transcribe_handler_re_run_does_not_duplicate_raw_asset(db, monkeypatch) -> None:
