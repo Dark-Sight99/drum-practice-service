@@ -54,6 +54,7 @@ import type { DrumPiece, DrumScore, Hand } from '../../score/types'
 import { createLaneRenderer, type LaneRenderer } from '../../render/laneRenderer'
 import { KitIllustration } from '../../render/KitIllustration'
 import { Drawer } from '../../components/Drawer'
+import { Spinner } from '../../components/Spinner'
 
 // 연습 화면의 레인+킷 렌더러 + BPM 변경·A-B 루프(T2-4, REQ-04) 컨트롤을 실제로
 // 돌려보는 데모 컴포넌트. 라이브러리 연동(T2-5)은 범위 밖(work/T2-4/plan.md §범위).
@@ -2221,12 +2222,23 @@ export function PracticeCanvas({
                   onClick={handlePlay}
                   disabled={isStarting || audioTracksLoading}
                 >
-                  <Play
-                    size={22}
-                    aria-hidden="true"
-                    fill="currentColor"
-                    style={{ marginLeft: 2 }}
-                  />
+                  {/* 2026-10-29(의뢰인 요청) — "다운로드 다 완료될 때까지
+                   * 스켈레톤 로딩 넣어서 경험에 방해 없게" — 재생을 막아두는
+                   * 건 그대로 유지(끊김 재현 이력이 있어 의도적으로 막아둔
+                   * 보호장치, 의뢰인 확인됨)하되, 그냥 흐려진 ▶ 아이콘 대신
+                   * "지금 실제로 뭔가 진행되고 있다"는 걸 분명히 보여주는
+                   * 스피너로 — 업로드 화면의 "노트를 생성하는 중…"과 같은
+                   * 컴포넌트(components/Spinner.tsx) 재사용. */}
+                  {audioTracksLoading ? (
+                    <Spinner size={22} />
+                  ) : (
+                    <Play
+                      size={22}
+                      aria-hidden="true"
+                      fill="currentColor"
+                      style={{ marginLeft: 2 }}
+                    />
+                  )}
                 </button>
               )}
               <button
