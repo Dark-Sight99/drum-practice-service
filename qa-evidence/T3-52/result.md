@@ -57,7 +57,22 @@ bpm을 임의로 조절하잖아. 근데 원본의 bpm이 몇인지 기억이 �
   같은 이유로 클릭 테스트는 못 함 — 코드가 기존에 이미 검증된 지연보정
   재설정 버튼과 완전히 같은 패턴이라 동작 위험은 낮다고 판단.
 
+## Codex 모드A 검수
+1차 `task-mvsvcsq9-c8q7cm` — **REQUEST_CHANGES**(P2): `song.original_bpm =
+bpm`을 `song.status = COMPLETED`와 같은 커밋(`staging_path.replace()`
+**이전**)에 묶어뒀던 게 문제 — 그 사이 파일 승격(`replace()`)이
+실패하면(디스크 꽉 참 등) except 블록이 Song을 FAILED로 되돌려도 이미
+커밋된 `original_bpm`은 그대로 남아 "라이브러리 BPM은 새 값인데 실제
+DrumScore 파일은 승격 안 된 예전 상태"인 불일치가 생길 수 있었음.
+**반영**: `song.original_bpm = bpm` 대입과 커밋을 `staging_path.replace()`
+**성공 이후**로 이동(별도 커밋 추가) — 이제 "파일 승격 성공 + BPM 갱신"이
+둘 다 성공하거나 둘 다 이전 상태로 남는다. 그 외 지적(디지털 악보
+업로드 경로가 재채보로 이어질 수 있는 실제 경로는 없음, 테스트 단언이
+`db.refresh` 이후라 실제 DB 상태 검증, BPM 재설정 버튼의 스테일 클로저
+없음)은 전부 "문제 없음"으로 확인됨. 수정 후 백엔드 테스트 207개 전부
+재통과, ruff 0건.
+
 ## 남은 작업
-- Codex 모드A 검수 요청 예정 → APPROVE 후 `main` 병합.
+- Codex 모드A 재검수 요청 예정 → APPROVE 후 `main` 병합.
 - 의뢰인이 직접 로그인해 라이브러리 BPM 표시·BPM 재설정 아이콘을 눈으로
   확인 필요.
