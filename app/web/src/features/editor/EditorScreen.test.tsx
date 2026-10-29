@@ -730,33 +730,6 @@ describe('EditorScreen', () => {
     expect(onSaved).not.toHaveBeenCalled()
   })
 
-  it('assigns a hand to the selected note via the R/L/RF/LF buttons (REQ-12)', () => {
-    render(
-      <EditorScreen song={song} initialScore={makeScore()} onSaved={() => {}} onCancel={() => {}} />,
-    )
-    const kickRow = screen.getByTestId('editor-row-kick')
-    fireEvent.click(kickRow.querySelectorAll('button')[0])
-    expect(screen.getByText(/손: 미지정/)).toBeInTheDocument()
-
-    fireEvent.click(screen.getByText('RF'))
-
-    expect(screen.getByText(/손: 오른발\(지정\)/)).toBeInTheDocument()
-  })
-
-  it('clears the hand with the 손 지우기 button', () => {
-    render(
-      <EditorScreen song={song} initialScore={makeScore()} onSaved={() => {}} onCancel={() => {}} />,
-    )
-    const kickRow = screen.getByTestId('editor-row-kick')
-    fireEvent.click(kickRow.querySelectorAll('button')[0])
-    fireEvent.click(screen.getByText('RF'))
-    expect(screen.getByText(/손: 오른발/)).toBeInTheDocument()
-
-    fireEvent.click(screen.getByText('손 지우기'))
-
-    expect(screen.getByText(/손: 미지정/)).toBeInTheDocument()
-  })
-
   it('does not show the multi-select batch bar for a plain (non-modifier) click — selection replaces, not toggles', () => {
     render(
       <EditorScreen

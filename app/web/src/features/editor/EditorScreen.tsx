@@ -1113,10 +1113,6 @@ export function EditorScreen({
     setSelectedIds(new Set())
   }
 
-  function setSelectedHand(hand: Hand) {
-    updateSelectedNote({ hand, handSource: hand === null ? undefined : 'user' })
-  }
-
   function applyAlternateHands(batchStartHand: 'R' | 'L') {
     if (selectedMulti.length < 2) return
     const updated = alternateHandsByTick(selectedMulti, batchStartHand)
@@ -1633,21 +1629,9 @@ export function EditorScreen({
                 </button>
               </>
             )}
-            <button disabled={isPlaying} onClick={() => setSelectedHand('R')}>
-              R
-            </button>
-            <button disabled={isPlaying} onClick={() => setSelectedHand('L')}>
-              L
-            </button>
-            <button disabled={isPlaying} onClick={() => setSelectedHand('RF')}>
-              RF
-            </button>
-            <button disabled={isPlaying} onClick={() => setSelectedHand('LF')}>
-              LF
-            </button>
-            <button disabled={isPlaying} onClick={() => setSelectedHand(null)}>
-              손 지우기
-            </button>
+            {/* 2026-10-30(T3-81, 의뢰인 요청) — 손/발 지정 버튼(R/L/RF/LF/
+             * 손 지우기) 제거. "손: {표시}" 텍스트(자동 추천값 포함)는
+             * 그대로 두고 수동 변경 버튼만 뺀다. */}
             <button disabled={isPlaying} onClick={deleteSelectedNote}>
               삭제
             </button>
