@@ -319,6 +319,13 @@ export function EditorScreen({
   // 슬라이더의 표시값·실제 재생 게인을 아래로 바꿔 보여주는 세션 전용
   // 오버레이. 드럼원곡·가상드럼 둘 중 하나라도 사용자가 직접 슬라이더를
   // 움직이면 해제(그 뒤로는 평소처럼 둘 다 독립적으로 동작·저장됨).
+  // 2026-10-29 재지적("신스드럼은 소리0으로 고정해달라고 했는데 반영이
+  // 안된거 같다") — 처음엔 "원곡 드럼이 이미 0일 때만" 켜도록 조건을
+  // 좁혔었는데, 테스트를 거치며 계정에 저장된 원곡 드럼 값이 정확히 0이
+  // 아닌 채로 남아있을 수 있어(예: 이전 세션에서 슬라이더를 만져 저장된
+  // 경우) 그 조건 때문에 전혀 안 켜지는 일이 있었다 — 의뢰인 요청은
+  // 처음부터 조건 없는 규칙이었다("가상드럼을 켜고있었더라도"가 바로 그
+  // 뜻) — 원곡 드럼 트랙 자체만 있으면(hasStemDrumsTrack) 무조건 켠다.
   const [drumOverrideActive, setDrumOverrideActive] = useState(false)
   const [drumOverrideVolume, setDrumOverrideVolume] = useState(0)
 
@@ -383,20 +390,15 @@ export function EditorScreen({
         const merged = defaultMixerState()
         for (const key of CHANNEL_KEYS) if (volumes[key]) merged[key] = volumes[key]
         setMixerStateRaw(merged)
-        // 원곡 드럼이 꺼져있고(0) 신스 드럼만 들리고 있었다면 — 연습 화면의
-        // "원곡 드럼 켜기/끄기" 프리셋(toggleDrumlessPreset)이 만드는 바로
-        // 그 상태 — 신스 드럼 음량을 "드럼원곡" 쪽으로 빌려와 보여준다.
-        // 둘 다 조절돼 있거나 원곡 드럼이 이미 뭔가로 설정돼 있으면(의도적
-        // 조합일 수 있어) 그대로 둔다. 이 곡에 실제로 쓸 수 있는 원곡 드럼
-        // 트랙이 없으면(이 곡은 음원 분리가 안 됐거나 드럼만 빠져있는 경우)
-        // 절대 켜지 않는다 — 대체할 소리가 없는데 신스만 무음 처리하면
-        // 편집 중 드럼이 완전히 안 들리는 회귀가 생긴다.
+        // "가상드럼을 켜고있었더라도" 무조건 켠다 — 연습 화면에서 원곡 드럼이
+        // 이미 어떤 값으로 설정돼 있었든(이전 세션에서 슬라이더를 만져
+        // 저장된 값 등) 상관없이, 편집 화면에서는 항상 신스 드럼의 지금
+        // 음량을 "드럼원곡" 쪽으로 빌려와 그 소리로 대체한다. 이 곡에 실제로
+        // 쓸 수 있는 원곡 드럼 트랙이 없으면(이 곡은 음원 분리가 안 됐거나
+        // 드럼만 빠져있는 경우)만 켜지 않는다 — 대체할 소리가 없는데 신스만
+        // 무음 처리하면 편집 중 드럼이 완전히 안 들리는 회귀가 생긴다.
         const hasStemDrumsTrack = canUseAudioTracks && stemKinds.includes('stem_drums')
-        if (
-          hasStemDrumsTrack &&
-          effectiveGain(merged.stem_drums) === 0 &&
-          effectiveGain(merged.synth_drums) > 0
-        ) {
+        if (hasStemDrumsTrack) {
           setDrumOverrideActive(true)
           setDrumOverrideVolume(merged.synth_drums.volume)
         }

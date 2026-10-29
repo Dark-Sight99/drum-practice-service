@@ -1193,6 +1193,16 @@ export function PracticeCanvas({
   function handlePause() {
     if (!playbackRef.current) return
     playbackRef.current.handle.pause()
+    // 2026-10-29(의뢰인 지적 — "일시정지해있는데 음원소리랑 원본드럼은
+    // 일시정지가 안된다") — handle.pause()는 playDrumScore()에 넘긴 tracks를
+    // 내부적으로만 pause()하는데, 편집 화면에서 "연습 화면으로" 넘어와 시작한
+    // 세션은(위 pendingInitialPositionTicksRef 소비 블록 참고) 실측으로 확인된
+    // Tone.js 스케줄 발화 문제를 피하려고 playDrumScore()에 tracks를 일부러
+    // 안 넘긴다 — 그 경로에서는 handle이 tracks를 전혀 모른다. 여기서 직접
+    // pause()를 호출해야 두 경로 모두 확실히 멈춘다(보통 경로에선 handle이
+    // 이미 멈춘 트랙을 또 멈추는 것뿐이라 안전 — HTMLMediaElement.pause()는
+    // 중복 호출해도 무해).
+    playbackRef.current.tracks?.pause()
     playbackRef.current.metronome.stopRinging()
     pauseAutoStopTimer()
     isPlayingRef.current = false
@@ -1221,6 +1231,9 @@ export function PracticeCanvas({
         return
       }
       session.handle.resume()
+      // 위 handlePause()와 같은 이유 — handle이 tracks를 모르는 경로(편집
+      // 화면에서 넘어온 세션)에서도 확실히 재개되도록 직접 호출.
+      session.tracks?.resume()
       // 기존 자동 정지 타이머와 같은 handle 아이덴티티 가드 재사용(새 세대
       // 토큰 없이 — work/T3-6/plan.md §4).
       resumeAutoStopTimer(() => {
