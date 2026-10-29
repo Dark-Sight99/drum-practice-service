@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import * as Tone from 'tone'
 import { FastForward, Pause, Play, Redo2, Rewind, RotateCcw, Undo2 } from 'lucide-react'
 import { Spinner } from '../../components/Spinner'
+import { Modal } from '../../components/Modal'
 import type { DrumNote, DrumPiece, DrumScore, Hand } from '../../score/types'
 import { alternateHandsByTick, validateDrumScore } from '../../score'
 import { saveSongDrumScore, songAudioUrl, type SongSummary } from '../../api/songs'
@@ -933,11 +934,26 @@ export function EditorScreen({
 
   function updateSelectedNote(patch: Partial<DrumNote>) {
     if (selectedNote === null) return
+    const updated = { ...selectedNote, ...patch }
+    // 2026-10-29(의뢰인 요청 — "실제 바뀐건 없는데 저장버튼은 활성화가
+    // 되어있더라") — 이 함수가 셈여림(약/중/강)·손(R/L/RF/LF)·화살표 키
+    // 이동(moveSelected)의 공통 경로다. 이미 선택된 값과 같은 셈여림
+    // 버튼을 다시 누르거나, 화살표 키로 더 못 가는 경계(틱 0 등)에서
+    // 계속 누르면 값은 그대로인데도 commit()이 "새로운" 객체를 만들어
+    // 밀어넣어 저장 버튼이 켜졌다 — 실제로 값이 하나라도 달라질 때만
+    // commit한다.
+    if (
+      updated.tick === selectedNote.tick &&
+      updated.piece === selectedNote.piece &&
+      updated.velocity === selectedNote.velocity &&
+      updated.hand === selectedNote.hand &&
+      updated.handSource === selectedNote.handSource
+    ) {
+      return
+    }
     commit({
       ...state,
-      notes: state.notes.map((n) =>
-        n._editorId === selectedNote._editorId ? { ...n, ...patch } : n,
-      ),
+      notes: state.notes.map((n) => (n._editorId === selectedNote._editorId ? updated : n)),
     })
   }
 
@@ -1015,24 +1031,60 @@ export function EditorScreen({
     }
   }
 
-  async function handleSave() {
+  // 2026-10-29(의뢰인 요청 — "저장버튼 누르지 않고 라이브러리나 연습화면으로
+  // 이동을 시도할 때 변경내용을 저장할 것인지 확인하는 모달이 나오면
+  // 좋겠다") — "나가기 확인" 모달의 저장 선택지도 이 함수를 그대로 써야
+  // 하는데, 기존엔 성공하면 곧장 onSaved()(→ 항상 라이브러리로 이동)를
+  // 불러 "연습 화면으로 나가려다 저장"한 경우에도 라이브러리로 잘못
+  // 보내게 된다. 저장 성공 여부만 boolean으로 돌려주고, 어디로 갈지는
+  // 호출한 쪽(툴바의 "저장" 버튼은 그대로 onSaved, 나가기 모달은 원래
+  // 가려던 곳)이 결정한다.
+  async function handleSave(): Promise<boolean> {
     const score = toDrumScore(state)
     const validation = validateDrumScore(score)
     if (!validation.valid) {
       setSaveError(`악보 데이터가 올바르지 않습니다: ${validation.errors.join(', ')}`)
-      return
+      return false
     }
     setSaveError(null)
     setIsSaving(true)
     try {
       await saveSongDrumScore(song.id, score)
       lastSavedStateRef.current = state
-      onSaved()
+      return true
     } catch (err) {
       setSaveError(err instanceof ApiError ? err.message : '저장에 실패했습니다')
+      return false
     } finally {
       setIsSaving(false)
     }
+  }
+
+  // 2026-10-29(의뢰인 요청) — 저장하지 않은 변경사항(isDirty)이 있는 채로
+  // "← 라이브러리"·"← 연습 화면"을 누르면 임의로 버리지 않고 먼저 묻는다.
+  // 변경이 없으면(흔한 경우) 기존처럼 바로 이동 — 모달이 매번 뜨면 오히려
+  // 방해가 된다.
+  type PendingNav = { kind: 'cancel' } | { kind: 'practice'; positionTicks: number }
+  const [pendingNav, setPendingNav] = useState<PendingNav | null>(null)
+
+  function navigateNow(nav: PendingNav) {
+    if (nav.kind === 'cancel') onCancel()
+    else onBackToPractice?.(nav.positionTicks)
+  }
+
+  function requestLeave(nav: PendingNav) {
+    if (isDirty) setPendingNav(nav)
+    else navigateNow(nav)
+  }
+
+  async function handleSaveThenLeave() {
+    const nav = pendingNav
+    const ok = await handleSave()
+    // 실패하면(검증 오류·서버 오류) 모달을 닫고 화면에 남는다 — 기존 "저장"
+    // 버튼과 같은 자리(하단)에 saveError가 그대로 보이고, isDirty도 그대로라
+    // 다시 저장을 시도하거나 "저장 안 함"으로 포기할 수 있다.
+    setPendingNav(null)
+    if (ok && nav) navigateNow(nav)
   }
 
   return (
@@ -1045,9 +1097,15 @@ export function EditorScreen({
           gap: 'var(--space-3)',
         }}
       >
-        <button onClick={onCancel}>← 라이브러리</button>
+        <button onClick={() => requestLeave({ kind: 'cancel' })}>← 라이브러리</button>
         {onBackToPractice && (
-          <button onClick={() => onBackToPractice(cursorTicksRef.current)}>← 연습 화면</button>
+          <button
+            onClick={() =>
+              requestLeave({ kind: 'practice', positionTicks: cursorTicksRef.current })
+            }
+          >
+            ← 연습 화면
+          </button>
         )}
         {/* 2026-10-29(의뢰인 요청) — "편집기에서 bpm을 건들 수 없었으면
          * 좋겠어... 라이브러리에 bpm은 우리가 업로드했을 때의 원본값이
@@ -1122,7 +1180,7 @@ export function EditorScreen({
           <Redo2 size={16} aria-hidden="true" />
         </button>
         <button
-          onClick={() => void handleSave()}
+          onClick={() => void handleSave().then((ok) => ok && onSaved())}
           disabled={isSaving || !isDirty}
           title={!isDirty && !isSaving ? '변경한 내용이 없습니다' : undefined}
         >
@@ -1366,6 +1424,39 @@ export function EditorScreen({
       )}
 
       {saveError && <p style={{ color: 'var(--danger)' }}>{saveError}</p>}
+
+      <Modal
+        open={pendingNav !== null}
+        onClose={() => setPendingNav(null)}
+        title="저장하지 않은 변경사항"
+      >
+        <p>편집한 내용을 저장하지 않았습니다. 저장할까요?</p>
+        <div
+          style={{
+            display: 'flex',
+            gap: 'var(--space-2)',
+            justifyContent: 'flex-end',
+            marginTop: 'var(--space-4)',
+          }}
+        >
+          <button onClick={() => setPendingNav(null)} disabled={isSaving}>
+            취소
+          </button>
+          <button
+            onClick={() => {
+              const nav = pendingNav
+              setPendingNav(null)
+              if (nav) navigateNow(nav)
+            }}
+            disabled={isSaving}
+          >
+            저장 안 함
+          </button>
+          <button onClick={() => void handleSaveThenLeave()} disabled={isSaving}>
+            {isSaving ? '저장 중…' : '저장'}
+          </button>
+        </div>
+      </Modal>
 
       <div
         ref={gridScrollRef}

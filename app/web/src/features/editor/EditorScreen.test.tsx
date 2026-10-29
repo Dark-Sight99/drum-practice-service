@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { EditorScreen } from './EditorScreen'
 import type { DrumScore } from '../../score/types'
@@ -312,6 +312,135 @@ describe('EditorScreen', () => {
     // undo가 저장 시점 상태를 정확히 복원함을 같이 확인.
     fireEvent.click(screen.getByRole('button', { name: '실행취소' }))
     expect(screen.getByRole('button', { name: '저장' })).toBeDisabled()
+  })
+
+  it('does not enable save when clicking a velocity/hand value that is already selected (2026-10-29 의뢰인 요청 — "실제 바뀐건 없는데 저장버튼은 활성화")', () => {
+    // makeTwoSnareScore()의 두 노트는 velocity 90 = 이미 "중" 티어.
+    render(
+      <EditorScreen
+        song={song}
+        initialScore={makeTwoSnareScore()}
+        onSaved={() => {}}
+        onCancel={() => {}}
+      />,
+    )
+    fireEvent.click(screen.getByRole('button', { name: /SN 노트, 틱 0/ }))
+    expect(screen.getByRole('button', { name: '저장' })).toBeDisabled()
+
+    // 이미 "중"인 노트에 "중"을 다시 눌러도 값은 그대로 — 저장 버튼이 켜지면
+    // 안 된다(예전엔 updateSelectedNote가 값이 같아도 매번 새 history
+    // 항목을 밀어넣어 켜졌었다).
+    fireEvent.click(screen.getByRole('button', { name: '중' }))
+    expect(screen.getByRole('button', { name: '저장' })).toBeDisabled()
+
+    // 실제로 다른 값으로 바꾸면 당연히 켜진다(대조군).
+    fireEvent.click(screen.getByRole('button', { name: '약' }))
+    expect(screen.getByRole('button', { name: '저장' })).not.toBeDisabled()
+  })
+
+  it('does not enable save when an arrow-key move is clamped at the grid boundary (no-op)', () => {
+    render(
+      <EditorScreen
+        song={song}
+        initialScore={makeTwoSnareScore()}
+        onSaved={() => {}}
+        onCancel={() => {}}
+      />,
+    )
+    // 첫 노트는 이미 틱 0 — 왼쪽 경계라 더 못 간다(Math.max(0, ...)로 제자리
+    // 클램프). 예전엔 moveSelected가 "제자리로 클램프된" 같은 틱이라도
+    // updateSelectedNote를 거쳐 매번 새 history 항목을 커밋했다.
+    fireEvent.click(screen.getByRole('button', { name: /SN 노트, 틱 0/ }))
+    const grid = screen.getByRole('application')
+    fireEvent.keyDown(grid, { key: 'ArrowLeft' })
+    expect(screen.getByRole('button', { name: '저장' })).toBeDisabled()
+  })
+
+  it('leaves immediately on "← 라이브러리"/"← 연습 화면" when there are no unsaved changes (no modal)', () => {
+    const onCancel = vi.fn()
+    render(
+      <EditorScreen song={song} initialScore={makeScore()} onSaved={() => {}} onCancel={onCancel} />,
+    )
+    fireEvent.click(screen.getByRole('button', { name: '← 라이브러리' }))
+    expect(onCancel).toHaveBeenCalled()
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  })
+
+  it('asks to save before leaving with unsaved changes, and "취소" stays on the screen (2026-10-29 의뢰인 요청)', () => {
+    const onCancel = vi.fn()
+    render(
+      <EditorScreen song={song} initialScore={makeScore()} onSaved={() => {}} onCancel={onCancel} />,
+    )
+    const snareRow = screen.getByTestId('editor-row-snare')
+    fireEvent.click(snareRow, { clientX: 100 })
+
+    fireEvent.click(screen.getByRole('button', { name: '← 라이브러리' }))
+    expect(onCancel).not.toHaveBeenCalled()
+    expect(screen.getByRole('dialog')).toBeInTheDocument()
+    expect(screen.getByText('편집한 내용을 저장하지 않았습니다. 저장할까요?')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: '취소' }))
+    expect(onCancel).not.toHaveBeenCalled()
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    // 편집 내용은 그대로 남아있다(버려지지 않음) — 저장 버튼 여전히 활성.
+    expect(screen.getByRole('button', { name: '저장' })).not.toBeDisabled()
+  })
+
+  it('"저장 안 함"은 편집을 버리고 원래 가려던 곳(연습 화면)으로 그대로 이동한다', () => {
+    const onBackToPractice = vi.fn()
+    render(
+      <EditorScreen
+        song={song}
+        initialScore={makeScore()}
+        onSaved={() => {}}
+        onCancel={() => {}}
+        initialPositionTicks={960}
+        onBackToPractice={onBackToPractice}
+      />,
+    )
+    const snareRow = screen.getByTestId('editor-row-snare')
+    fireEvent.click(snareRow, { clientX: 100 })
+
+    fireEvent.click(screen.getByRole('button', { name: '← 연습 화면' }))
+    expect(onBackToPractice).not.toHaveBeenCalled()
+
+    fireEvent.click(screen.getByRole('button', { name: '저장 안 함' }))
+    expect(onBackToPractice).toHaveBeenCalledWith(960)
+  })
+
+  it('모달의 "저장"은 실제로 저장한 뒤, 원래 가려던 곳(라이브러리가 아니라 연습 화면)으로 보낸다', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 204 }))
+    vi.stubGlobal('fetch', fetchMock)
+    const onSaved = vi.fn()
+    const onCancel = vi.fn()
+    const onBackToPractice = vi.fn()
+    render(
+      <EditorScreen
+        song={song}
+        initialScore={makeScore()}
+        onSaved={onSaved}
+        onCancel={onCancel}
+        initialPositionTicks={960}
+        onBackToPractice={onBackToPractice}
+      />,
+    )
+    const snareRow = screen.getByTestId('editor-row-snare')
+    fireEvent.click(snareRow, { clientX: 100 })
+
+    fireEvent.click(screen.getByRole('button', { name: '← 연습 화면' }))
+    // 모달 안의 "저장" 버튼 — 툴바의 "저장" 버튼과 이름이 같아 모달
+    // 범위(role=dialog) 안에서만 찾는다.
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: '저장' }))
+
+    await waitFor(() => expect(onBackToPractice).toHaveBeenCalledWith(960))
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/songs/7/drumscore',
+      expect.objectContaining({ method: 'PUT' }),
+    )
+    // "저장 성공 후 항상 라이브러리로" 가는 onSaved 경로는 안 거친다 —
+    // 원래 가려던 곳(연습 화면)으로 직접 가야 한다.
+    expect(onSaved).not.toHaveBeenCalled()
+    expect(onCancel).not.toHaveBeenCalled()
   })
 
   it('calls saveSongDrumScore with the edited score on save', async () => {
