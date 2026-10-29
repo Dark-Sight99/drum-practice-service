@@ -255,6 +255,28 @@ export function EditorScreen({
     return ROW_LABEL_WIDTH + (tick / unitTicks) * PX_PER_GRID_UNIT
   }
 
+  // 2026-10-29(의뢰인 요청 — "sn와 mt와 같은 위치에 노트를 찍고싶었는데
+  // 원하는 위치에 노트는 찍을 수 없었다... 드래그로 옮겨서 위치라도
+  // 맞추려 했지만 그럴 수 없었다") — 클릭·드래그의 스냅 계산 자체(위
+  // pxToSnappedTick/handleNoteMouseDown의 mousemove 처리)는 다시 확인해도
+  // 틀린 데가 없었다. 실제 원인은 **격자선이 화면에 전혀 안 그려져 있어서**
+  // (`EDITOR_ROWS.map()`이 만드는 각 행은 그냥 단색 배경일 뿐 세로선이
+  // 없음) — 사용자가 어디를 클릭해야 어느 틱에 스냅될지, 기존 노트와
+  // 같은 세로줄인지 눈으로 전혀 확인할 수 없었던 것(캡처 화면으로 직접
+  // 확인 — 점들만 떠 있고 세로 기준선이 아예 안 보임). 세로 격자선(지금
+  // "격자" 선택 단위마다 1개)과 마디 경계선(더 또렷하게)을 그려 추가한다.
+  const gridLineTicks = useMemo(() => {
+    const ticks: number[] = []
+    for (let t = 0; t <= totalTicks; t += unitTicks) ticks.push(t)
+    return ticks
+  }, [totalTicks, unitTicks])
+
+  const barLineTicks = useMemo(() => {
+    const ticks: number[] = []
+    for (let t = 0; t <= totalTicks; t += barTicks) ticks.push(t)
+    return ticks
+  }, [totalTicks, barTicks])
+
   function pxToSnappedTick(px: number): number {
     return Math.max(
       0,
@@ -1334,7 +1356,13 @@ export function EditorScreen({
                 fontSize: '0.8em',
                 whiteSpace: 'nowrap',
                 pointerEvents: 'none',
-                zIndex: 1,
+                // Codex 모드A 지적(권장, 반영) — 노트 버튼에 준 zIndex: 2
+                // (위 코멘트) 때문에, 틱 0(또는 근처) 노트는 절반이
+                // ROW_LABEL_WIDTH 안쪽까지 걸쳐지는데(디자인상 원래도 그랬음
+                // — tickToPx(0) - NOTE_SIZE/2가 음수) 라벨이 2보다 낮은
+                // zIndex면 그 노트가 라벨 글자를 가려버린다. 라벨을 항상
+                // 가장 위로.
+                zIndex: 3,
               }}
             >
               {row.label}
@@ -1373,6 +1401,10 @@ export function EditorScreen({
                       padding: 0,
                       cursor: isBeingDragged ? 'grabbing' : 'grab',
                       opacity: isBeingDragged ? 0.7 : 1,
+                      // 아래 격자선·재생 위치선이 DOM 순서상 모든 행보다
+                      // 뒤에 그려져 z-index 없이는 노트 위를 덮어버린다 —
+                      // 노트가 항상 위에 보이도록 명시적으로 올림.
+                      zIndex: 2,
                     }}
                   >
                     {note.hand && (
@@ -1396,6 +1428,43 @@ export function EditorScreen({
                 )
               })}
           </div>
+        ))}
+        {/* 2026-10-29(의뢰인 요청 — "원하는 위치에 노트를 찍을 수 없었다") —
+         * 세로 격자선. 각 행이 단색 배경뿐이라 클릭·드래그가 어디에 스냅될지
+         * 전혀 안 보였던 게 원인이었다(스냅 계산 자체는 문제없음) — 지금
+         * "격자" 단위마다 옅은 선, 마디 경계마다 더 또렷한 선을 그려 기존
+         * 노트와 같은 세로줄인지 눈으로 바로 비교할 수 있게 한다.
+         * pointerEvents:none이라 클릭은 그대로 아래 행에 전달된다. */}
+        {gridLineTicks.map((t) => (
+          <div
+            key={`grid-${t}`}
+            aria-hidden="true"
+            style={{
+              position: 'absolute',
+              top: 0,
+              bottom: 0,
+              left: tickToPx(t),
+              width: 1,
+              background: 'var(--border)',
+              opacity: 0.5,
+              pointerEvents: 'none',
+            }}
+          />
+        ))}
+        {barLineTicks.map((t) => (
+          <div
+            key={`bar-${t}`}
+            aria-hidden="true"
+            style={{
+              position: 'absolute',
+              top: 0,
+              bottom: 0,
+              left: tickToPx(t),
+              width: 1,
+              background: 'var(--text-muted)',
+              pointerEvents: 'none',
+            }}
+          />
         ))}
         {/* 2026-10-29(의뢰인 요청) — 재생 위치선. 그리드 콘텐츠와 같은 스크롤
          * 영역 안에 절대 위치시켜, 가로 스크롤 시 노트와 같이 움직인다.
