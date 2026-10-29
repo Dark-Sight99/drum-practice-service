@@ -277,11 +277,27 @@ export function EditorScreen({
     return ticks
   }, [totalTicks, barTicks])
 
+  // 2026-10-29(의뢰인 재지적, 스크린샷 첨부) — "원하는(빨간) 위치 대신 그
+  // 왼쪽 격자의 노트가 찍힌다. 드래그해도 다음 격자로 넘어가 버린다" —
+  // 실제 브라우저로 클릭 좌표별 결과 틱을 하나하나 찍어 확인한 결과,
+  // 계산 자체(반올림)는 틀리지 않았다 — 격자선에서 정확히 ±12px(한 칸의
+  // 절반)까지는 그 선으로, 넘어가면 다음 선으로 반올림되는 교과서적인
+  // "가장 가까운 선" 스냅이었다. 문제는 그게 사람이 기대하는 방식이
+  // 아니었다는 것 — 눈에 보이는 "칸" 안 아무 데나 클릭하면 그 칸으로
+  // 들어가길 기대하는데(칸의 오른쪽 절반을 클릭하면 반올림 때문에 다음
+  // 칸 선으로 넘어가 버림), 이건 대부분의 DAW/피아노롤 편집기가 쓰는
+  // "칸 기준"(바닥 함수) 스냅과 다르다. 그래서 반올림 대신 바닥 함수로
+  // 바꾼다 — 클릭(또는 드래그로 가리키는) 지점이 속한 칸의 왼쪽 선으로
+  // 항상 스냅. (snapTick() 자체는 화살표 키 이동(moveSelected, 이미
+  // 격자에 맞는 값끼리 더해 스냅은 사실상 항상 제자리 확인용)이 여전히
+  // 쓰고 grid.test.ts가 "가장 가까운 선" 동작을 직접 검증하므로 안
+  // 건드림 — 마우스 입력 전용으로 바닥 함수 버전을 따로 둔다.)
+  function floorSnapTick(rawTick: number): number {
+    return Math.max(0, Math.round(Math.floor(rawTick / unitTicks) * unitTicks))
+  }
+
   function pxToSnappedTick(px: number): number {
-    return Math.max(
-      0,
-      snapTick(Math.round(((px - ROW_LABEL_WIDTH) / PX_PER_GRID_UNIT) * unitTicks), gridUnit, ppq),
-    )
+    return floorSnapTick(((px - ROW_LABEL_WIDTH) / PX_PER_GRID_UNIT) * unitTicks)
   }
 
   // --- 재생(2026-10-29 의뢰인 요청) ---------------------------------------
@@ -848,7 +864,9 @@ export function EditorScreen({
       if (!drag) return
       const deltaPx = e.clientX - drag.startClientX
       const deltaTicks = (deltaPx / PX_PER_GRID_UNIT) * unitTicks
-      const nextTick = snapTick(Math.max(0, drag.startTick + deltaTicks), gridUnit, ppq)
+      // 위 pxToSnappedTick과 같은 이유(바닥 함수) — 클릭과 드래그가 서로
+      // 다른 스냅 규칙을 쓰면 더 헷갈리므로 반드시 같은 함수를 쓴다.
+      const nextTick = floorSnapTick(drag.startTick + deltaTicks)
       const preview = { noteId: drag.noteId, tick: nextTick }
       dragPreviewRef.current = preview
       setDragPreview(preview)
