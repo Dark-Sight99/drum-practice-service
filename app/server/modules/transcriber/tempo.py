@@ -29,6 +29,13 @@ DEFAULT_BPM = 120.0
 DEFAULT_START_BPM = 100.0
 
 
+MIN_RESULTANT_LENGTH = 0.5
+"""원형평균(아래 estimate_downbeat_offset_seconds)의 신뢰도 임계값. 0=완전히
+흩어짐, 1=모든 비트가 정확히 같은 위상. song id=9(Pretender) 표본 1곡
+기준 1차 추정치(work/T3-72/plan.md §2) — DEFAULT_START_BPM과 같은 성격의
+경험적 선택."""
+
+
 def estimate_tempo(audio_path, start_bpm: float = DEFAULT_START_BPM) -> float:
     """`audio_path`(드럼 스템 권장 — 리듬이 가장 또렷함)에서 템포(BPM)를
     추정한다. 실패하거나(디코딩 오류 등) 비정상 결과(0 이하·NaN·Inf)면
@@ -60,3 +67,61 @@ def estimate_tempo(audio_path, start_bpm: float = DEFAULT_START_BPM) -> float:
     if rounded_bpm <= 0:
         return DEFAULT_BPM
     return rounded_bpm
+
+
+def estimate_downbeat_offset_seconds(
+    audio_path, bpm: float, start_bpm: float = DEFAULT_START_BPM
+) -> float:
+    """`audio_path`(드럼 스템)에서 다운비트(진짜 1박) 위상을 추정한다.
+
+    T3-72(REQ-02, intent/07-open-questions.md Q-43) — 지금까지 틱 계산은
+    "오디오 파일 시작 = 1박"으로만 가정했는데, 실측(song id=9, Pretender)
+    결과 실제 다운비트가 평균 0.2789초(표준편차 0.0356초) 늦게 와서 전체
+    곡이 일정하게 밀려 보였다. `estimate_tempo()`가 이미 부르는
+    `librosa.beat.beat_track()`이 같이 돌려주는 비트 위치(지금까지는
+    버려지던 값)를 원형평균(circular mean)으로 모아 "우리 격자(틱0=오디오
+    0초)가 실제 비트와 몇 초 어긋나 있는지"를 구한다.
+
+    원형평균을 쓰는 이유: 위상이 한 박 길이(`period`) 경계(0초 근처/period
+    근처)에 걸쳐 흩어져 있으면 단순 평균·중앙값은 양 끝을 서로 반대로
+    당겨 틀린 값을 낸다 — 반드시 원형 통계로 구해야 모든 경우에 안전하다
+    (work/T3-72/plan.md §2).
+
+    `estimate_tempo()`와 별도로 `beat_track()`을 한 번 더 호출한다(의도적
+    중복 — `estimate_tempo()`는 Q-40에서 이미 승인된 코드라 시그니처를
+    바꾸지 않음, plan.md §2 "의도적으로 중복 호출 감수" 참고).
+
+    실패하거나(디코딩 오류 등) 비정상·저신뢰 결과(음수, 한 박 길이 이상,
+    원형평균 신뢰도가 `MIN_RESULTANT_LENGTH` 미만, 비트 4개 미만)면
+    0.0(기존 "보정 없음" 동작과 동일)으로 안전하게 돌아간다 — `bpm`이
+    `estimate_tempo()`처럼 이미 유효성이 보장된 값이라고 가정하지 않고,
+    0 이하·비유한이면 이 함수도 바로 0.0으로 폴백한다(한 박 길이를
+    `60/bpm`으로 나눠야 해서 0 나눗셈을 막아야 함).
+    """
+    if not np.isfinite(bpm) or bpm <= 0:
+        return 0.0
+    period = 60.0 / bpm
+    try:
+        y, sr = librosa.load(str(audio_path), sr=None, mono=True)
+        _, beat_frames = librosa.beat.beat_track(y=y, sr=sr, start_bpm=start_bpm, units="frames")
+        beat_times = librosa.frames_to_time(beat_frames, sr=sr)
+    except Exception:
+        return 0.0
+    if len(beat_times) < 4:  # 신뢰할 통계를 내기엔 너무 적음
+        return 0.0
+    theta = (beat_times % period) / period * 2 * np.pi
+    mean_sin = float(np.mean(np.sin(theta)))
+    mean_cos = float(np.mean(np.cos(theta)))
+    # 위상이 원 위에 고르게 흩어져 있으면(비트 트래킹 자체가 신뢰할 수
+    # 없는 곡 등) mean_sin·mean_cos가 둘 다 0에 가까워져 atan2 결과가
+    # 수치 잡음에 좌우된다 — "합성 벡터 길이"가 너무 작으면 추정 자체를
+    # 신뢰하지 않는다.
+    resultant_length = float(np.hypot(mean_sin, mean_cos))
+    if resultant_length < MIN_RESULTANT_LENGTH:
+        return 0.0
+    t0 = (np.arctan2(mean_sin, mean_cos) / (2 * np.pi)) * period
+    if t0 < 0:
+        t0 += period
+    if not np.isfinite(t0) or t0 < 0 or t0 >= period:
+        return 0.0
+    return float(t0)

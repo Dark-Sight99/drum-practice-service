@@ -262,7 +262,7 @@ describe('EditorScreen', () => {
     })
   })
 
-  it('does not attempt to load audio tracks when audioOffsetMs is non-zero, even if stems exist', () => {
+  it('still attempts to load audio tracks when audioOffsetMs is non-zero, as long as stems exist (T3-72, Q-43 — 예전엔 이 경우 음원 트랙 자체를 안 만들었음)', () => {
     const songWithStems: SongSummary = { ...song, available_audio_kinds: ['stem_drums', 'stem_bass'] }
     const scoreWithOffset: DrumScore = { ...makeScore(), audioOffsetMs: 50 }
     render(
@@ -273,9 +273,17 @@ describe('EditorScreen', () => {
         onCancel={() => {}}
       />,
     )
+    // "음원 분리가 안 돼 있어"는 canUseAudioTracks===false(stems 자체가
+    // 없을 때)일 때만 뜨는 문구 — 이제 audioOffsetMs가 0이 아니어도 그
+    // 문구가 뜨면 안 된다(그 경로를 아예 시도조차 안 했다는 뜻이므로).
     expect(
-      screen.getByText('이 곡은 음원 분리가 안 돼 있어 신스 드럼만 재생됩니다.'),
-    ).toBeInTheDocument()
+      screen.queryByText('이 곡은 음원 분리가 안 돼 있어 신스 드럼만 재생됩니다.'),
+    ).not.toBeInTheDocument()
+    // jsdom은 실제 오디오 로딩을 지원하지 않아 "불러오는 중"에서 못
+    // 벗어나지만, canUseAudioTracks===true 경로를 실제로 탔다는 것
+    // 자체는 이 상태 문구(로딩 중/실패 — 분리 자체가 없다는 문구와는
+    // 다름)로 확인할 수 있다.
+    expect(screen.getByText('원곡 음원을 불러오는 중…')).toBeInTheDocument()
   })
 
   it('scrolls the grid to initialPositionTicks on mount without starting playback (연주 화면 "편집하기" 연동)', () => {

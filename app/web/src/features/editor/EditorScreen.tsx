@@ -452,9 +452,10 @@ export function EditorScreen({
   }, [])
 
   // 2026-10-29(의뢰인 요청 — "원곡을 듣고 고쳐야지") — 원곡 분리 음원(스템)
-  // 로딩. PracticeCanvas.tsx의 같은 효과와 같은 가드(audioOffsetMs===0,
-  // 스템 종류 1개 이상)를 쓰되, 이 화면은 song이 바뀌지 않아(마운트 1회)
-  // "곡 전환" 관련 복잡도는 없다.
+  // 로딩. PracticeCanvas.tsx의 같은 효과와 같은 가드(스템 종류 1개 이상 —
+  // T3-72부터 audioOffsetMs 값과 무관, 아래 canUseAudioTracks 참고)를
+  // 쓰되, 이 화면은 song이 바뀌지 않아(마운트 1회) "곡 전환" 관련
+  // 복잡도는 없다.
   // useMemo로 참조를 안정시킴 — song.available_audio_kinds는 이 화면에서
   // 안 바뀌지만, .filter()가 매 렌더 새 배열을 만들면 아래 effect들의
   // 의존성 배열에 넣었을 때 매번 다시 돌게 된다.
@@ -462,7 +463,10 @@ export function EditorScreen({
     () => song.available_audio_kinds.filter((k) => k !== 'original') as ChannelKey[],
     [song.available_audio_kinds],
   )
-  const canUseAudioTracks = initialScore.audioOffsetMs === 0 && stemKinds.length > 0
+  // 2026-10-29(T3-72, REQ-02, Q-43) — audioOffsetMs===0 가드를 뺐다(PracticeCanvas.tsx와
+  // 같은 이유 — 이제 그 값이 0이 아니어도 아래 audioTrackPositionSeconds
+  // 호출부가 올바르게 반영한다).
+  const canUseAudioTracks = stemKinds.length > 0
 
   // 계정 전체 공유 믹서(의뢰인 요청 "믹서 동일하게 사용") — practice 화면과
   // 같은 `/auth/me/mixer-setting`을 그대로 쓴다. practice의 채널별 편집-추적·
@@ -630,7 +634,14 @@ export function EditorScreen({
         // meta.bpm은 이제 이 화면에서 편집할 수 없어(위 playbackBpm 주석 참고)
         // 항상 "원곡 BPM"이다 — PracticeCanvas.tsx의 같은 리싱크 계산과 동일.
         const playbackRate = playbackBpmRef.current / stateRef.current.meta.bpm
-        const expectedSongPositionSeconds = audioTrackPositionSeconds(seconds, 0, playbackRate)
+        // T3-72(Q-43) — 네 번째 인자(오프셋)만 추가, 두 번째 인자가 계속
+        // 리터럴 0인 이유는 아래 handlePlay()의 같은 호출부 코멘트 참고.
+        const expectedSongPositionSeconds = audioTrackPositionSeconds(
+          seconds,
+          0,
+          playbackRate,
+          stateRef.current.audioOffsetMs / 1000,
+        )
         session.tracks.resync(expectedSongPositionSeconds, TRACK_RESYNC_THRESHOLD_SECONDS)
       }
       rafIdRef.current = requestAnimationFrame(loop)
@@ -751,10 +762,17 @@ export function EditorScreen({
     if (tracks) {
       // "원곡 속도"(meta.bpm, 더는 편집 불가) 대비 "지금 연습 속도"의 비율 —
       // PracticeCanvas.tsx의 playbackRate = playbackBpm/score.meta.bpm과 같은 식.
-      // audioOffsetMs===0일 때만 tracks가 있으므로 곡 시작 기준점
-      // (songStartSeconds)은 항상 0.
+      // 2026-10-29(T3-72 Codex 모드C 2차 지적 반영 — 이전 주석의 "audioOffsetMs===0
+      // 일 때만 tracks가 있어 기준점이 항상 0"이라는 근거는 틀렸다. 진짜
+      // 이유는 EditorScreen이 playDrumScore()에 countInBars: 0을 넘겨서다
+      // (위 playDrumScore 호출부 참고, audioOffsetMs 값과 무관하게 항상
+      // 성립) — computePlaybackSchedule()의 songStartSeconds = barSeconds *
+      // countInBars이므로 countInBars=0이면 songStartSeconds는 항상 0.
       const playbackRate = playbackBpmRef.current / latestState.meta.bpm
-      tracks.playFrom(audioTrackPositionSeconds(positionSeconds, 0, playbackRate), playbackRate)
+      tracks.playFrom(
+        audioTrackPositionSeconds(positionSeconds, 0, playbackRate, latestState.audioOffsetMs / 1000),
+        playbackRate,
+      )
     }
     setIsPlaying(true)
     startRaf()
@@ -788,7 +806,10 @@ export function EditorScreen({
       if (session?.tracks) {
         // handlePlay()의 같은 위치 점프 블록과 같은 식 — playbackRate 계산 근거도 동일.
         const playbackRate = playbackBpmRef.current / stateRef.current.meta.bpm
-        session.tracks.playFrom(audioTrackPositionSeconds(target, 0, playbackRate), playbackRate)
+        session.tracks.playFrom(
+          audioTrackPositionSeconds(target, 0, playbackRate, stateRef.current.audioOffsetMs / 1000),
+          playbackRate,
+        )
       }
     }
   }

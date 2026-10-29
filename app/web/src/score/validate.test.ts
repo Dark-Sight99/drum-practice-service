@@ -37,11 +37,25 @@ describe('validateDrumScore', () => {
     expect(result.errors).toContain('version: 1이 아님')
   })
 
-  it('rejects a non-zero audioOffsetMs (T2-8, Phase 3 전까지 임시 제한, Q-23)', () => {
+  it('rejects an audioOffsetMs at or past one beat length (T3-72, Q-43 — bpm=120의 한 박=500ms)', () => {
     const score = { ...minimalScore(), audioOffsetMs: 500 }
     const result = validateDrumScore(score)
     expect(result.valid).toBe(false)
     expect(result.errors.some((e) => e.startsWith('audioOffsetMs'))).toBe(true)
+  })
+
+  it('rejects a negative audioOffsetMs', () => {
+    const score = { ...minimalScore(), audioOffsetMs: -1 }
+    const result = validateDrumScore(score)
+    expect(result.valid).toBe(false)
+    expect(result.errors.some((e) => e.startsWith('audioOffsetMs'))).toBe(true)
+  })
+
+  it('accepts an audioOffsetMs within one beat length (T3-72 — 다운비트 자동 보정이 실제로 채우는 값의 범위)', () => {
+    const score = { ...minimalScore(), audioOffsetMs: 280 }
+    const result = validateDrumScore(score)
+    expect(result.valid).toBe(true)
+    expect(result.errors).toEqual([])
   })
 
   it('rejects a non-finite audioOffsetMs', () => {

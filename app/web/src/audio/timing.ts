@@ -75,13 +75,26 @@ export function barIndexForSeconds(
  * 지난 뒤 경과한 시간에 `playbackRate`를 곱하면 오디오 파일 내 위치가 나온다
  * (루프 유무와 무관한 일반식 — `audioStartSeconds`에 `songStartSeconds` 대신
  * `loopStartSeconds`를 넣으면 루프 재진입 시점의 올바른 위치도 그대로 나옴,
- * 모드C 1라운드에서 "루프 재진입마다 0으로 틀던" 설계 오류를 이 일반식으로 수정). */
+ * 모드C 1라운드에서 "루프 재진입마다 0으로 틀던" 설계 오류를 이 일반식으로 수정).
+ *
+ * `audioOffsetSeconds`(2026-10-29, T3-72, REQ-02, intent/07-open-questions.md
+ * Q-43) — `DrumScore.audioOffsetMs`를 초로 바꾼 값(기본 0, 기존 동작과 동일).
+ * 다운비트 자동 보정(서버 쪽 work/T3-72/plan.md §1) 이후 "틱 0 = 원곡 파일
+ * 위치 0"이 더 이상 성립하지 않는다 — 틱 0은 이제 다운비트이고, 그 다운비트는
+ * 원곡 파일에서 `audioOffsetSeconds`초 지점이다. `transportSeconds ===
+ * songStartSeconds`(틱 0)일 때 결과가 정확히 `audioOffsetSeconds`가 되도록
+ * 더해준다. `audioStartSeconds`(songStartSeconds 또는 loopStartSeconds)는
+ * 항상 `songStartSeconds` 이상이고 `audioOffsetSeconds`는 항상 0 이상(한
+ * 박 길이 미만, api/schemas.py·score/validate.ts가 그 범위를 보장)이므로
+ * 결과는 수학적으로 항상 0 이상이다(plan.md §5 증명 — 음수 위치가 나올
+ * 입력 자체가 없어 호출부에서 별도 클램프가 필요 없음). */
 export function audioTrackPositionSeconds(
   transportSeconds: number,
   songStartSeconds: number,
   playbackRate: number,
+  audioOffsetSeconds = 0,
 ): number {
-  return (transportSeconds - songStartSeconds) * playbackRate
+  return (transportSeconds - songStartSeconds) * playbackRate + audioOffsetSeconds
 }
 
 export interface MetronomeBeat {
