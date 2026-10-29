@@ -204,6 +204,10 @@ export function EditorScreen({
   // 옮겨 그려야 해서 훨씬 복잡해짐).
   const [dragPreview, setDragPreview] = useState<{ noteId: number; tick: number } | null>(null)
   const dragPreviewRef = useRef<{ noteId: number; tick: number } | null>(null)
+  // Codex 모드A 지적(반영) — 드래그가 진행 중인 동안 또 다른 mousedown으로
+  // 두 번째 드래그가 겹쳐 시작되는 걸 막는다(둘 다 같은 dragPreviewRef를
+  // 써서 서로 덮어쓰는 문제 방지 — handleNoteMouseDown 코멘트 참고).
+  const activeDragRef = useRef(false)
   // Codex 모드A 지적(필수, 반영) — mousedown이 노트에서 시작했는데 mouseup이
   // (드래그로 옮겨서) 노트 밖 — 즉 행 배경 — 에서 끝나면, 브라우저가 그 뒤에
   // 합성하는 click 이벤트는 mousedown·mouseup 타깃의 가장 가까운 공통 조상
@@ -853,11 +857,20 @@ export function EditorScreen({
     e.stopPropagation()
     // Ctrl/Cmd+클릭은 다중 선택 토글 전용(기존 onClick이 처리) — 드래그를
     // 같이 시작하면 "토글하려고 눌렀는데 옮겨짐"이 되므로 건너뛴다.
-    if (e.ctrlKey || e.metaKey || isSaving) return
+    // Codex 모드A 지적(반영) — 왼쪽 버튼(e.button===0)이 아니면(오른쪽
+    // 클릭 메뉴 등) 드래그를 시작하지 않는다. 그리고 이미 드래그가
+    // 진행 중인데(예: 왼쪽 버튼을 누른 채로 다른 노트에 또 mousedown이
+    // 들어오는 비정상 입력 — 멀티터치·펜 입력 등) 또 시작하면, 두 드래그의
+    // window 리스너가 동시에 같은 dragPreviewRef를 써서 서로 덮어쓰다가
+    // 먼저 끝나는 쪽이 나중 드래그의 미리보기 값으로 잘못 커밋하고,
+    // 나중 드래그는 커밋할 미리보기를 잃어버릴 수 있었다 — 활성 드래그가
+    // 있으면 새로 시작하지 않는다.
+    if (e.ctrlKey || e.metaKey || isSaving || e.button !== 0 || activeDragRef.current) return
     // 브라우저 기본 동작(텍스트 선택 드래그 등)이 우리 드래그와 겹쳐 보이는
     // 걸 막는 방어적 조치 — 노트 버튼엔 셀렉트할 텍스트가 없지만, 빠르게
     // 드래그할 때 인접 요소까지 끌리는 드래그 셀렉션이 생기지 않게.
     e.preventDefault()
+    activeDragRef.current = true
     setSelectedIds(new Set([note._editorId]))
     const drag = { noteId: note._editorId, startClientX: e.clientX, startTick: note.tick }
     dragPreviewRef.current = { noteId: note._editorId, tick: note.tick }
@@ -874,6 +887,7 @@ export function EditorScreen({
       setDragPreview(preview)
     }
     function handleMouseUp() {
+      activeDragRef.current = false
       const preview = dragPreviewRef.current
       dragPreviewRef.current = null
       setDragPreview(null)
