@@ -47,7 +47,6 @@ import {
 import {
   EDITOR_ROWS,
   editorRowIndexForPiece,
-  snapTick,
   tickToBeatLabel,
   ticksPerGridUnit,
   type GridUnit,
@@ -899,7 +898,28 @@ export function EditorScreen({
     const rect = e.currentTarget.getBoundingClientRect()
     const relativeX = e.clientX - rect.left + e.currentTarget.scrollLeft
     if (relativeX < ROW_LABEL_WIDTH) return // 고정 레이블 거터 클릭은 무시
-    const tick = pxToTick(relativeX)
+    const rawTick = pxToTick(relativeX)
+    // 2026-10-30(T3-77, 의뢰인 요청 — "hh랑 mt을 같이 쳐야 하는데 어느
+    // 위치에 찍어야 동시에 소리가 나는지 모르겠다") — 클릭으로 뽑은 틱을
+    // 그대로 쓰면, 화면을 보고 아무리 정확히 클릭해도 픽셀 단위 오차가 틱
+    // 단위로 남아 "같이 치려던" 기존 노트(다른 행)와 실제로는 몇 틱 어긋난
+    // 채 저장된다 — 들어보면 미묘하게 안 맞는 원인. 클릭 지점에서 가장
+    // 가까운 기존 노트(행 무관)가 지금 격자 한 칸의 절반 이내에 있으면,
+    // 그 노트의 "진짜" 틱(절대 격자가 아니라 실제 검출된 값)에 그대로
+    // 맞춰 찍는다 — 그래야 "동시에" 치는 게 보장되고, 그 뒤 화살표로
+    // 1/16씩 옮기면(아래 moveSelected, 더는 절대 격자로 안 돌아감) 그
+    // 실제 기준에서 정확히 상대 이동한다.
+    const snapToleranceTicks = unitTicks / 2
+    let nearestNote: EditableNote | null = null
+    let nearestDist = Infinity
+    for (const n of state.notes) {
+      const d = Math.abs(n.tick - rawTick)
+      if (d < nearestDist) {
+        nearestDist = d
+        nearestNote = n
+      }
+    }
+    const tick = nearestNote && nearestDist <= snapToleranceTicks ? nearestNote.tick : rawTick
     const id = nextIdRef.current++
     const newNote: EditableNote = {
       _editorId: id,
@@ -1083,10 +1103,19 @@ export function EditorScreen({
 
   function moveSelected(deltaTicks: number, deltaRows: number) {
     if (selectedNote === null) return
-    // ppq가 격자 분할 수로 나누어떨어지지 않으면 unitTicks 자체가 정수가 아닐 수
-    // 있어(Codex 모드A 지적, grid.ts의 snapTick 주석 참고) 더한 뒤 다시 격자에
-    // 스냅해 항상 정수·격자정렬 틱을 보장한다.
-    const nextTick = snapTick(Math.max(0, selectedNote.tick + deltaTicks), gridUnit, ppq)
+    // 2026-10-30(T3-77, 의뢰인 요청) — 예전엔 snapTick()으로 "0틱 기준 절대
+    // 격자"에 매번 다시 맞췄다. 그런데 실제 채보된 노트(HH 등)는 AI가 검출한
+    // 진짜 타이밍이라 그 절대 격자와 몇 틱(T3-72/Q-43) 어긋나 있는 게 정상이다
+    // — 그 노트 옆에 새 노트를 만들어 화살표로 "1/16박 뒤"로 옮기면, 절대
+    // 격자에 다시 스냅되면서 기준 노트의 실제(살짝 어긋난) 위치가 아니라
+    // "이론상 깨끗한" 위치로 끌려가 버려, 실제로 들어보면 둘이 안 맞는
+    // 문제가 있었음(의뢰인이 직접 재생해보고 발견). 드래그 이동(위
+    // handleMouseMove)이 이미 snapTick 없이 `Math.round(시작틱+이동량)`만
+    // 쓰는 것과 똑같이, 여기도 절대 격자로 되돌리지 않고 **지금 틱에서 그대로
+    // 더한 값**(정수 보정만)을 쓴다 — 노트가 새 노트 추가 시 가까운 기존
+    // 노트의 실제 틱에 자동으로 맞춰지면(아래 handleRowClick), 그 뒤 화살표
+    // 이동은 그 실제 기준에서 정확히 1/16박씩 상대 이동하게 된다.
+    const nextTick = Math.max(0, Math.round(selectedNote.tick + deltaTicks))
     const rowIdx = editorRowIndexForPiece(selectedNote.piece)
     const nextRowIdx = Math.min(EDITOR_ROWS.length - 1, Math.max(0, rowIdx + deltaRows))
     // 지금 행 그대로 머물면(deltaRows===0, 가로 이동만) 피스는 안 바뀐다 —
