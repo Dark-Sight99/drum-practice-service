@@ -186,6 +186,37 @@ describe('EditorScreen', () => {
     expect(Number.isInteger(tick)).toBe(true)
   })
 
+  it('does not accumulate rounding drift across repeated non-integer-step moves (T3-77, 모드A 지적 C-001)', () => {
+    // ppq=100의 8nt 격자 스텝은 100/3=33.333…(정수 아님) — 이동할 때마다
+    // "이미 반올림된 틱"에 다시 더해 반올림하면(순수 반복) 오차가 쌓여,
+    // 3번 누르면 50+3*33.333…=150을 반올림한 값(150)이 아니라 149가 나오는
+    // 버그가 있었다(기준 틱+누른 횟수를 따로 기억하지 않고 매번 직전 결과만
+    // 썼을 때 재현됨). 기준점을 따로 추적해 149가 아니라 150이 나와야 한다.
+    const score: DrumScore = {
+      version: 1,
+      meta: { title: '테스트곡', bpm: 120, timeSignature: [4, 4], source: 'midi' },
+      ppq: 100,
+      audioOffsetMs: 0,
+      notes: [{ tick: 50, piece: 'kick', velocity: 90, hand: null }],
+    }
+    render(<EditorScreen song={song} initialScore={score} onSaved={() => {}} onCancel={() => {}} />)
+
+    const select = screen.getByDisplayValue('8분') as HTMLSelectElement
+    fireEvent.change(select, { target: { value: '8nt' } })
+
+    const kickRow = screen.getByTestId('editor-row-kick')
+    fireEvent.click(kickRow.querySelectorAll('button')[0])
+    const grid = screen.getByRole('application')
+    fireEvent.keyDown(grid, { key: 'ArrowRight' })
+    fireEvent.keyDown(grid, { key: 'ArrowRight' })
+    fireEvent.keyDown(grid, { key: 'ArrowRight' })
+
+    const text = screen.getByText(/틱 [\d.]+/).textContent ?? ''
+    const tick = Number(/틱 ([\d.]+)/.exec(text)?.[1])
+    expect(tick).toBe(Math.round(50 + 3 * (100 / 3)))
+    expect(tick).toBe(150)
+  })
+
   it('changes the selected note piece with ArrowUp/ArrowDown', () => {
     render(
       <EditorScreen song={song} initialScore={makeScore()} onSaved={() => {}} onCancel={() => {}} />,

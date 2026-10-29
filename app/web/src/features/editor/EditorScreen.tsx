@@ -1101,6 +1101,11 @@ export function EditorScreen({
     })
   }
 
+  // 2026-10-30(T3-77, 모드A 지적) — moveSelected()의 반복 반올림 오차 누적을
+  // 막으려고 "화살표 이동을 시작한 기준 틱 + 그 뒤 누른 횟수"를 따로 든다
+  // (아래 moveSelected 코멘트 참고).
+  const moveAnchorRef = useRef<{ noteId: number; anchorTick: number; steps: number } | null>(null)
+
   function moveSelected(deltaTicks: number, deltaRows: number) {
     if (selectedNote === null) return
     // 2026-10-30(T3-77, 의뢰인 요청) — 예전엔 snapTick()으로 "0틱 기준 절대
@@ -1109,13 +1114,37 @@ export function EditorScreen({
     // — 그 노트 옆에 새 노트를 만들어 화살표로 "1/16박 뒤"로 옮기면, 절대
     // 격자에 다시 스냅되면서 기준 노트의 실제(살짝 어긋난) 위치가 아니라
     // "이론상 깨끗한" 위치로 끌려가 버려, 실제로 들어보면 둘이 안 맞는
-    // 문제가 있었음(의뢰인이 직접 재생해보고 발견). 드래그 이동(위
-    // handleMouseMove)이 이미 snapTick 없이 `Math.round(시작틱+이동량)`만
-    // 쓰는 것과 똑같이, 여기도 절대 격자로 되돌리지 않고 **지금 틱에서 그대로
-    // 더한 값**(정수 보정만)을 쓴다 — 노트가 새 노트 추가 시 가까운 기존
-    // 노트의 실제 틱에 자동으로 맞춰지면(아래 handleRowClick), 그 뒤 화살표
-    // 이동은 그 실제 기준에서 정확히 1/16박씩 상대 이동하게 된다.
-    const nextTick = Math.max(0, Math.round(selectedNote.tick + deltaTicks))
+    // 문제가 있었음(의뢰인이 직접 재생해보고 발견). 절대 격자로 되돌리지
+    // 않고 **지금 틱에서 그대로 더한 값**을 쓴다 — 노트가 새 노트 추가 시
+    // 가까운 기존 노트의 실제 틱에 자동으로 맞춰지면(아래 handleRowClick),
+    // 그 뒤 화살표 이동은 그 실제 기준에서 정확히 1/16박씩 상대 이동한다.
+    //
+    // Codex 모드A 지적(필수, 반영) — unitTicks가 정수가 아닌 경우(예:
+    // ppq=100의 8분음표 셋잇단 격자, unitTicks=33.333…) 매번 "이미 반올림된
+    // 틱"에 33.333…을 더해 다시 반올림하면, 각 단계의 반올림 오차가
+    // 누적돼(round(round(x)+33.333) 반복) 여러 번 누르면 실제 "출발점 +
+    // N*격자폭"에서 점점 멀어진다(직접 재현: 30번 누르면 10틱 차이) — 이동을
+    // 시작한 "기준 틱"과 그 뒤 누른 횟수(정수)를 따로 기억해뒀다가, 매번
+    // "기준 틱 + 누른 횟수*격자폭"을 한 번만 반올림한다. 다른 노트 선택·
+    // 드래그 등으로 틱이 이 추적과 다르게 바뀌면(moveAnchorRef가 예상하는
+    // 값과 실제 selectedNote.tick이 다르면) 그 순간의 실제 틱을 새 기준으로
+    // 다시 잡는다 — 격자 설정을 바꾼 경우도 이 비교로 자연히 걸러진다.
+    let nextTick: number
+    if (deltaTicks === 0) {
+      nextTick = selectedNote.tick
+    } else {
+      const anchor = moveAnchorRef.current
+      const anchorStillValid =
+        anchor !== null &&
+        anchor.noteId === selectedNote._editorId &&
+        Math.max(0, Math.round(anchor.anchorTick + anchor.steps * unitTicks)) === selectedNote.tick
+      const base = anchorStillValid
+        ? anchor
+        : { noteId: selectedNote._editorId, anchorTick: selectedNote.tick, steps: 0 }
+      const steps = base.steps + deltaTicks / unitTicks
+      nextTick = Math.max(0, Math.round(base.anchorTick + steps * unitTicks))
+      moveAnchorRef.current = { noteId: selectedNote._editorId, anchorTick: base.anchorTick, steps }
+    }
     const rowIdx = editorRowIndexForPiece(selectedNote.piece)
     const nextRowIdx = Math.min(EDITOR_ROWS.length - 1, Math.max(0, rowIdx + deltaRows))
     // 지금 행 그대로 머물면(deltaRows===0, 가로 이동만) 피스는 안 바뀐다 —
