@@ -963,7 +963,7 @@ export function EditorScreen({
   // 그 자리에 새 노트를 하나 더 만들어 "이동이 아니라 복사"처럼 보였다.
   // mousedown 핸들러 **안에서 바로**(같은 동기 구간, state·effect를
   // 거치지 않고) 리스너를 달면 이 틈 자체가 사라진다.
-  function handleNoteMouseDown(e: React.MouseEvent, note: EditableNote) {
+  function handleNoteMouseDown(e: React.MouseEvent<HTMLButtonElement>, note: EditableNote) {
     e.stopPropagation()
     // Ctrl/Cmd+클릭은 다중 선택 토글 전용(기존 onClick이 처리) — 드래그를
     // 같이 시작하면 "토글하려고 눌렀는데 옮겨짐"이 되므로 건너뛴다.
@@ -979,7 +979,24 @@ export function EditorScreen({
     // 브라우저 기본 동작(텍스트 선택 드래그 등)이 우리 드래그와 겹쳐 보이는
     // 걸 막는 방어적 조치 — 노트 버튼엔 셀렉트할 텍스트가 없지만, 빠르게
     // 드래그할 때 인접 요소까지 끌리는 드래그 셀렉션이 생기지 않게.
+    //
+    // 2026-10-30(T3-78, 의뢰인 요청 — "노트생성하고 다른거 만지다(실행취소,
+    // 격자바꾸기 등) 그 노트 다시 클릭 후 키보드 누르면 안 움직인다") —
+    // 바로 위 preventDefault()가 "텍스트 드래그 선택 방지"에는 필요하지만,
+    // 부작용으로 **브라우저가 클릭 시 이 버튼에 포커스를 주는 기본 동작도
+    // 같이 막아버린다**(mousedown의 preventDefault는 포커스 이동 자체를
+    // 취소시킴 — 실제로 document.activeElement를 찍어 직접 확인). 그래서
+    // 클릭 직전에 포커스가 다른 곳(격자 드롭다운, 실행취소 버튼 등)에
+    // 있었다면, 노트를 클릭해 선택해도 포커스는 그 다른 곳에 그대로 남고
+    // 화살표 키(handleGridKeyDown, 그리드 컨테이너의 키보드 이벤트)가 전혀
+    // 안 와서 안 움직이는 것처럼 보였다. 새 노트를 빈 칸 클릭으로 만들 때는
+    // (handleRowClick, mousedown 핸들러 없음 — preventDefault를 안 함)
+    // 포커스 없는 자식을 클릭하면 브라우저가 알아서 가장 가까운 포커스
+    // 가능한 조상(그리드 컨테이너, tabIndex=0)으로 포커스를 넘겨줘서 이
+    // 문제가 없었다 — 기존 노트를 다시 클릭하는 경로에서만 재현됐다.
+    // preventDefault로 사라진 포커스를 명시적으로 되돌려준다.
     e.preventDefault()
+    e.currentTarget.focus()
     activeDragRef.current = true
     setSelectedIds(new Set([note._editorId]))
     const drag = { noteId: note._editorId, startClientX: e.clientX, startTick: note.tick }
