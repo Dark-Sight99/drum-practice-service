@@ -122,8 +122,70 @@ lucide-react `Undo2`/`Redo2`로 교체(이미 설치된 버전에 존재 확인,
   써보셔야 진짜 소리·타이밍 확인 가능(Tone.js 경로는 Claude가 소리를
   들을 수 없음, CLAUDE.md §1).
 
+## Codex 모드A 검수 (4라운드 완료, 5라운드는 사용량 한도로 실행 못 함)
+
+**1차 — REQUEST_CHANGES** (job `task-mvt26ppe-2gp226`)
+- [High] `handlePlay()`가 비동기 `createDrumVoices()`를 기다리는 동안
+  재진입(빠른 더블클릭 시 세션 유실)·언마운트(정리 안 된 리소스)·실패
+  (만들어둔 Limiter/Gain 미정리, 사용자 피드백 없음) 전부 무방비 →
+  `ensureVoicesSession()`으로 분리해 재진입 가드(`isStartingVoicesRef`)·
+  언마운트 플래그(`isMountedRef`)·try/catch(+ `playbackError` 상태) 추가.
+- [Medium] 믹서 GET 응답이 늦게 와서 사용자가 먼저 슬라이더를 움직인 뒤
+  도착하면 그 조작을 통째로 덮어씀 → `mixerEditedRef`로 사용자가 한 번
+  건드리면 그 뒤 GET 응답을 무시하도록 수정.
+
+**2차 — REQUEST_CHANGES** (job `task-mvt2a7l4-cjnbdb`)
+- [필수] React StrictMode(개발 모드)의 마운트→정리→재마운트 이중 호출 때문에
+  `isMountedRef`가 cleanup에서만 false가 되고 setup에서 다시 true로 안
+  올라와, 그 뒤로는 재생 버튼을 눌러도 "언마운트됨"으로 오판해 영원히
+  무반응 → effect 시작부에 `isMountedRef.current = true` 추가.
+- [필수] 저장 요청이 진행되는 동안에도 편집이 가능해서, 그 사이의 편집이
+  저장 안 된 채 `onSaved()`로 화면을 떠나며 유실될 수 있었음 → 모든 편집이
+  거치는 `commit()`에 `if (isSaving) return` 가드 추가.
+- [권장] Limiter/Gain 생성이 try 블록 밖에 있어 그 자체가 던지면 아무도
+  못 잡음 → try 블록 안으로 이동.
+
+**3차 — REQUEST_CHANGES** (job `task-mvt2dq6d-ebtwlo`)
+- [필수] 실행취소/다시실행 버튼이 `commit()`을 거치지 않고 `setHistory()`를
+  직접 호출해 2차에서 추가한 저장 중 편집 차단을 우회 → 두 버튼 모두
+  `disabled`에 `|| isSaving` 추가.
+
+**4차 — REQUEST_CHANGES(문서 지적, 코드 결함 아님)** (job `task-mvt2fmr4-h0mcr2`)
+- 3차까지의 코드 수정은 전부 적절함을 확인("라운드 3 수정이 올바르고,
+  commit() 밖에서 setHistory()를 직접 부르는 곳은 그 두 버튼뿐 — 더 이상
+  우회 경로 없음").
+- [필수, 문서] 편집기의 "자동 추천"(자동추천 재적용·필인 시작손) 삭제가
+  `intent/02-requirements.md`의 REQ-12와 충돌 → 의뢰인의 명시적 요청
+  ("자동추천 재적용 버튼은 삭제해줘. 필인시작손도 삭제")에 따른 것이므로
+  기능은 그대로 두고, REQ-12를 이 문서의 기존 취소선+날짜 표기 관례대로
+  갱신(수동 R/L/RF/LF·교대 적용은 유지 명시).
+
+**5차(최종 확인) — 실행 못 함(job `task-mvt2hzqv-p1bu8z`, "failed")**.
+Codex 사용량 한도 도달("You've hit your usage limit... try again at Nov
+22nd, 2026")로 작업이 중간에 실패 — 리뷰 자체가 완료되지 않음(부분 진행
+중이던 소견은 "REQ-12 수정이 기존 관례를 따르고 수동 편집도 남겨뒀다"는
+긍정적 방향이었으나, 전체 코드 diff 재확인까지는 못 갔음).
+
+## 5차를 대신한 자체 재검토(Codex 불가로 직접 재확인)
+4차까지의 승인 뒤 전체 diff를 다시 한번 직접 읽으며 아래 2가지를 추가로
+찾아 수정:
+- `handlePlay()`가 `createDrumVoices()`(비동기)를 기다리는 동안 그
+  함수가 처음 호출될 당시의 `state` 클로저를 그대로 썼다 — 세션 첫
+  재생(샘플 로딩 대기)과 겹쳐 그 사이 사용자가 노트/BPM을 편집하면 그
+  편집이 반영 안 된 옛 상태로 재생될 수 있었음 → `cursorTicksRef`와 같은
+  패턴으로 `stateRef`를 추가해 await 이후엔 항상 최신 state를 읽게 수정.
+- 재생 중에도 BPM/박자표 입력이 계속 활성화돼 있어, 바꿔도 지금 재생엔
+  반영 안 되는데(Transport가 이미 그 값으로 스케줄됨) 혼란을 줄 수
+  있었고, 재생 위치(초→틱) 변환이 재생 내내 같은 BPM을 가정하는 전제와도
+  충돌 가능 → PracticeCanvas.tsx가 이미 쓰는 것과 같은 원칙으로 재생 중
+  BPM/박자표 입력을 잠금.
+
 ## 남은 작업
-- Codex 모드A 검수 → APPROVE 후 `main` 병합.
+- **Codex 최종(5차) 확인 보류** — 사용량 한도가 풀리는 11월 22일 이후
+  재요청 가능. 그 전까지는 위 4라운드의 검증 + 직접 재검토로 대체.
+  **병합 여부는 의뢰인 확인 후 진행** — 이 result.md를 최종 근거로 삼아
+  지금 바로 병합할지, 아니면 5차가 가능해질 때까지 기다릴지 의뢰인 판단
+  필요.
 - **의뢰인 확인 필요**: `song.original_bpm`(라이브러리 목록 BPM)을 편집
   저장 시 같이 갱신할지 여부(위 "질문에 대한 답" 참고).
 - 의뢰인이 실제로 재생·믹서·편집하기 버튼을 써보고 체감 확인.
