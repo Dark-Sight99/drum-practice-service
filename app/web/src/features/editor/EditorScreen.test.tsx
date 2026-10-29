@@ -88,7 +88,7 @@ describe('EditorScreen', () => {
     expect(kickRow.querySelectorAll('button')).toHaveLength(0)
   })
 
-  it('moves the selected note with ArrowRight by a fixed 16th-note step, regardless of the displayed 격자 (T3-79, 의뢰인 요청)', () => {
+  it('moves the selected note with ArrowRight by a fixed 1/8-beat step, regardless of the displayed 격자 (T3-79/T3-80, 의뢰인 요청)', () => {
     render(
       <EditorScreen song={song} initialScore={makeScore()} onSaved={() => {}} onCancel={() => {}} />,
     )
@@ -96,12 +96,12 @@ describe('EditorScreen', () => {
     fireEvent.click(kickRow.querySelectorAll('button')[0])
     expect(screen.getByText(/틱 480/)).toBeInTheDocument()
 
-    // 기본 격자(8분, 보기용)로 두고도 화살표 이동은 항상 16분음표 한 칸
-    // (ppq=480/4=120틱) — 격자 선택과 무관하다.
+    // 기본 격자(8분, 보기용)로 두고도 화살표 이동은 항상 "한 박을 8칸으로
+    // 쪼갠" 간격(ppq=480/8=60틱, T3-80) — 격자 선택과 무관하다.
     const grid = screen.getByRole('application')
     fireEvent.keyDown(grid, { key: 'ArrowRight' })
 
-    expect(screen.getByText(/틱 600/)).toBeInTheDocument()
+    expect(screen.getByText(/틱 540/)).toBeInTheDocument()
   })
 
   it('shows the selected note\'s position in bar/beat units next to the raw tick (2026-10-29 의뢰인 요청 — "어떤 간격으로 찍어야할지 감이 안 온다")', () => {
@@ -119,8 +119,8 @@ describe('EditorScreen', () => {
     expect(screen.getByText(/1마디 2박 \(틱 480\)/)).toBeInTheDocument()
 
     const grid = screen.getByRole('application')
-    fireEvent.keyDown(grid, { key: 'ArrowLeft' }) // 화살표 이동은 항상 16분음표 고정(T3-79) = ppq 480/4 = 120틱
-    expect(screen.getByText(/1마디 1박 \+3\/4 \(틱 360\)/)).toBeInTheDocument()
+    fireEvent.keyDown(grid, { key: 'ArrowLeft' }) // 화살표 이동은 항상 "한 박의 1/8" 고정(T3-80) = ppq 480/8 = 60틱
+    expect(screen.getByText(/틱 420/)).toBeInTheDocument()
   })
 
   it('focuses the note button on mousedown so keyboard movement still works after focus moved elsewhere (T3-78, 의뢰인 요청 — "노트생성하고 다른거 만지다 그 노트 다시 클릭 후 키보드 누르면 안 움직인다")', () => {
@@ -189,10 +189,10 @@ describe('EditorScreen', () => {
     expect((labels[1] as HTMLElement).style.left).toBe('115px')
   })
 
-  it('keeps moved notes on an integer tick even when ppq is not divisible by 4 (Codex 모드A 지적)', () => {
-    // T3-79부터 화살표 이동 간격은 항상 ppq/4(16분음표 고정, 격자 드롭다운과
-    // 무관) — ppq가 4로 안 나누어떨어지면(예: 90) 그 간격 자체가 정수가
-    // 아니다(90/4=22.5).
+  it('keeps moved notes on an integer tick even when ppq is not divisible by 8 (Codex 모드A 지적)', () => {
+    // T3-80부터 화살표 이동 간격은 항상 ppq/8(한 박을 8칸으로 쪼갠 간격,
+    // 격자 드롭다운과 무관) — ppq가 8로 안 나누어떨어지면(예: 90) 그
+    // 간격 자체가 정수가 아니다(90/8=11.25).
     const score: DrumScore = {
       version: 1,
       meta: { title: '테스트곡', bpm: 120, timeSignature: [4, 4], source: 'midi' },
@@ -213,12 +213,12 @@ describe('EditorScreen', () => {
   })
 
   it('does not accumulate rounding drift across repeated non-integer-step moves (T3-77, 모드A 지적 C-001)', () => {
-    // ppq=90일 때 화살표 이동 간격(ppq/4=22.5, T3-79)은 정수가 아니다 —
+    // ppq=90일 때 화살표 이동 간격(ppq/8=11.25, T3-80)은 정수가 아니다 —
     // 이동할 때마다 "이미 반올림된 틱"에 다시 더해 반올림하면(순수 반복)
-    // 오차가 쌓여, 3번 누르면 50+3*22.5=117.5를 반올림한 값(118)이 아니라
-    // 119가 나오는 버그가 있었다(기준 틱+누른 횟수를 따로 기억하지 않고
-    // 매번 직전 결과만 썼을 때 재현됨). 기준점을 따로 추적해 119가 아니라
-    // 118이 나와야 한다.
+    // 오차가 쌓여, 3번 누르면 50+3*11.25=83.75를 반올림한 값(84)이 아니라
+    // 83이 나오는 버그가 있었다(기준 틱+누른 횟수를 따로 기억하지 않고
+    // 매번 직전 결과만 썼을 때 재현됨). 기준점을 따로 추적해 83이 아니라
+    // 84가 나와야 한다.
     const score: DrumScore = {
       version: 1,
       meta: { title: '테스트곡', bpm: 120, timeSignature: [4, 4], source: 'midi' },
@@ -237,8 +237,8 @@ describe('EditorScreen', () => {
 
     const text = screen.getByText(/틱 [\d.]+/).textContent ?? ''
     const tick = Number(/틱 ([\d.]+)/.exec(text)?.[1])
-    expect(tick).toBe(Math.round(50 + 3 * (90 / 4)))
-    expect(tick).toBe(118)
+    expect(tick).toBe(Math.round(50 + 3 * (90 / 8)))
+    expect(tick).toBe(84)
   })
 
   it('does not lose a move when reversing direction right after clamping at tick 0 (T3-77, 모드A 2차 지적 C-001)', () => {
@@ -246,8 +246,8 @@ describe('EditorScreen', () => {
     // 그 직후 →를 누르면 "클램프되기 전 가상의 기준점"에서 계속 세던 예전
     // 버그는 steps가 -1→0이 돼 틱이 또 0에 그대로 머물렀다(사용자가 기대한
     // "오른쪽으로 한 칸"이 조용히 사라짐) — 클램프가 실제로 일어난 자리를
-    // 새 기준으로 다시 잡아야 그 다음 →가 정확히 한 칸(120틱, ppq=480의
-    // 16분음표 고정 간격, T3-79) 이동해야 한다.
+    // 새 기준으로 다시 잡아야 그 다음 →가 정확히 한 칸(60틱, ppq=480의
+    // "한 박의 1/8" 고정 간격, T3-80) 이동해야 한다.
     const score: DrumScore = {
       version: 1,
       meta: { title: '테스트곡', bpm: 120, timeSignature: [4, 4], source: 'midi' },
@@ -261,11 +261,11 @@ describe('EditorScreen', () => {
     fireEvent.click(kickRow.querySelectorAll('button')[0])
     const grid = screen.getByRole('application')
     fireEvent.keyDown(grid, { key: 'ArrowLeft' }) // 0에 클램프
-    fireEvent.keyDown(grid, { key: 'ArrowRight' }) // 120틱(16분음표 한 칸)으로 이동해야 함
+    fireEvent.keyDown(grid, { key: 'ArrowRight' }) // 60틱(한 박의 1/8)으로 이동해야 함
 
     const text = screen.getByText(/틱 [\d.]+/).textContent ?? ''
     const tick = Number(/틱 ([\d.]+)/.exec(text)?.[1])
-    expect(tick).toBe(120)
+    expect(tick).toBe(60)
   })
 
   it('changes the selected note piece with ArrowUp/ArrowDown', () => {
