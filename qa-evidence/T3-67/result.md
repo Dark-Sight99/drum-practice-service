@@ -88,7 +88,13 @@ mousemove·mouseup이 먼저 도착하면 아무 리스너도 없어 드래그 �
 - `npx tsc -b`·`npx oxlint`(기존 경고 4건만)·`npx vitest run`(309/309)
   재확인(기존 테스트는 `fireEvent.mouseDown`이 기본값 `button: 0`이라
   영향 없음).
-- **2차 — 아래 결과 반영 예정.**
+- **2차(수정분만 재검수) — APPROVE(지적 없음)**. 가드가 선택 변경·미리보기
+  갱신보다 먼저 두 번째 mousedown을 거부함, 자바스크립트는 핸들러
+  동기 실행 중 다른 mousedown을 끼워 넣지 않아 그 사이 재진입 틈이
+  없음(이후 별도 디스패치 재진입은 ref 가드가 막음), `activeDragRef`가
+  `handleMouseUp` 맨 앞에서 먼저 풀리고 리스너 제거는 그 뒤, 이 내부
+  함수를 다른 경로가 직접 호출하는 곳 없음, `e.button!==0` 검사가 일반
+  트랙패드·주 버튼 입력을 부당하게 막지 않음을 확인.
 
 ## 테스트
 - `app/web`: `npx tsc -b` 통과(에러 0). `npx oxlint` 통과(기존 경고
