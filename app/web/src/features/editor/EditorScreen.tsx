@@ -1,16 +1,20 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import * as Tone from 'tone'
 import { Pause, Play, Redo2, Undo2 } from 'lucide-react'
+import { Spinner } from '../../components/Spinner'
 import type { DrumNote, DrumPiece, DrumScore, Hand } from '../../score/types'
 import { alternateHandsByTick, validateDrumScore } from '../../score'
-import { saveSongDrumScore, type SongSummary } from '../../api/songs'
+import { saveSongDrumScore, songAudioUrl, type SongSummary } from '../../api/songs'
 import { fetchMixerSetting, saveMixerSetting } from '../../api/auth'
 import { ApiError } from '../../api/client'
 import {
+  audioTrackPositionSeconds,
   barIndexForTick,
   CHANNEL_KEYS,
+  createAudioTrackPool,
   createDrumVoices,
   createMetronome,
+  createTrackPlayer,
   defaultMixerState,
   disposeDrumVoices,
   effectiveGain,
@@ -19,12 +23,14 @@ import {
   playDrumScore,
   ticksPerBar,
   ticksToSeconds,
+  type AudioTrackPool,
   type ChannelKey,
   type ChannelState,
   type DrumVoiceMap,
   type Metronome,
   type MixerState,
   type PlaybackHandle,
+  type TrackPlayer,
 } from '../../audio'
 import {
   canRedo,
@@ -49,17 +55,25 @@ const CHANNEL_LABEL: Record<ChannelKey, string> = {
   stem_other: '그 외',
 }
 
-// 2026-10-29(의뢰인 요청) — "편집시에도 음악을 들으면서". 이 화면은 원곡
-// 오디오 스템 없이 신스 드럼 + 메트로놈만 재생한다(practice 화면의 실제
-// 분리 음원 스템 재생은 prime()/playFrom()/resync()로 이어지는 훨씬 복잡한
-// 파이프라인이라, "재생 시작 뒤 바로 임의 위치로 점프"라는 이 화면의
-// 요구와 섞으면 이 프로젝트가 과거에 반복해서 겪은 스템 동기화 버그
-// 부류(T3-16-feedback-6/7, T3-47 루프 경계 등)를 새로 만들 위험이 크다고
-// 판단 — 노트 트리거는 scorePlayer.ts가 각 노트를 개별 schedule()로 예약하는
-// 단순한 경로라 "시작 직후 점프"가 자연스럽게 안전함(지나간 노트는 그냥
-// 스킵됨, Tone.js Transport 표준 동작). 편집 중인 패턴을 듣는다는 핵심
-// 목적은 이걸로 충분히 달성되고, 원곡 전체 믹스가 꼭 필요해지면 별도
-// 작업으로 확장 가능.
+// 2026-10-29(의뢰인 요청) — "편집시에도 음악을 들으면서". 처음엔 신스
+// 드럼+메트로놈만 재생하도록 범위를 좁혔었는데, 의뢰인 재지적("편집화면에서
+// 오히려 신스드럼보다 원곡 음원이 더 중요한거 아니야? 원곡을 듣고 고쳐야지
+// 신스드럼은 이미 노트대로 드럼을 치는데 그거듣고 편집을 할 수 있는게
+// 없지")이 맞아 원곡 분리 음원(스템)까지 재생하도록 확장했다.
+//
+// practice 화면(PracticeCanvas.tsx)의 스템 재생은 scorePlayer.ts의
+// playDrumScore()에 tracks를 넘겨 내부적으로 transport.schedule()이
+// tracks.playFrom()을 "곡 시작 시각"에 예약하게 하는데, 이 화면처럼 재생을
+// 시작하자마자 임의 위치로 점프하면 그 예약된 콜백이 점프 전에 이미
+// 커밋됐는지 불확실하다(이 프로젝트가 과거 겪은 루프 경계 타이밍 버그들
+// (T3-47 등)과 같은 부류의 위험 — 실제 브라우저로 검증 전엔 안전을 단정할
+// 수 없음, CLAUDE.md §1). 대신 **scorePlayer.ts에는 tracks를 아예 안
+// 넘겨**(노트/메트로놈 스케줄링만 맡김) 커서 위치로 점프한 **뒤에 직접**
+// `tracks.playFrom()`을 호출한다 — 이건 handleSeek()(PracticeCanvas.tsx)가
+// 이미 운영 중에 검증된 "먼저 위치를 옮기고, 그 다음 tracks.playFrom()을
+// 직접 호출"과 완전히 같은 패턴이라(재생 중간에 점프하는 것과 세션을
+// 시작하자마자 원하는 위치부터 트는 것은 트랙 쪽 입장에서 동일한 호출) 새
+// 미검증 조합을 쓰지 않는다.
 export interface EditorScreenProps {
   song: SongSummary
   initialScore: DrumScore
@@ -278,6 +292,62 @@ export function EditorScreen({
     }
   }, [])
 
+  // 2026-10-29(의뢰인 요청 — "원곡을 듣고 고쳐야지") — 원곡 분리 음원(스템)
+  // 로딩. PracticeCanvas.tsx의 같은 효과와 같은 가드(audioOffsetMs===0,
+  // 스템 종류 1개 이상)를 쓰되, 이 화면은 song이 바뀌지 않아(마운트 1회)
+  // "곡 전환" 관련 복잡도는 없다.
+  // useMemo로 참조를 안정시킴 — song.available_audio_kinds는 이 화면에서
+  // 안 바뀌지만, .filter()가 매 렌더 새 배열을 만들면 아래 effect들의
+  // 의존성 배열에 넣었을 때 매번 다시 돌게 된다.
+  const stemKinds = useMemo(
+    () => song.available_audio_kinds.filter((k) => k !== 'original') as ChannelKey[],
+    [song.available_audio_kinds],
+  )
+  const canUseAudioTracks = initialScore.audioOffsetMs === 0 && stemKinds.length > 0
+  const audioTrackPoolRef = useRef<AudioTrackPool | null>(null)
+  const [audioTracksLoading, setAudioTracksLoading] = useState(canUseAudioTracks)
+  const [audioTracksAvailable, setAudioTracksAvailable] = useState(false)
+  // 재생 시작 시점에 audioOffsetMs=0인 원본 BPM을 "오디오 파일의 실제
+  // 속도 기준"으로 고정(initialScore 기준 — 세션 중 meta.bpm을 편집해도
+  // 음원 파일 자체의 길이·속도는 그대로이므로). scorePlayer.ts가
+  // playbackRate = playbackBpm/score.meta.bpm을 쓰는 것과 같은 원칙 —
+  // 지금 편집 중인 meta.bpm을 "연습 속도"처럼, 로딩 시점 BPM을 "원곡
+  // 속도"처럼 다룬다.
+  const initialBpmRef = useRef(initialScore.meta.bpm)
+
+  useEffect(() => {
+    if (!canUseAudioTracks) return
+    let cancelled = false
+    createAudioTrackPool(stemKinds.map((kind) => ({ kind, url: songAudioUrl(song.id, kind) })))
+      .then((pool) => {
+        if (cancelled) {
+          pool.destroy()
+          return
+        }
+        audioTrackPoolRef.current = pool
+        setAudioTracksAvailable(true)
+        setAudioTracksLoading(false)
+      })
+      .catch((err) => {
+        if (cancelled) return
+        // PracticeCanvas.tsx의 같은 상황과 같은 폴백 — 조용히 포기하고
+        // 신스 드럼만 재생되는 경로로 넘어간다(원곡 음원 없이도 편집 자체는
+        // 계속할 수 있어야 함).
+        // eslint-disable-next-line no-console
+        console.error('편집 화면 원곡 음원 로딩 실패 — 신스 드럼만 재생됩니다', err)
+        setAudioTracksLoading(false)
+      })
+    return () => {
+      cancelled = true
+      audioTrackPoolRef.current?.destroy()
+      audioTrackPoolRef.current = null
+    }
+    // song.id·canUseAudioTracks·stemKinds 전부 이 화면 안에서 안 바뀌는
+    // 값이라(song이 교체되지 않음, stemKinds는 위에서 useMemo로 고정) 의존성
+    // 배열에 넣어도 사실상 마운트 1회만 실행된다 — eslint-disable 없이도
+    // 정직하게 규칙을 지킬 수 있어 그렇게 둔다.
+  }, [canUseAudioTracks, song.id, stemKinds])
+
   // 신스 드럼 음색(샘플 로딩)은 한 번만 만들어 재생/일시정지를 반복할 때마다
   // 재사용 — 매번 다시 만들면 비용도 크고 소리가 잠깐 끊길 수 있다.
   const voicesSessionRef = useRef<{
@@ -285,9 +355,14 @@ export function EditorScreen({
     synthGain: Tone.Gain
     limiter: Tone.Limiter
   } | null>(null)
-  // 재생 핸들·메트로놈은 재생을 누를 때마다 새로 만든다(편집 중 노트·BPM·
-  // 박자표가 바뀔 수 있어 "다시 재생"은 항상 최신 state를 반영해야 함).
-  const playbackSessionRef = useRef<{ handle: PlaybackHandle; metronome: Metronome } | null>(null)
+  // 재생 핸들·메트로놈·트랙 플레이어는 재생을 누를 때마다 새로 만든다(편집
+  // 중 노트·BPM·박자표가 바뀔 수 있어 "다시 재생"은 항상 최신 state를
+  // 반영해야 함).
+  const playbackSessionRef = useRef<{
+    handle: PlaybackHandle
+    metronome: Metronome
+    tracks: TrackPlayer | null
+  } | null>(null)
   const rafIdRef = useRef<number | null>(null)
   const lastRafUpdateRef = useRef(0)
 
@@ -296,8 +371,15 @@ export function EditorScreen({
     const voicesSession = voicesSessionRef.current
     if (voicesSession) voicesSession.synthGain.gain.value = effectiveGain(mixerState.synth_drums)
     const session = playbackSessionRef.current
-    if (session) session.metronome.setVolume(metronomeGainToDb(effectiveGain(mixerState.metronome)))
-  }, [mixerState])
+    if (session) {
+      session.metronome.setVolume(metronomeGainToDb(effectiveGain(mixerState.metronome)))
+      if (session.tracks) {
+        for (const key of stemKinds) {
+          session.tracks.setChannelGain(key, effectiveGain(mixerState[key]))
+        }
+      }
+    }
+  }, [mixerState, stemKinds])
 
   function stopRaf() {
     if (rafIdRef.current !== null) {
@@ -381,7 +463,15 @@ export function EditorScreen({
 
   async function handlePlay() {
     setPlaybackError(null)
+    // 트랙 언락(prime)은 사용자 제스처 체인이 살아있는 지금(동기 호출
+    // 시작 지점) 바로 걸어둔다 — PracticeCanvas.tsx의 handlePlay()와 같은
+    // 이유(모바일 자동재생 정책, work/T3-16-feedback-6/plan.md). 음색
+    // 로딩(ensureVoicesSession)과 동시에 진행되게 await는 나중에.
+    const tracks = audioTrackPoolRef.current ? createTrackPlayer(audioTrackPoolRef.current) : null
+    const primePromise = tracks?.prime()
+
     const voicesSession = await ensureVoicesSession()
+    if (primePromise) await primePromise
     if (!voicesSession || !isMountedRef.current) return
 
     // await 이후엔 이 함수가 호출될 당시(클로저)의 state가 아니라 ref로
@@ -394,28 +484,38 @@ export function EditorScreen({
     playbackSessionRef.current?.metronome.dispose()
     const metronome = createMetronome({ timeSignature: latestState.meta.timeSignature })
     metronome.setVolume(metronomeGainToDb(effectiveGain(mixerStateRef.current.metronome)))
+    // tracks는 일부러 안 넘긴다 — 파일 맨 위 주석 참고(handleSeek()와 같은
+    // "위치부터 옮기고 직접 playFrom()" 패턴을 쓰기 위함).
     const handle = playDrumScore(latestScore, voicesSession.voices, {
       // 편집 중 임의 위치부터 듣는 용도라 카운트인은 불필요(처음부터 들을
       // 땐 0초부터라 어차피 카운트인이 의미 없고, 중간부터면 더더욱).
       countInBars: 0,
       countInVolumeDb: metronomeGainToDb(effectiveGain(mixerStateRef.current.metronome)),
     })
-    playbackSessionRef.current = { handle, metronome }
+    playbackSessionRef.current = { handle, metronome, tracks }
 
     const clock = getMasterClock()
     // scorePlayer.ts는 항상 0초부터 스케줄하고 시작한다(count-in 없이도
     // "곡 시작"은 0초) — 재생 시작 직후 바로 지금 커서 위치로 점프한다.
     // 이미 지난 노트의 schedule() 콜백은 그 시각을 넘어서면 자동으로
     // 스킵되는 Tone.js 표준 동작이라(실제 설치된 Transport 소스 기준) 안전.
-    clock.setPositionSeconds(
-      ticksToSeconds(cursorTicksRef.current, latestState.ppq, latestState.meta.bpm),
-    )
+    const positionSeconds = ticksToSeconds(cursorTicksRef.current, latestState.ppq, latestState.meta.bpm)
+    clock.setPositionSeconds(positionSeconds)
+    if (tracks) {
+      // "원곡 속도" 대비 "지금 편집 중인 BPM"의 비율 — PracticeCanvas.tsx의
+      // playbackRate = playbackBpm/score.meta.bpm과 같은 식(위 initialBpmRef
+      // 코멘트 참고). audioOffsetMs===0일 때만 tracks가 있으므로 곡 시작
+      // 기준점(songStartSeconds)은 항상 0.
+      const playbackRate = latestState.meta.bpm / initialBpmRef.current
+      tracks.playFrom(audioTrackPositionSeconds(positionSeconds, 0, playbackRate), playbackRate)
+    }
     setIsPlaying(true)
     startRaf()
   }
 
   function handlePause() {
     playbackSessionRef.current?.handle.pause()
+    playbackSessionRef.current?.tracks?.pause()
     stopRaf()
     const seconds = getMasterClock().getPositionSeconds()
     setCurrentSeconds(seconds)
@@ -713,11 +813,16 @@ export function EditorScreen({
       >
         <button
           onClick={() => void (isPlaying ? handlePause() : handlePlay())}
-          aria-label={isPlaying ? '일시정지' : '재생'}
-          title={isPlaying ? '일시정지' : '재생'}
+          // T3-16-feedback-7(PracticeCanvas.tsx)과 같은 보호장치 — 원곡
+          // 음원이 아직 다 안 받아졌는데 재생을 누르면 끊김 재현 이력 있음.
+          disabled={!isPlaying && audioTracksLoading}
+          aria-label={isPlaying ? '일시정지' : audioTracksLoading ? '원곡 음원 불러오는 중' : '재생'}
+          title={isPlaying ? '일시정지' : audioTracksLoading ? '원곡 음원 불러오는 중…' : '재생'}
           style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}
         >
-          {isPlaying ? (
+          {!isPlaying && audioTracksLoading ? (
+            <Spinner size={16} />
+          ) : isPlaying ? (
             <Pause size={16} aria-hidden="true" fill="currentColor" />
           ) : (
             <Play size={16} aria-hidden="true" fill="currentColor" />
@@ -727,7 +832,13 @@ export function EditorScreen({
           {formatMmSs(currentSeconds)}
         </span>
         <span style={{ color: 'var(--text-muted)', fontSize: '0.85em' }}>
-          신스 드럼 + 메트로놈만 들립니다(원곡 음원은 재생되지 않음).
+          {audioTracksAvailable
+            ? '원곡 음원 + 신스 드럼을 함께 재생합니다.'
+            : canUseAudioTracks
+              ? audioTracksLoading
+                ? '원곡 음원을 불러오는 중…'
+                : '원곡 음원을 불러오지 못해 신스 드럼만 재생됩니다.'
+              : '이 곡은 음원 분리가 안 돼 있어 신스 드럼만 재생됩니다.'}
         </span>
         {playbackError && (
           <span role="alert" style={{ color: 'var(--danger)', fontSize: '0.85em' }}>
@@ -735,7 +846,10 @@ export function EditorScreen({
           </span>
         )}
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--space-3)', marginLeft: 'auto' }}>
-          {(['synth_drums', 'metronome'] as const).map((key) => (
+          {(audioTracksAvailable
+            ? (['synth_drums', 'metronome', ...stemKinds] as const)
+            : (['synth_drums', 'metronome'] as const)
+          ).map((key) => (
             <label
               key={key}
               style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-1)', fontSize: '0.85em' }}

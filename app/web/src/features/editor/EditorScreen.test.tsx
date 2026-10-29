@@ -161,6 +161,33 @@ describe('EditorScreen', () => {
     expect(screen.getByText('0:00')).toBeInTheDocument()
   })
 
+  it('shows the synth-only fallback message when the song has no separated audio (2026-10-29 의뢰인 요청 — "원곡을 듣고 고쳐야지")', () => {
+    render(
+      <EditorScreen song={song} initialScore={makeScore()} onSaved={() => {}} onCancel={() => {}} />,
+    )
+    expect(
+      screen.getByText('이 곡은 음원 분리가 안 돼 있어 신스 드럼만 재생됩니다.'),
+    ).toBeInTheDocument()
+    // 음원이 없으므로 원곡 채널 슬라이더는 안 뜸.
+    expect(screen.queryByText('베이스')).not.toBeInTheDocument()
+  })
+
+  it('does not attempt to load audio tracks when audioOffsetMs is non-zero, even if stems exist', () => {
+    const songWithStems: SongSummary = { ...song, available_audio_kinds: ['stem_drums', 'stem_bass'] }
+    const scoreWithOffset: DrumScore = { ...makeScore(), audioOffsetMs: 50 }
+    render(
+      <EditorScreen
+        song={songWithStems}
+        initialScore={scoreWithOffset}
+        onSaved={() => {}}
+        onCancel={() => {}}
+      />,
+    )
+    expect(
+      screen.getByText('이 곡은 음원 분리가 안 돼 있어 신스 드럼만 재생됩니다.'),
+    ).toBeInTheDocument()
+  })
+
   it('scrolls the grid to initialPositionTicks on mount without starting playback (연주 화면 "편집하기" 연동)', () => {
     render(
       <EditorScreen
