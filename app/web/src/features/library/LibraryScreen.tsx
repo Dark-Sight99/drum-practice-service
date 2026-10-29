@@ -15,6 +15,7 @@ import { UploadScreen } from '../upload/UploadScreen'
 import { Toast } from '../../components/Toast'
 import { Modal } from '../../components/Modal'
 import { SongCardSkeleton } from '../../components/Skeleton'
+import { Spinner } from '../../components/Spinner'
 
 export interface LibraryScreenProps {
   onOpenSong: (song: SongSummary, drumScore: DrumScore) => void
@@ -366,9 +367,7 @@ export function LibraryScreen({ onOpenSong, onEditSong, onLoggedOut }: LibrarySc
         onPlaySong={onOpenSong}
       />
 
-      {toast && (
-        <Toast key={toast.id} message={toast.message} onDismiss={() => setToast(null)} />
-      )}
+      {toast && <Toast key={toast.id} message={toast.message} onDismiss={() => setToast(null)} />}
 
       <input
         placeholder="제목·아티스트 검색"
@@ -449,6 +448,9 @@ export function LibraryScreen({ onOpenSong, onEditSong, onLoggedOut }: LibrarySc
                     }}
                     disabled={openingId === song.id}
                     style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 'var(--space-2)',
                       background: 'none',
                       border: 'none',
                       color: 'var(--text)',
@@ -458,10 +460,18 @@ export function LibraryScreen({ onOpenSong, onEditSong, onLoggedOut }: LibrarySc
                       cursor: 'pointer',
                     }}
                   >
-                    <strong>{song.title}</strong>
-                    {song.artist && (
-                      <span style={{ color: 'var(--text-muted)' }}> — {song.artist}</span>
-                    )}
+                    {/* 2026-10-29(의뢰인 요청) — "곡을 골랐을 때 서버렉 등으로
+                     * 오래 걸리면 화면에 아무 반응이 없다" — DrumScore를
+                     * 가져오는 동안(handleOpen) 버튼이 비활성화되는 것 말고는
+                     * 아무 표시가 없었다. 업로드 화면의 "노트를 생성하는
+                     * 중…"과 같은 Spinner 컴포넌트 재사용. */}
+                    {openingId === song.id && <Spinner size={16} />}
+                    <span>
+                      <strong>{song.title}</strong>
+                      {song.artist && (
+                        <span style={{ color: 'var(--text-muted)' }}> — {song.artist}</span>
+                      )}
+                    </span>
                   </button>
                 ) : (
                   // 처리가 아직 안 끝난 곡은 눌러도 열 게 없으므로(DrumScore가
@@ -485,7 +495,10 @@ export function LibraryScreen({ onOpenSong, onEditSong, onLoggedOut }: LibrarySc
                * 안 퍼지게(stopPropagation) 막아야 "편집" 등을 눌렀는데 동시에
                * 연주 화면으로도 넘어가는 일이 없다(카드 자체엔 키보드 핸들러가
                * 없어 키 입력은 막을 필요 없음 — 위 코멘트 참고). */}
-              <div style={{ display: 'flex', gap: 'var(--space-1)' }} onClick={(e) => e.stopPropagation()}>
+              <div
+                style={{ display: 'flex', gap: 'var(--space-1)' }}
+                onClick={(e) => e.stopPropagation()}
+              >
                 <button
                   onClick={() => void handleEdit(song)}
                   disabled={!isReady || openingId === song.id}
@@ -506,9 +519,7 @@ export function LibraryScreen({ onOpenSong, onEditSong, onLoggedOut }: LibrarySc
         onClose={() => setPendingDeleteSong(null)}
         title="곡 삭제"
       >
-        <p>
-          "{pendingDeleteSong?.title}"을(를) 삭제할까요? 이 작업은 되돌릴 수 없습니다.
-        </p>
+        <p>"{pendingDeleteSong?.title}"을(를) 삭제할까요? 이 작업은 되돌릴 수 없습니다.</p>
         <div
           style={{
             display: 'flex',
