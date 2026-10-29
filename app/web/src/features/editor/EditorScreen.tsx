@@ -211,6 +211,15 @@ export function EditorScreen({
     mixerStateRef.current = mixerState
   }, [mixerState])
 
+  // Codex 모드A 지적(Medium, 반영) — GET 응답이 늦게 오는 사이 사용자가
+  // 먼저 슬라이더를 움직이면, 응답이 도착했을 때 그 조작값을 통째로
+  // 덮어써 잃어버릴 수 있었다(이미 예약된 저장 타이머가 그 뒤 서버 옛
+  // 값을 다시 저장해버릴 위험까지). PracticeCanvas.tsx의
+  // userEditedChannelsRef와 같은 원칙을 가볍게 적용 — 사용자가 한 번이라도
+  // 건드리면 그 뒤로는 GET 응답을 더 이상 반영하지 않는다(이 화면은 채널
+  // 2개뿐이라 채널별 세밀한 병합까진 필요 없다고 판단).
+  const mixerEditedRef = useRef(false)
+
   // 계정 전체 공유 믹서(의뢰인 요청 "믹서 동일하게 사용") — practice 화면과
   // 같은 `/auth/me/mixer-setting`을 그대로 쓴다. practice의 채널별 편집-추적·
   // 저장 직렬화 같은 정교한 경합 방지(PracticeCanvas.tsx 참고)는 이 화면
@@ -219,7 +228,7 @@ export function EditorScreen({
     let cancelled = false
     fetchMixerSetting()
       .then(({ volumes }) => {
-        if (cancelled || !volumes) return
+        if (cancelled || !volumes || mixerEditedRef.current) return
         const merged = defaultMixerState()
         for (const key of CHANNEL_KEYS) if (volumes[key]) merged[key] = volumes[key]
         setMixerStateRaw(merged)
@@ -234,6 +243,7 @@ export function EditorScreen({
 
   const mixerSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   function updateChannel(key: ChannelKey, patch: Partial<ChannelState>) {
+    mixerEditedRef.current = true
     setMixerStateRaw((prev) => {
       const next = { ...prev, [key]: { ...prev[key], ...patch } }
       if (mixerSaveTimerRef.current) clearTimeout(mixerSaveTimerRef.current)
@@ -301,16 +311,57 @@ export function EditorScreen({
     return Math.max(0, Math.round(seconds * (meta.bpm / 60) * ppq))
   }
 
-  async function handlePlay() {
-    if (!voicesSessionRef.current) {
-      const limiter = new Tone.Limiter(-1).connect(Tone.getDestination())
-      const synthGain = new Tone.Gain(effectiveGain(mixerStateRef.current.synth_drums)).connect(
-        limiter,
-      )
+  // Codex 모드A 지적(필수, 반영) — createDrumVoices()가 비동기라 (1) 재생
+  // 버튼을 빠르게 두 번 누르면 voicesSessionRef가 아직 null인 채로 생성이
+  // 두 번 겹쳐 시작돼 하나가 유실(dispose 안 됨, 메모리 누수)되고, (2) 생성이
+  // 끝나기 전에 화면을 떠나면(언마운트) 뒤늦게 끝난 생성 결과가 아무도
+  // 정리 안 한 채 남거나, 심하면 이미 사라진 컴포넌트를 위해 재생을 시작할
+  // 수 있었다. 재진입 가드(isStartingVoicesRef)와 언마운트 플래그
+  // (isMountedRef)로 막고, 샘플 로딩 실패도 처리한다.
+  const isStartingVoicesRef = useRef(false)
+  const isMountedRef = useRef(true)
+  const [playbackError, setPlaybackError] = useState<string | null>(null)
+
+  async function ensureVoicesSession(): Promise<{
+    voices: DrumVoiceMap
+    synthGain: Tone.Gain
+    limiter: Tone.Limiter
+  } | null> {
+    if (voicesSessionRef.current) return voicesSessionRef.current
+    if (isStartingVoicesRef.current) return null // 이미 다른 호출이 생성 중
+    isStartingVoicesRef.current = true
+    const limiter = new Tone.Limiter(-1).connect(Tone.getDestination())
+    const synthGain = new Tone.Gain(effectiveGain(mixerStateRef.current.synth_drums)).connect(
+      limiter,
+    )
+    try {
       const voices = await createDrumVoices(synthGain)
-      voicesSessionRef.current = { voices, synthGain, limiter }
+      if (!isMountedRef.current) {
+        // 로딩이 끝나기 전에 화면을 떠남 — 방금 만든 리소스를 그대로 정리.
+        disposeDrumVoices(voices)
+        synthGain.dispose()
+        limiter.dispose()
+        return null
+      }
+      const session = { voices, synthGain, limiter }
+      voicesSessionRef.current = session
+      return session
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error('신스 드럼 음색 로딩 실패', err)
+      synthGain.dispose()
+      limiter.dispose()
+      if (isMountedRef.current) setPlaybackError('재생 음색을 불러오지 못했습니다')
+      return null
+    } finally {
+      isStartingVoicesRef.current = false
     }
-    const voicesSession = voicesSessionRef.current
+  }
+
+  async function handlePlay() {
+    setPlaybackError(null)
+    const voicesSession = await ensureVoicesSession()
+    if (!voicesSession || !isMountedRef.current) return
 
     playbackSessionRef.current?.handle.stop()
     playbackSessionRef.current?.metronome.dispose()
@@ -346,6 +397,7 @@ export function EditorScreen({
   // 언마운트 시 오디오 리소스 정리.
   useEffect(() => {
     return () => {
+      isMountedRef.current = false
       stopRaf()
       playbackSessionRef.current?.handle.stop()
       playbackSessionRef.current?.metronome.dispose()
@@ -630,6 +682,11 @@ export function EditorScreen({
         <span style={{ color: 'var(--text-muted)', fontSize: '0.85em' }}>
           신스 드럼 + 메트로놈만 들립니다(원곡 음원은 재생되지 않음).
         </span>
+        {playbackError && (
+          <span role="alert" style={{ color: 'var(--danger)', fontSize: '0.85em' }}>
+            {playbackError}
+          </span>
+        )}
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--space-3)', marginLeft: 'auto' }}>
           {(['synth_drums', 'metronome'] as const).map((key) => (
             <label
