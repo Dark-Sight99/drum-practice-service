@@ -133,9 +133,10 @@ describe('EditorScreen', () => {
     expect(screen.getByText(/선택됨: KK/)).toBeInTheDocument()
 
     const grid = screen.getByRole('application')
-    fireEvent.keyDown(grid, { key: 'ArrowUp' }) // KK는 마지막 행 — 한 칸 위는 RD
+    // T3-60(연주 화면 레인 순서와 통일) — KK 한 칸 위는 이제 SN.
+    fireEvent.keyDown(grid, { key: 'ArrowUp' })
 
-    expect(screen.getByText(/선택됨: RD/)).toBeInTheDocument()
+    expect(screen.getByText(/선택됨: SN/)).toBeInTheDocument()
   })
 
   it('supports undo/redo via the toolbar buttons', () => {
@@ -202,6 +203,49 @@ describe('EditorScreen', () => {
     expect(screen.getByRole('button', { name: '재생' })).toBeInTheDocument()
     const grid = screen.getByRole('application')
     expect(grid.scrollLeft).toBeGreaterThan(0)
+  })
+
+  it('seeks forward/backward even while not playing, clamped at 0 (2026-10-29 의뢰인 요청 — "앞으로 뒤로 이동이 안되서")', () => {
+    render(
+      <EditorScreen song={song} initialScore={makeScore()} onSaved={() => {}} onCancel={() => {}} />,
+    )
+    expect(screen.getByText('0:00')).toBeInTheDocument()
+
+    // makeScore()는 노트가 1개뿐(틱 480)이라 곡 길이(여유 2마디 포함) 추정이
+    // 짧다 — +10초는 곡 끝(위 클램프 상한)을 넘어서므로, 상한 안쪽 값으로
+    // "이동 자체가 되는지"만 확인한다(상한 클램프 자체는 PracticeCanvas.tsx의
+    // handleSeek()와 같은 원리라 이 화면에서 별도로 재검증하지 않음).
+    fireEvent.click(screen.getByRole('button', { name: '10초 앞으로' }))
+    expect(screen.getByText(/^0:0[1-9]|^0:[1-5]\d/)).toBeInTheDocument()
+    expect(screen.queryByText('0:00')).not.toBeInTheDocument()
+
+    // 0초 아래로는 못 내려감(클램프).
+    fireEvent.click(screen.getByRole('button', { name: '10초 뒤로' }))
+    fireEvent.click(screen.getByRole('button', { name: '10초 뒤로' }))
+    expect(screen.getByText('0:00')).toBeInTheDocument()
+  })
+
+  it('shows and wires up the "연습 화면으로" back button only when onBackToPractice is given (2026-10-29 의뢰인 요청)', () => {
+    const onBackToPractice = vi.fn()
+    render(
+      <EditorScreen
+        song={song}
+        initialScore={makeScore()}
+        onSaved={() => {}}
+        onCancel={() => {}}
+        initialPositionTicks={960}
+        onBackToPractice={onBackToPractice}
+      />,
+    )
+    fireEvent.click(screen.getByRole('button', { name: '← 연습 화면' }))
+    expect(onBackToPractice).toHaveBeenCalledWith(960)
+  })
+
+  it('does not show the "연습 화면으로" back button when onBackToPractice is not given (라이브러리에서 바로 편집으로 들어온 경우)', () => {
+    render(
+      <EditorScreen song={song} initialScore={makeScore()} onSaved={() => {}} onCancel={() => {}} />,
+    )
+    expect(screen.queryByRole('button', { name: '← 연습 화면' })).not.toBeInTheDocument()
   })
 
   it('does not let grid shortcuts interfere with the playback-speed input (2026-10-29부터 BPM 자체는 편집 불가, 재생 속도만 조절)', () => {

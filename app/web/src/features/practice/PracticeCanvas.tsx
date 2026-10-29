@@ -3,6 +3,7 @@ import * as Tone from 'tone'
 import {
   Drum,
   FastForward,
+  FileMusic,
   Music2,
   Pause,
   Play,
@@ -359,6 +360,11 @@ export interface PracticeCanvasProps {
    * 버튼 자체를 보여줄 수 있어 둘 다 선택값으로 묶는다. */
   song?: SongSummary
   onEditSong?: (song: SongSummary, drumScore: DrumScore, positionTicks: number) => void
+  /** 2026-10-29(의뢰인 요청) — "편집하고나서 연습화면으로 돌아가서 다시 그
+   * 부분부터 치고싶은데". EditorScreen.tsx의 같은 prop과 대칭 — 마운트 시
+   * 1회만 이 위치로 Transport를 점프시키고, 자동 재생은 하지 않는다(위
+   * onEditSong과 같은 "위치만, 재생은 사용자가" 원칙). */
+  initialPositionTicks?: number
 }
 
 export function PracticeCanvas({
@@ -380,6 +386,7 @@ export function PracticeCanvas({
   barsVisible: initialBarsVisible,
   songId,
   availableAudioKinds = [],
+  initialPositionTicks,
 }: PracticeCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const rendererRef = useRef<LaneRenderer | null>(null)
@@ -907,6 +914,25 @@ export function PracticeCanvas({
         .trim(),
       hitWindowSeconds: 0.06,
     })
+  }, [])
+
+  // 2026-10-29(의뢰인 요청) — "편집하고나서 연습화면으로 돌아가서 다시 그
+  // 부분부터 치고싶은데" — EditorScreen.tsx의 같은 목적 효과와 대칭. 마운트
+  // 1회만 — 그 이후(연습 중 탐색 등) 위치 변화로 다시 점프하면 사용자가
+  // 직접 옮긴 위치를 덮어써 버린다. 렌더러는 매 프레임 clock.getPositionSeconds()
+  // 를 그대로 읽으므로(위 loop() 참고) Transport 위치만 옮기면 재생을 누르기
+  // 전에도 그 위치가 바로 화면에 반영된다.
+  useEffect(() => {
+    if (initialPositionTicks === undefined) return
+    // 마운트 시점의 playbackBpm은 항상 score.meta.bpm(기본값, 아직 사용자가
+    // 속도를 안 건드린 새 인스턴스)과 같다 — 그래도 handleEditClick()의
+    // 역산과 같은 기준(playbackBpm)을 명시적으로 써서 일관성을 둔다.
+    const barSeconds = barDurationSeconds(score.meta.timeSignature, playbackBpm)
+    const songStartSeconds = barSeconds * COUNT_IN_BARS
+    const positionSeconds =
+      songStartSeconds + (initialPositionTicks / score.ppq) * (60 / playbackBpm)
+    getMasterClock().setPositionSeconds(positionSeconds)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   // T3-16(성능, 2026-10-26) — 의뢰인이 Safari 실기기 프로파일러로 T3-15 수정
@@ -1575,12 +1601,17 @@ export function PracticeCanvas({
        * 자동으로 재생을 시작하지도 않음(의뢰인 명시: "연주페이지에서
        * 재생되는동안 편집페이지에서도 동일하게 재생되고 있으면 안됨"). */}
       {song && onEditSong && (
+        // 2026-10-29(의뢰인 요청) — "편집하기라는 버튼이 멀 편집하는건지 잘
+        // 느낌이 안오거든? 그래서 악보 편집하기라고 쓰자. 음표아이콘도 하나
+        // 넣어주고" — T3-60.
         <button
           onClick={() => {
             handleEditClick()
           }}
+          style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-1)' }}
         >
-          편집하기
+          <FileMusic size={16} aria-hidden="true" />
+          악보 편집하기
         </button>
       )}
       <label style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import * as Tone from 'tone'
-import { Pause, Play, Redo2, RotateCcw, Undo2 } from 'lucide-react'
+import { FastForward, Pause, Play, Redo2, Rewind, RotateCcw, Undo2 } from 'lucide-react'
 import { Spinner } from '../../components/Spinner'
 import type { DrumNote, DrumPiece, DrumScore, Hand } from '../../score/types'
 import { alternateHandsByTick, validateDrumScore } from '../../score'
@@ -20,7 +20,9 @@ import {
   effectiveGain,
   getMasterClock,
   metronomeGainToDb,
+  musicVolume,
   playDrumScore,
+  setMusicVolume,
   ticksPerBar,
   ticksToSeconds,
   type AudioTrackPool,
@@ -94,6 +96,12 @@ export interface EditorScreenProps {
    * 편집페이지에서도 동일하게 재생되고 있으면 안됨") — 위치만 맞춰두고
    * 멈춰 있는 상태로 진입. */
   initialPositionTicks?: number
+  /** 2026-10-29(의뢰인 요청) — "편집하고나서 연습화면으로 돌아가서 다시 그
+   * 부분부터 치고싶은데 돌아갈 수 있는 버튼 및 기능이 없는거 같다". 연주
+   * 화면의 "악보 편집하기"로 들어왔을 때만(App.tsx가 결정) 전달되며, 지금
+   * 커서(틱) 위치를 그대로 넘긴다. 저장 여부와 무관 — "← 라이브러리"
+   * (onCancel)와 같은 원칙으로 저장하지 않은 변경은 버리고 이동한다. */
+  onBackToPractice?: (positionTicks: number) => void
 }
 
 interface EditableNote extends DrumNote {
@@ -173,6 +181,7 @@ export function EditorScreen({
   onSaved,
   onCancel,
   initialPositionTicks,
+  onBackToPractice,
 }: EditorScreenProps) {
   const [history, setHistory] = useState<EditHistory<EditorState>>(() =>
     createHistory(toEditorState(initialScore)),
@@ -333,6 +342,21 @@ export function EditorScreen({
       return next
     })
   }
+
+  // 2026-10-29(의뢰인 요청) — "편집에서도 연습화면의 필터처럼, 드럼원곡·음악·
+  // 가상드럼·메트로놈 4개만". PracticeCanvas.tsx와 완전히 같은 로직
+  // (mixer.ts의 setMusicVolume — stem_bass/vocals/other 3채널을 항상 같은
+  // 값으로 묶어 저장) 재사용 — 저장되는 데이터 구조·effectiveGain() 전부
+  // 그대로, 두 화면이 보여주는 "채널 개수"만 통일된다.
+  function updateMusicVolume(volume: number) {
+    mixerEditedRef.current = true
+    setMixerStateRaw((prev) => {
+      const next = setMusicVolume(prev, volume)
+      if (mixerSaveTimerRef.current) clearTimeout(mixerSaveTimerRef.current)
+      mixerSaveTimerRef.current = setTimeout(() => void saveMixerSetting(next), 500)
+      return next
+    })
+  }
   useEffect(() => {
     return () => {
       if (mixerSaveTimerRef.current) {
@@ -408,6 +432,10 @@ export function EditorScreen({
   const rafIdRef = useRef<number | null>(null)
   const lastRafUpdateRef = useRef(0)
   const lastTrackResyncAtRef = useRef(0)
+  // 2026-10-29(의뢰인 요청) — 재생 위치선을 아래 10회/초 state 갱신보다 더
+  // 자주(매 프레임) 움직이기 위한 DOM 직접 접근 — PracticeCanvas.tsx의
+  // progressBarRef와 같은 이유.
+  const playheadRef = useRef<HTMLDivElement | null>(null)
 
   // 재생 중 믹서가 바뀌면 즉시 반영(practice 화면과 같은 원칙).
   useEffect(() => {
@@ -436,11 +464,17 @@ export function EditorScreen({
     lastRafUpdateRef.current = 0
     lastTrackResyncAtRef.current = 0
     function loop(ts: number) {
-      // 60fps 그대로 setState하면 노트가 많을 때 매 프레임 전체 그리드가
-      // 다시 렌더돼 버벅일 수 있어(PracticeCanvas.tsx가 재생 위치를 React
-      // state 대신 DOM ref에 직접 쓰는 것과 같은 이유), 초당 약 10회로
-      // 줄인다 — 시간 표시·재생 위치선은 이 정도로도 충분히 매끄럽다.
+      // 60fps 그대로 setState하면 노트가 많을 때 매 프레임 전체 그리드이
+      // 다시 렌더돼 버벅일 수 있어, 시간 표시·선택/편집 로직이 쓰는
+      // cursorTicks state는 초당 약 10회로만 갱신한다. 2026-10-29(의뢰인
+      // 지적 "재생 위치선이 끊겨 보여서 눈이 피로하다") — 위치선 자체는
+      // 아래에서 PracticeCanvas.tsx의 progressBarRef와 같은 방식(ref에
+      // style.left 직접 쓰기, state·리렌더 없음)으로 매 프레임 갱신해
+      // 기술적 한계가 아니라 그려지는 방식만 바꿔 해결했다.
       const seconds = clock.getPositionSeconds()
+      if (playheadRef.current) {
+        playheadRef.current.style.left = `${tickToPx(secondsToTicks(seconds))}px`
+      }
       if (ts - lastRafUpdateRef.current > 100) {
         lastRafUpdateRef.current = ts
         setCurrentSeconds(seconds)
@@ -588,6 +622,29 @@ export function EditorScreen({
     setCurrentSeconds(seconds)
     setCursorTicks(secondsToTicks(seconds))
     setIsPlaying(false)
+  }
+
+  // 2026-10-29(의뢰인 요청) — "편집할때 음악을 앞으로 뒤로 이동이 안되서
+  // 다시듣고싶을 때 어떻게 할 방법이 없다" — PracticeCanvas.tsx의 handleSeek()
+  // ±10초 버튼과 같은 패턴. 재생 중이 아닐 때도 눌러서 커서(cursorTicks)만
+  // 옮겨둘 수 있게 하면(다음 "재생" 때 그 위치부터 시작) 더 유용하므로,
+  // PracticeCanvas.tsx와 달리 isPlaying/isPaused로 막지 않고 항상 활성화.
+  function handleSeek(deltaSeconds: number) {
+    const current = isPlaying ? getMasterClock().getPositionSeconds() : currentSeconds
+    const maxSeconds = ticksToSeconds(totalTicks, ppq, playbackBpm)
+    const target = Math.min(maxSeconds, Math.max(0, current + deltaSeconds))
+    setCurrentSeconds(target)
+    setCursorTicks(secondsToTicks(target))
+    if (isPlaying) {
+      const clock = getMasterClock()
+      clock.setPositionSeconds(target)
+      const session = playbackSessionRef.current
+      if (session?.tracks) {
+        // handlePlay()의 같은 위치 점프 블록과 같은 식 — playbackRate 계산 근거도 동일.
+        const playbackRate = playbackBpmRef.current / stateRef.current.meta.bpm
+        session.tracks.playFrom(audioTrackPositionSeconds(target, 0, playbackRate), playbackRate)
+      }
+    }
   }
 
   // 언마운트 시 오디오 리소스 정리.
@@ -776,6 +833,9 @@ export function EditorScreen({
         }}
       >
         <button onClick={onCancel}>← 라이브러리</button>
+        {onBackToPractice && (
+          <button onClick={() => onBackToPractice(cursorTicksRef.current)}>← 연습 화면</button>
+        )}
         {/* 2026-10-29(의뢰인 요청) — "편집기에서 bpm을 건들 수 없었으면
          * 좋겠어... 라이브러리에 bpm은 우리가 업로드했을 때의 원본값이
          * 적히도록". 원곡 BPM은 이제 여기서 조절할 수 없고(읽기 전용
@@ -871,6 +931,14 @@ export function EditorScreen({
         }}
       >
         <button
+          onClick={() => handleSeek(-10)}
+          aria-label="10초 뒤로"
+          title="10초 뒤로"
+          style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+        >
+          <Rewind size={16} aria-hidden="true" />
+        </button>
+        <button
           onClick={() => void (isPlaying ? handlePause() : handlePlay())}
           // T3-16-feedback-7(PracticeCanvas.tsx)과 같은 보호장치 — 원곡
           // 음원이 아직 다 안 받아졌는데 재생을 누르면 끊김 재현 이력 있음.
@@ -886,6 +954,14 @@ export function EditorScreen({
           ) : (
             <Play size={16} aria-hidden="true" fill="currentColor" />
           )}
+        </button>
+        <button
+          onClick={() => handleSeek(10)}
+          aria-label="10초 앞으로"
+          title="10초 앞으로"
+          style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+        >
+          <FastForward size={16} aria-hidden="true" />
         </button>
         <span style={{ fontFamily: 'monospace', color: 'var(--text-muted)', fontSize: '0.9em' }}>
           {formatMmSs(currentSeconds)}
@@ -955,24 +1031,32 @@ export function EditorScreen({
         </label>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--space-3)', marginLeft: 'auto' }}>
           {(audioTracksAvailable
-            ? (['synth_drums', 'metronome', ...stemKinds] as const)
+            ? (['stem_drums', 'music', 'synth_drums', 'metronome'] as const)
             : (['synth_drums', 'metronome'] as const)
-          ).map((key) => (
-            <label
-              key={key}
-              style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-1)', fontSize: '0.85em' }}
-            >
-              {CHANNEL_LABEL[key]}
-              <input
-                type="range"
-                min={0}
-                max={100}
-                value={Math.round(mixerState[key].volume * 100)}
-                onChange={(e) => updateChannel(key, { volume: Number(e.target.value) / 100 })}
-                style={{ width: 80 }}
-              />
-            </label>
-          ))}
+          ).map((key) => {
+            const label = key === 'music' ? '음악(베이스·보컬·그 외)' : CHANNEL_LABEL[key]
+            const volume = key === 'music' ? musicVolume(mixerState) : mixerState[key].volume
+            return (
+              <label
+                key={key}
+                style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-1)', fontSize: '0.85em' }}
+              >
+                {label}
+                <input
+                  type="range"
+                  min={0}
+                  max={100}
+                  value={Math.round(volume * 100)}
+                  onChange={(e) => {
+                    const next = Number(e.target.value) / 100
+                    if (key === 'music') updateMusicVolume(next)
+                    else updateChannel(key, { volume: next })
+                  }}
+                  style={{ width: 80 }}
+                />
+              </label>
+            )
+          })}
         </div>
       </div>
 
@@ -1098,8 +1182,18 @@ export function EditorScreen({
           </div>
         ))}
         {/* 2026-10-29(의뢰인 요청) — 재생 위치선. 그리드 콘텐츠와 같은 스크롤
-         * 영역 안에 절대 위치시켜, 가로 스크롤 시 노트와 같이 움직인다. */}
+         * 영역 안에 절대 위치시켜, 가로 스크롤 시 노트와 같이 움직인다.
+         * left는 cursorTicks state로도 계산해 두되(멈춰있을 때·첫 렌더용,
+         * 아래 값과 항상 같음), 재생 중엔 startRaf()의 rAF 루프가 playheadRef
+         * 에 매 프레임 직접 덮어써 더 자주 갱신한다 — "끊겨 보여 눈이
+         * 피로하다"는 지적(2026-10-29) 원인은 cursorTicks state 자체가
+         * 초당 10회로 스로틀돼 있어서였다(그리드 전체가 다시 그려지는
+         * 비용을 아끼려던 의도적 절충, 위 startRaf() 코멘트 참고) — 기술적
+         * 한계가 아니라, PracticeCanvas.tsx의 progressBarRef·timeDisplayRef와
+         * 같은 방식(React state를 건너뛰고 ref에 직접 style을 쓰면 VDOM
+         * diff·리렌더 없음)으로 이 선 하나만 60fps로 올릴 수 있었다. */}
         <div
+          ref={playheadRef}
           aria-hidden="true"
           style={{
             position: 'absolute',
