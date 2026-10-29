@@ -121,6 +121,30 @@ describe('EditorScreen', () => {
     expect(screen.getByText(/1마디 1박 \+3\/4 \(틱 360\)/)).toBeInTheDocument()
   })
 
+  it('focuses the note button on mousedown so keyboard movement still works after focus moved elsewhere (T3-78, 의뢰인 요청 — "노트생성하고 다른거 만지다 그 노트 다시 클릭 후 키보드 누르면 안 움직인다")', () => {
+    // 실제 버그 원인: handleNoteMouseDown의 e.preventDefault()(텍스트 드래그
+    // 선택 방지용)가 브라우저의 "클릭 시 이 버튼에 포커스" 기본 동작도 같이
+    // 막아버려서, 클릭 직전에 포커스가 다른 곳(여기선 격자 드롭다운)에 있었
+    // 다면 노트를 클릭해도 포커스가 그대로 안 옮겨와 화살표 키가 전혀 안
+    // 먹혔다(실제 브라우저로 재현·확인). mousedown 핸들러가 명시적으로
+    // e.currentTarget.focus()를 불러줘야 한다.
+    render(
+      <EditorScreen song={song} initialScore={makeScore()} onSaved={() => {}} onCancel={() => {}} />,
+    )
+    const kickRow = screen.getByTestId('editor-row-kick')
+    fireEvent.click(kickRow.querySelectorAll('button')[0])
+
+    const gridSelect = screen.getByDisplayValue('8분')
+    gridSelect.focus()
+    expect(document.activeElement).toBe(gridSelect)
+
+    const kickNote = screen.getByRole('button', { name: /KK 노트, 틱 480/ })
+    fireEvent.mouseDown(kickNote, { clientX: 100, button: 0 })
+    fireEvent.mouseUp(window)
+
+    expect(document.activeElement).toBe(kickNote)
+  })
+
   it('updates the bar/beat label live while dragging, not just after the drag commits', () => {
     render(
       <EditorScreen song={song} initialScore={makeScore()} onSaved={() => {}} onCancel={() => {}} />,
