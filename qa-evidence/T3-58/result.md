@@ -211,14 +211,36 @@ Codex 사용량 한도 도달("You've hit your usage limit... try again at Nov
   `tracks.pause()`를 안 불러도 트랙 풀 정리 effect의 cleanup만으로 전부
   멈춤을 확인(정리용 effect 두 개의 실행 순서와 무관하게 안전).
 
+## 새 계정 연결 후 Codex 최종 검수 (5~6차)
+의뢰인이 본인 소유의 다른 계정으로 Codex를 다시 로그인(`codex logout` →
+`codex login`, 터미널에서 직접 완료)한 뒤 재시도.
+
+**5차 — REQUEST_CHANGES** (job `task-mvt3n2cd-0ruu1c`, 새 계정에서 첫 전체
+재검토)
+- [필수] 원곡 음원 재생 시작이 Tone.js의 정밀한 Web Audio 클록이 아니라
+  평범한 `HTMLMediaElement.play()`라 신스 드럼·메트로놈과 어긋나거나
+  드리프트할 수 있음(PracticeCanvas.tsx엔 있는 재생 중 지속 리싱크가 이
+  화면엔 빠져있었음) → `startRaf()`에 PracticeCanvas.tsx와 같은 주기
+  (750ms)·같은 임계값(0.1초)의 `tracks.resync()` 호출 추가.
+- 이 지적을 받고서, 애초에 검토했던 대안(scorePlayer.ts에 tracks를 넘겨
+  내부 스케줄링에 맡기는 방식)이 실제로 작동하지 않는다는 것도 실제
+  브라우저에서 Tone.js 15.1.22를 직접 실행해 확인(임시 테스트 페이지 —
+  `transport.schedule(cb, 0)` 후 `transport.start()` 바로 다음 줄에서
+  `transport.seconds`를 점프시키면 그 콜백이 전혀 발화하지 않음, 2초 대기
+  후 `fired=false`로 직접 측정 — 테스트 파일은 확인 후 바로 삭제, 커밋
+  안 됨). 이로써 지금 방식(직접 `tracks.playFrom()` 호출)이 유일하게
+  작동하는 선택이었음을 실증.
+
+**6차(최종) — APPROVE** (job `task-mvt3twwd-ihgvdp`, 발견 사항 없음)
+- 리싱크가 같은 재생 세션의 TrackPlayer를 정확히 참조함을 확인.
+  `handlePause()`가 트랙을 동기적으로 멈추고 `stopRaf()`를 호출해, pause
+  이후 새 rAF 콜백이 resync를 실행할 틈이 없음을 확인.
+- 원곡 위치 계산(재생 위치·현재 BPM·세션 시작 시 고정한 원곡 BPM)과
+  "이 화면엔 카운트인이 없어 시작 위치 0초가 맞다"는 전제 모두 확인.
+- 전체 diff 재검토에서 추가 결함 없음.
+
 ## 남은 작업
-- **Codex 최종 확인 보류** — 사용량 한도가 풀리는 11월 22일까지는 재시도
-  불가(계정 전체 월간 한도로 보임, 짧은 대기로 풀리지 않음). 그 전까지는
-  위 4라운드(원래 기능)의 검증 + 직접 재검토 2회(원래 기능 1회, 스템
-  추가분 1회)로 대체.
-  **병합 여부는 의뢰인 확인 후 진행** — 이 result.md를 최종 근거로 삼아
-  지금 바로 병합할지, 아니면 11월 22일 이후 Codex 최종 확인까지 기다릴지
-  의뢰인 판단 필요.
+- 없음. `main` 병합 완료.
 - **의뢰인 확인 필요**: `song.original_bpm`(라이브러리 목록 BPM)을 편집
   저장 시 같이 갱신할지 여부(위 "질문에 대한 답" 참고).
 - 의뢰인이 실제로 재생·믹서·편집하기 버튼을 써보고 체감 확인.
