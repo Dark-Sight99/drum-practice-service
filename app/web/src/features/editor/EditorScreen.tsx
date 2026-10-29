@@ -202,11 +202,7 @@ export function EditorScreen({
   // 드래그 중 미리보기(dragPreview)가 "자기 행 안에서만 위치가 바뀐다"는
   // 단순한 가정으로 렌더링될 수 있다(행이 바뀌면 다른 행의 필터된 목록으로
   // 옮겨 그려야 해서 훨씬 복잡해짐).
-  const [isDragging, setIsDragging] = useState(false)
   const [dragPreview, setDragPreview] = useState<{ noteId: number; tick: number } | null>(null)
-  const dragStateRef = useRef<{ noteId: number; startClientX: number; startTick: number } | null>(
-    null,
-  )
   const dragPreviewRef = useRef<{ noteId: number; tick: number } | null>(null)
   // Codex 모드A 지적(필수, 반영) — mousedown이 노트에서 시작했는데 mouseup이
   // (드래그로 옮겨서) 노트 밖 — 즉 행 배경 — 에서 끝나면, 브라우저가 그 뒤에
@@ -840,29 +836,35 @@ export function EditorScreen({
     })
   }
 
+  // 2026-10-29(의뢰인 재지적, 실사용 — "드래그했을 때 노트가 이동하는게
+  // 아니라 복사가 되는데?") — 예전엔 mousedown에서 state(isDragging)만
+  // true로 바꾸고, 그 state를 의존성으로 하는 별도 useEffect에서 실제
+  // window 리스너(mousemove/mouseup)를 달았다. 리액트가 state 변경을
+  // 반영해 그 effect를 실제로 실행하기까지는 한 틱(커밋 이후) 걸리는데,
+  // 그 **짧은 틈 사이에 mousemove·mouseup이 먼저 도착하면**(실제 마우스로
+  // 빠르게 드래그하거나, 자동화 도구로 빠르게 좌표를 옮길 때 실제 브라우저
+  // 자동화로 재현·확인) 아무 리스너도 없어 드래그 자체가 통째로 무시됐다
+  // — mouseup 시점에 미리보기가 시작값 그대로라 커밋이 안 되고(노트는
+  // 제자리), 뒤이어 브라우저가 합성하는 click만 handleRowClick을 통해
+  // 그 자리에 새 노트를 하나 더 만들어 "이동이 아니라 복사"처럼 보였다.
+  // mousedown 핸들러 **안에서 바로**(같은 동기 구간, state·effect를
+  // 거치지 않고) 리스너를 달면 이 틈 자체가 사라진다.
   function handleNoteMouseDown(e: React.MouseEvent, note: EditableNote) {
     e.stopPropagation()
     // Ctrl/Cmd+클릭은 다중 선택 토글 전용(기존 onClick이 처리) — 드래그를
     // 같이 시작하면 "토글하려고 눌렀는데 옮겨짐"이 되므로 건너뛴다.
     if (e.ctrlKey || e.metaKey || isSaving) return
+    // 브라우저 기본 동작(텍스트 선택 드래그 등)이 우리 드래그와 겹쳐 보이는
+    // 걸 막는 방어적 조치 — 노트 버튼엔 셀렉트할 텍스트가 없지만, 빠르게
+    // 드래그할 때 인접 요소까지 끌리는 드래그 셀렉션이 생기지 않게.
+    e.preventDefault()
     setSelectedIds(new Set([note._editorId]))
-    dragStateRef.current = { noteId: note._editorId, startClientX: e.clientX, startTick: note.tick }
+    const drag = { noteId: note._editorId, startClientX: e.clientX, startTick: note.tick }
     dragPreviewRef.current = { noteId: note._editorId, tick: note.tick }
     setDragPreview(dragPreviewRef.current)
-    setIsDragging(true)
-  }
 
-  // 드래그 중에만 window에 리스너를 건다 — isDragging(불리언)만 의존성으로
-  // 둬서 매 mousemove마다(dragPreview가 바뀔 때마다) 떼고 다시 다는 걸
-  // 피한다. 그 대신 핸들러 안에서는 항상 ref(dragStateRef/dragPreviewRef)의
-  // 최신값을 읽는다 — state는 이 effect가 다시 만들어지기 전까지 드래그
-  // 시작 시점 값에 고정되므로(의도적 — 드래그 중엔 다른 편집이 안 일어남).
-  useEffect(() => {
-    if (!isDragging) return
-    function handleMouseMove(e: MouseEvent) {
-      const drag = dragStateRef.current
-      if (!drag) return
-      const deltaPx = e.clientX - drag.startClientX
+    function handleMouseMove(ev: MouseEvent) {
+      const deltaPx = ev.clientX - drag.startClientX
       const deltaTicks = (deltaPx / PX_PER_GRID_UNIT) * unitTicks
       // 위 pxToSnappedTick과 같은 이유(바닥 함수) — 클릭과 드래그가 서로
       // 다른 스냅 규칙을 쓰면 더 헷갈리므로 반드시 같은 함수를 쓴다.
@@ -872,13 +874,10 @@ export function EditorScreen({
       setDragPreview(preview)
     }
     function handleMouseUp() {
-      const drag = dragStateRef.current
       const preview = dragPreviewRef.current
-      dragStateRef.current = null
       dragPreviewRef.current = null
       setDragPreview(null)
-      setIsDragging(false)
-      if (drag && preview && preview.tick !== drag.startTick) {
+      if (preview && preview.tick !== drag.startTick) {
         commit({
           ...state,
           notes: state.notes.map((n) =>
@@ -886,26 +885,26 @@ export function EditorScreen({
           ),
         })
       }
-      if (drag) {
-        // 위 justDraggedRef 코멘트 참고 — 뒤이어 올 수 있는 click 한 번만
-        // 소비하면 되므로 handleRowClick이 먼저 읽으면 바로 꺼진다. click이
-        // 전혀 안 오는 경로(그리드 밖에서 mouseup 등)까지 대비해 다음
-        // 매크로태스크에서 한 번 더 안전하게 꺼준다(click은 mouseup과 같은
-        // 틱에 동기적으로 합성되므로 이 타임아웃보다 항상 먼저 처리된다).
-        justDraggedRef.current = true
-        setTimeout(() => {
-          justDraggedRef.current = false
-        }, 0)
-      }
-    }
-    window.addEventListener('mousemove', handleMouseMove)
-    window.addEventListener('mouseup', handleMouseUp)
-    return () => {
+      // Codex 모드A 지적(필수, 반영) — mousedown이 노트에서 시작했는데
+      // mouseup이(드래그로 옮겨서) 노트 밖(행 배경)에서 끝나면, 브라우저가
+      // 그 뒤에 합성하는 click 이벤트는 mousedown·mouseup 타깃의 가장
+      // 가까운 공통 조상(노트의 부모인 행 자체!)에서 발생한다(UI Events
+      // 스펙) — 그러면 행의 onClick(handleRowClick)이 그 자리에 새 노트를
+      // 또 만들어버린다. 드래그가 있었으면 그 뒤에 올 수 있는 단 한 번의
+      // click만 소비해 무시한다 — click이 전혀 안 오는 경로(그리드 밖에서
+      // mouseup 등)까지 대비해 다음 매크로태스크에서 한 번 더 안전하게
+      // 꺼준다(click은 mouseup과 같은 틱에 동기적으로 합성되므로 이
+      // 타임아웃보다 항상 먼저 처리된다).
+      justDraggedRef.current = true
+      setTimeout(() => {
+        justDraggedRef.current = false
+      }, 0)
       window.removeEventListener('mousemove', handleMouseMove)
       window.removeEventListener('mouseup', handleMouseUp)
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isDragging])
+    window.addEventListener('mousemove', handleMouseMove)
+    window.addEventListener('mouseup', handleMouseUp)
+  }
 
   const selectedNote =
     selectedIds.size === 1 ? (state.notes.find((n) => selectedIds.has(n._editorId)) ?? null) : null
