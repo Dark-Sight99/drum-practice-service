@@ -18,7 +18,7 @@ plan.md §4) — 이게 서버가 막아야 할 가장 구체적인 위험이다
 import math
 from typing import Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 DrumPiece = Literal[
     "kick",
@@ -88,21 +88,28 @@ class DrumScoreIn(BaseModel):
 
     @field_validator("audioOffsetMs")
     @classmethod
-    def audio_offset_must_be_zero(cls, value: float) -> float:
+    def audio_offset_must_be_finite(cls, value: float) -> float:
         # Codex 모드A C-001(재현됨): `value in (inf, -inf)`는 NaN을 못 거름
         # (NaN은 어떤 값과도 같지 않아 `in` 비교에 안 걸림) — math.isfinite()는
         # inf·-inf·NaN을 전부 정확히 걸러냄(Python 공식 문서 math.isfinite).
-        #
-        # T2-8(Codex 모드C 3차 지적, C-001): "유한하기만 하면 통과"였던 이전 검증은
-        # 0이 아닌 값을 API로 직접 올리는 경로를 막지 못했다 — scorePlayer.ts가
-        # 노트를 A-B 루프 경계 밖으로 밀어낼 수 있는데, 그 상호작용 설계는
-        # audioOffsetMs를 실제로 쓰게 될 Phase 3(T3-5, 오디오-MIDI 오프셋 정렬 UI)
-        # 전까지 보류(intent/07-open-questions.md Q-23). 그래서 0만 허용.
-        if not math.isfinite(value) or value != 0:
-            raise ValueError(
-                "audioOffsetMs는 0이어야 합니다(Phase 3 오디오-MIDI 정렬 전까지 임시 제한)"
-            )
+        if not math.isfinite(value):
+            raise ValueError("audioOffsetMs는 유한한 값이어야 합니다")
         return value
+
+    @model_validator(mode="after")
+    def audio_offset_must_be_within_one_beat(self) -> "DrumScoreIn":
+        # T3-72(REQ-02, work/T3-72/plan.md §6) — 예전엔 "0이어야 함"(T2-8,
+        # Phase 3 오디오-MIDI 정렬 전까지의 임시 제한, Q-23)이었는데, 이제
+        # 다운비트 자동 보정(Q-43)이 이 필드를 실제로 채운다. 설계(§2)가
+        # 보장하는 범위(`t0 ∈ [0, 한 박 길이)`)와 정확히 일치하는 범위만
+        # 허용 — 그 범위를 벗어나는 값은 지금 설계가 만들어낼 수 없는
+        # 상태이므로 여전히 거부한다(완전 개방 아님).
+        period_ms = 60_000.0 / self.meta.bpm
+        if not (0 <= self.audioOffsetMs < period_ms):
+            raise ValueError(
+                f"audioOffsetMs는 0 이상, 한 박 길이({period_ms:.3f}ms) 미만이어야 합니다"
+            )
+        return self
 
 
 # T3-4(REQ-05) — 믹서. work/T3-4/plan.md §1에서 정의한 6채널 고정 집합.

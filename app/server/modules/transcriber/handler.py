@@ -18,7 +18,7 @@ from db.models import Asset, AssetKind, Job, Song, SongStatus
 from file_storage import resolve_asset_path, write_song_file
 from modules.transcriber.adtof_transcriber import transcribe
 from modules.transcriber.midi_to_drumscore import midi_to_drumscore
-from modules.transcriber.tempo import estimate_tempo
+from modules.transcriber.tempo import estimate_downbeat_offset_seconds, estimate_tempo
 
 logger = logging.getLogger("worker.transcribe")
 
@@ -83,8 +83,25 @@ def transcribe_handler(job: Job) -> None:
             bpm = estimate_tempo(drums_path)
             logger.info("transcribe song=%s estimated_bpm=%.2f", song.id, bpm)
 
+            # 2026-10-27(의뢰인 발견, Q-43) — 템포가 맞아도 "오디오 파일 시작 =
+            # 1박"이라고만 가정하면 실제 다운비트가 늦게(또는 빠르게) 오는
+            # 곡에서 전체 악보가 일정하게 밀려 보인다(실측: song id=9에서
+            # 평균 0.28초). 같은 드럼 스템에서 다운비트 위상도 추정해
+            # 틱 계산을 재앵커한다(work/T3-72/plan.md).
+            downbeat_offset_seconds = estimate_downbeat_offset_seconds(drums_path, bpm)
+            logger.info(
+                "transcribe song=%s downbeat_offset_seconds=%.4f",
+                song.id,
+                downbeat_offset_seconds,
+            )
+
             midi = pretty_midi.PrettyMIDI(str(tmp_midi))
-            drumscore_dict, unmapped_count = midi_to_drumscore(midi, title=song.title, bpm=bpm)
+            drumscore_dict, unmapped_count = midi_to_drumscore(
+                midi,
+                title=song.title,
+                bpm=bpm,
+                downbeat_offset_seconds=downbeat_offset_seconds,
+            )
             if unmapped_count:
                 logger.info(
                     "transcribe song=%s unmapped_pitch_count=%d", song.id, unmapped_count

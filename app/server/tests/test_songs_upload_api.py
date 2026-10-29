@@ -202,10 +202,12 @@ def test_upload_rejects_nan_audio_offset(client: TestClient, db_session) -> None
     assert client.get("/songs").json() == []
 
 
-def test_upload_rejects_nonzero_audio_offset(client: TestClient, db_session) -> None:
-    # T2-8(Codex 모드C 3차 지적, C-001): "유한하기만 하면 통과"였던 이전 검증은
-    # API로 직접 0이 아닌 값을 올리는 경로를 막지 못했다 — 지금은 0만 허용
-    # (Phase 3 오디오-MIDI 정렬 UI 전까지 임시 제한, intent/07-open-questions.md Q-23).
+def test_upload_rejects_audio_offset_at_or_past_one_beat(client: TestClient, db_session) -> None:
+    # T3-72(REQ-02, 다운비트 자동 보정, Q-43) — 예전엔 "0이어야 함"(T2-8, Q-23,
+    # Phase 3 오디오-MIDI 정렬 전까지 임시 제한)이었는데, 이제 0 이상·한 박
+    # 길이 미만까지 허용한다(work/T3-72/plan.md §6). bpm=120(기본값)의 한 박
+    # 길이는 정확히 500ms이므로, 500.0은 "한 박 길이 미만"을 어겨(경계값
+    # 자체는 불포함) 여전히 거부돼야 한다.
     _make_user(db_session, "u1")
     _login(client, "u1")
     score = _valid_drumscore()
@@ -213,6 +215,28 @@ def test_upload_rejects_nonzero_audio_offset(client: TestClient, db_session) -> 
     resp = _upload(client, drumscore=json.dumps(score))
     assert resp.status_code == 422
     assert client.get("/songs").json() == []
+
+
+def test_upload_rejects_negative_audio_offset(client: TestClient, db_session) -> None:
+    _make_user(db_session, "u1")
+    _login(client, "u1")
+    score = _valid_drumscore()
+    score["audioOffsetMs"] = -1.0
+    resp = _upload(client, drumscore=json.dumps(score))
+    assert resp.status_code == 422
+    assert client.get("/songs").json() == []
+
+
+def test_upload_accepts_audio_offset_within_one_beat(client: TestClient, db_session) -> None:
+    # T3-72 — 0 초과·한 박 길이 미만인 값은 이제 정상 허용돼야 한다(다운비트
+    # 자동 보정이 실제로 채워 넣는 값의 범위).
+    _make_user(db_session, "u1")
+    _login(client, "u1")
+    score = _valid_drumscore()
+    score["audioOffsetMs"] = 280.0  # bpm=120 한 박(500ms)보다 작음
+    resp = _upload(client, drumscore=json.dumps(score))
+    assert resp.status_code == 201
+    assert client.get("/songs").json()[0]["id"] is not None
 
 
 @pytest.mark.parametrize(

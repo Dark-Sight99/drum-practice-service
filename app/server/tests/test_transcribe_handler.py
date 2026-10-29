@@ -107,19 +107,32 @@ def test_transcribe_handler_passes_estimated_tempo_to_midi_to_drumscore(db, monk
     monkeypatch.setattr(handler_module, "transcribe", _fake_transcribe_writing_midi([35]))
 
     FIXED_BPM = 97.5
+    FIXED_OFFSET_SECONDS = 0.123
     estimate_tempo_calls: list[Path] = []
+    estimate_offset_calls: list[tuple[Path, float]] = []
     midi_to_drumscore_bpm_calls: list[float] = []
+    midi_to_drumscore_offset_calls: list[float] = []
     real_midi_to_drumscore = handler_module.midi_to_drumscore
 
     def spy_estimate_tempo(audio_path) -> float:
         estimate_tempo_calls.append(audio_path)
         return FIXED_BPM
 
-    def spy_midi_to_drumscore(midi, title, bpm):
+    def spy_estimate_downbeat_offset_seconds(audio_path, bpm) -> float:
+        estimate_offset_calls.append((audio_path, bpm))
+        return FIXED_OFFSET_SECONDS
+
+    def spy_midi_to_drumscore(midi, title, bpm, downbeat_offset_seconds=0.0):
         midi_to_drumscore_bpm_calls.append(bpm)
-        return real_midi_to_drumscore(midi, title=title, bpm=bpm)
+        midi_to_drumscore_offset_calls.append(downbeat_offset_seconds)
+        return real_midi_to_drumscore(
+            midi, title=title, bpm=bpm, downbeat_offset_seconds=downbeat_offset_seconds
+        )
 
     monkeypatch.setattr(handler_module, "estimate_tempo", spy_estimate_tempo)
+    monkeypatch.setattr(
+        handler_module, "estimate_downbeat_offset_seconds", spy_estimate_downbeat_offset_seconds
+    )
     monkeypatch.setattr(handler_module, "midi_to_drumscore", spy_midi_to_drumscore)
 
     handler_module.transcribe_handler(job)
@@ -129,6 +142,12 @@ def test_transcribe_handler_passes_estimated_tempo_to_midi_to_drumscore(db, monk
     assert len(estimate_tempo_calls) == 1
     assert estimate_tempo_calls[0].name == "stem_drums.wav"
     assert midi_to_drumscore_bpm_calls == [FIXED_BPM]
+    # T3-72(Q-43) — 다운비트 오프셋도 estimate_tempo()와 같은 드럼 스템 경로로
+    # 추정되고, 그 추정값(및 bpm)이 그대로 midi_to_drumscore()로 전달되는지
+    # (배선 자체)를 확인한다.
+    assert len(estimate_offset_calls) == 1
+    assert estimate_offset_calls[0] == (estimate_tempo_calls[0], FIXED_BPM)
+    assert midi_to_drumscore_offset_calls == [FIXED_OFFSET_SECONDS]
     # 2026-10-29(의뢰인 요청) — 라이브러리 목록이 읽는 Song.original_bpm도
     # 같은 추정값으로 채워져야 "BPM 미상"이 안 뜬다(T3-52).
     assert song.original_bpm == FIXED_BPM

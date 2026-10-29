@@ -11,7 +11,7 @@ import pytest
 import soundfile as sf
 
 import modules.transcriber.tempo as tempo_module
-from modules.transcriber.tempo import DEFAULT_BPM, estimate_tempo
+from modules.transcriber.tempo import DEFAULT_BPM, estimate_downbeat_offset_seconds, estimate_tempo
 
 
 def _write_click_track(path, bpm: float, duration_s: float = 20.0, sr: int = 44100) -> None:
@@ -113,3 +113,109 @@ def test_estimate_tempo_falls_back_to_default_on_silence(tmp_path):
 
     assert bpm > 0
     assert np.isfinite(bpm)
+
+
+# T3-72(REQ-02, intent/07-open-questions.md Q-43) — 다운비트 위상 추정.
+# estimate_tempo()와 달리 librosa.beat.beat_track()·librosa.frames_to_time()을
+# 직접 monkeypatch해 beat_times 배열을 완전히 통제한다 — 원형평균 자체의
+# 수학적 정확성(특히 위상이 0/period 경계에 걸친 경우)을 검증하는 게
+# 목적이라, 실제 클릭 트랙보다 정확한 합성 위상 데이터가 더 적합하다.
+
+
+def _patch_beat_times(monkeypatch, beat_times) -> None:
+    monkeypatch.setattr(
+        tempo_module.librosa, "load", lambda *a, **k: (np.zeros(1000, dtype=np.float32), 44100)
+    )
+    monkeypatch.setattr(
+        tempo_module.librosa.beat,
+        "beat_track",
+        lambda *a, **k: (None, np.arange(len(beat_times))),
+    )
+    monkeypatch.setattr(
+        tempo_module.librosa, "frames_to_time", lambda frames, sr=None: np.asarray(beat_times)
+    )
+
+
+def _circular_distance(a: float, b: float, period: float) -> float:
+    diff = abs(a - b) % period
+    return min(diff, period - diff)
+
+
+def test_estimate_downbeat_offset_recovers_clean_phase(tmp_path, monkeypatch):
+    """bpm=120(period=0.5초), 모든 비트가 정확히 위상 0.1초에 있는 깨끗한
+    데이터 — 원형평균이 당연히 그 값을 그대로 복원해야 한다."""
+    beat_times = [0.1, 0.6, 1.1, 1.6, 2.1, 2.6]
+    _patch_beat_times(monkeypatch, beat_times)
+
+    t0 = estimate_downbeat_offset_seconds(tmp_path / "dummy.wav", bpm=120.0)
+
+    assert t0 == pytest.approx(0.1, abs=1e-6)
+
+
+def test_estimate_downbeat_offset_handles_phase_straddling_the_boundary(tmp_path, monkeypatch):
+    """위상이 0초/period 경계에 걸쳐 흩어진 경우 — 산술평균이면 완전히
+    엉뚱한 값(경계 반대편, 중간 어딘가)이 나오지만 원형평균은 "경계
+    근처에 모여 있다"는 걸 정확히 복원해야 한다(work/T3-72/plan.md §2
+    설명 그대로). bpm=60(period=1.0초), 진짜 위상은 0.99초 근처."""
+    beat_times = [0.97, 1.98, 3.01, 4.02, 4.99]  # mod 1.0 => 0.97,0.98,0.01,0.02,0.99
+    _patch_beat_times(monkeypatch, beat_times)
+    naive_mean = float(np.mean([t % 1.0 for t in beat_times]))
+    assert naive_mean == pytest.approx(0.594, abs=0.01)  # 산술평균은 완전히 틀림(대조군)
+
+    t0 = estimate_downbeat_offset_seconds(tmp_path / "dummy.wav", bpm=60.0)
+
+    assert _circular_distance(t0, 0.99, period=1.0) < 0.03
+
+
+def test_estimate_downbeat_offset_falls_back_to_zero_when_phases_scattered(tmp_path, monkeypatch):
+    """위상이 한 박 안에 고르게 흩어져 있으면(비트 트래킹 자체가 못 믿을
+    곡) 신뢰도(합성 벡터 길이)가 MIN_RESULTANT_LENGTH 미만이 돼 0.0(보정
+    없음)으로 안전하게 폴백해야 한다."""
+    period = 0.5
+    beat_times = [i * period / 8 for i in range(8)]  # 한 박 안에 고르게 8등분
+    _patch_beat_times(monkeypatch, beat_times)
+
+    t0 = estimate_downbeat_offset_seconds(tmp_path / "dummy.wav", bpm=120.0)
+
+    assert t0 == 0.0
+
+
+def test_estimate_downbeat_offset_falls_back_to_zero_with_too_few_beats(tmp_path, monkeypatch):
+    """비트 3개 이하면 통계를 신뢰할 수 없어 0.0으로 폴백."""
+    _patch_beat_times(monkeypatch, [0.1, 0.6, 1.1])
+
+    t0 = estimate_downbeat_offset_seconds(tmp_path / "dummy.wav", bpm=120.0)
+
+    assert t0 == 0.0
+
+
+def test_estimate_downbeat_offset_falls_back_to_zero_on_decode_failure(tmp_path):
+    """오디오로 디코딩할 수 없는 파일이어도 예외 없이 0.0(보정 없음)으로
+    안전하게 폴백해야 한다 — estimate_tempo()와 같은 원칙."""
+    garbage_path = tmp_path / "not_audio.wav"
+    garbage_path.write_bytes(b"this is not a real wav file")
+
+    t0 = estimate_downbeat_offset_seconds(garbage_path, bpm=120.0)
+
+    assert t0 == 0.0
+
+
+@pytest.mark.parametrize("bad_bpm", [0.0, -10.0, float("nan"), float("inf")])
+def test_estimate_downbeat_offset_falls_back_to_zero_for_invalid_bpm(tmp_path, bad_bpm):
+    """0 나눗셈(period = 60/bpm)을 막기 위해, bpm 자체가 비정상이면 오디오를
+    읽기도 전에 0.0으로 안전하게 폴백해야 한다."""
+    t0 = estimate_downbeat_offset_seconds(tmp_path / "dummy.wav", bpm=bad_bpm)
+
+    assert t0 == 0.0
+
+
+def test_estimate_downbeat_offset_result_is_always_within_one_beat(tmp_path, monkeypatch):
+    """반환값은 항상 [0, period) 범위여야 한다(api/schemas.py의 검증 범위와
+    정확히 일치시켜야 하므로) — 위상이 음수로 계산되는 경우(atan2가 음수를
+    반환할 때)도 period를 더해 양수 범위로 감싸는지 확인."""
+    beat_times = [0.05, 0.55, 1.05, 1.55]  # bpm=120(period=0.5) 기준 위상 0.05
+    _patch_beat_times(monkeypatch, beat_times)
+
+    t0 = estimate_downbeat_offset_seconds(tmp_path / "dummy.wav", bpm=120.0)
+
+    assert 0.0 <= t0 < 0.5

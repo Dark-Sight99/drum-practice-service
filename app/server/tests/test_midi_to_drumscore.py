@@ -101,3 +101,78 @@ def test_empty_midi_produces_empty_notes_but_still_valid():
     assert drumscore["notes"] == []
     assert unmapped == 0
     DrumScoreIn.model_validate(drumscore)  # 예외 없이 통과해야 함
+
+
+# T3-72(REQ-02, intent/07-open-questions.md Q-43) — 다운비트 자동 보정.
+
+
+def test_downbeat_offset_reanchors_tick_zero():
+    """다운비트(틱 0)가 실제 오디오 파일의 `downbeat_offset_seconds`초
+    지점이라고 보정하면, 그 지점에 정확히 있는 노트의 틱이 0이 돼야 한다
+    (work/T3-72/plan.md §1 핵심 결정)."""
+    midi = _make_midi([(35, 0.28, 0.38, 100)])  # 0.28초 지점의 킥
+
+    drumscore = midi_to_drumscore(
+        midi, title="t", bpm=92.0, downbeat_offset_seconds=0.28
+    )[0]
+
+    assert drumscore["notes"][0]["tick"] == 0
+
+
+def test_downbeat_offset_shifts_all_ticks_by_the_same_amount():
+    """다운비트 보정 전/후 결과를 나란히 비교 — 모든 노트가 똑같은 양만큼
+    (초 단위로) 당겨져야 한다(이번 버그의 실제 증상이었던 song id=9 실측,
+    평균 0.2789초와 같은 성격)."""
+    notes = [(35, 0.5, 0.6, 100), (38, 1.0, 1.1, 90), (42, 1.5, 1.6, 100)]
+    midi_unshifted = _make_midi(notes)
+    midi_shifted = _make_midi(notes)
+    offset = 0.2789
+
+    before = midi_to_drumscore(midi_unshifted, title="t", bpm=92.0)[0]
+    after = midi_to_drumscore(
+        midi_shifted, title="t", bpm=92.0, downbeat_offset_seconds=offset
+    )[0]
+
+    ppq = before["ppq"]
+    expected_tick_delta = round(offset * 92.0 / 60 * ppq)
+    for note_before, note_after in zip(before["notes"], after["notes"], strict=True):
+        assert note_before["tick"] - note_after["tick"] == pytest.approx(
+            expected_tick_delta, abs=1
+        )
+
+
+def test_notes_before_downbeat_are_clamped_to_tick_zero():
+    """다운비트보다 이른(카운트인성) 타격은 음수 틱이 아니라 0으로
+    클램프돼야 한다 — `DrumScoreIn`이 음수 틱을 거부하므로(`api/schemas.py`),
+    여기서 막지 않으면 멀쩡한 채보가 저장 단계에서 통째로 실패한다."""
+    midi = _make_midi([(35, 0.1, 0.2, 100)])  # 다운비트(0.28초)보다 이름
+
+    drumscore = midi_to_drumscore(
+        midi, title="t", bpm=92.0, downbeat_offset_seconds=0.28
+    )[0]
+
+    assert drumscore["notes"][0]["tick"] == 0
+    DrumScoreIn.model_validate(drumscore)  # 클램프 덕분에 검증도 통과해야 함
+
+
+def test_audio_offset_ms_stores_the_downbeat_offset_in_milliseconds():
+    """`audioOffsetMs`는 더 이상 0 고정이 아니라 다운비트 오프셋(ms)을
+    그대로 담는다 — 음원 트랙 재생 위치 계산에만 쓰임(노트 틱 자체는
+    이미 보정됐으므로)."""
+    midi = _make_midi([(35, 0.5, 0.6, 100)])
+
+    drumscore = midi_to_drumscore(
+        midi, title="t", bpm=92.0, downbeat_offset_seconds=0.2789
+    )[0]
+
+    assert drumscore["audioOffsetMs"] == pytest.approx(278.9, abs=0.5)
+
+
+def test_downbeat_offset_default_zero_matches_old_behavior():
+    """`downbeat_offset_seconds`를 안 넘기면(기본값 0.0) 기존 동작과
+    완전히 동일해야 한다 — 하위호환 회귀 테스트."""
+    midi = _make_midi([(35, 0.5, 0.6, 100)])
+
+    drumscore = midi_to_drumscore(midi, title="t", bpm=92.0)[0]
+
+    assert drumscore["audioOffsetMs"] == 0

@@ -71,7 +71,12 @@ DEFAULT_VELOCITY_NOTE = (
 )
 
 
-def midi_to_drumscore(midi: pretty_midi.PrettyMIDI, title: str, bpm: float) -> tuple[dict, int]:
+def midi_to_drumscore(
+    midi: pretty_midi.PrettyMIDI,
+    title: str,
+    bpm: float,
+    downbeat_offset_seconds: float = 0.0,
+) -> tuple[dict, int]:
     """ADTOF가 만든 `PrettyMIDI` 객체를 `DrumScoreIn`(api/schemas.py) 호환
     dict로 변환한다. `(drumscore_dict, unmapped_pitch_count)`를 반환 —
     `PITCH_TO_PIECE`에 없는 피치(ADTOF 5-class 출력엔 원래 없어야 하지만,
@@ -87,6 +92,18 @@ def midi_to_drumscore(midi: pretty_midi.PrettyMIDI, title: str, bpm: float) -> t
     값이 계속 저장돼온 버그였음. 이제 호출자(`handler.py`)가
     `modules/transcriber/tempo.py`의 `estimate_tempo()`로 드럼 스템에서 직접
     추정한 값을 넘긴다.
+
+    `downbeat_offset_seconds`(2026-10-27, T3-72, intent/07-open-questions.md
+    Q-43)도 호출자가 넘긴다 — `tempo.py`의 `estimate_downbeat_offset_seconds()`
+    로 추정한, "진짜 다운비트(1박)가 오디오 파일 시작으로부터 몇 초 뒤인지"
+    값. 예전엔 "오디오 파일 시작 = 틱 0"으로만 가정해(이 값이 항상 0),
+    실측 결과 전체 곡이 일정하게(0.2~0.3초대) 밀려 보이는 원인이었다 —
+    이제 이 값만큼 뺀 뒤 틱을 계산해 **틱 0이 실제 다운비트를 가리키도록
+    재앵커**한다(work/T3-72/plan.md §1). 메트로놈·편집기 격자선은 순수
+    틱 계산이라 이 재앵커만으로 추가 코드 변경 없이 저절로 맞아떨어진다.
+    `audioOffsetMs`는 더 이상 "0 고정"이 아니라 이 값(ms 단위)을 그대로
+    저장 — 음원 트랙(분리된 스템) 재생 위치 계산에만 쓰인다(노트 틱
+    자체는 이미 보정됐으므로 다시 안 씀).
     """
     ppq = midi.resolution
     notes: list[dict] = []
@@ -109,7 +126,16 @@ def midi_to_drumscore(midi: pretty_midi.PrettyMIDI, title: str, bpm: float) -> t
                     # 시각 그대로다(pretty_midi 공식 동작, 직접 실행해 확인)
                     # — 그래서 `time_to_tick()`을 쓰지 않고 `note.start`를
                     # 이 함수가 받은 실제 `bpm` 기준으로 직접 틱으로 환산한다.
-                    "tick": round(note.start * bpm / 60 * ppq),
+                    #
+                    # 2026-10-27(T3-72, Q-43) — `downbeat_offset_seconds`(위
+                    # 함수 docstring 참고)만큼 먼저 뺀 뒤 환산해 틱 0이 실제
+                    # 다운비트를 가리키도록 재앵커한다. 다운비트보다 이른
+                    # 노트(카운트인성 타격 등, `downbeat_offset_seconds=0`
+                    # 이면 애초에 생기지 않음)는 틱 0으로 클램프 — 음수 틱은
+                    # `DrumScoreIn`이 어차피 거부한다(`api/schemas.py`).
+                    "tick": max(
+                        0, round((note.start - downbeat_offset_seconds) * bpm / 60 * ppq)
+                    ),
                     "piece": piece,
                     "velocity": note.velocity,
                     "hand": None,
@@ -128,7 +154,11 @@ def midi_to_drumscore(midi: pretty_midi.PrettyMIDI, title: str, bpm: float) -> t
             "source": "audio",
         },
         "ppq": ppq,
-        "audioOffsetMs": 0,
+        # 2026-10-27(T3-72, Q-43) — 더 이상 0 고정이 아니라 "틱 0(다운비트)이
+        # 원곡 파일에서 몇 ms 지점인지"(위 함수 docstring 참고). 노트 틱
+        # 자체는 이미 이 값만큼 보정됐으므로(위), 여기선 음원 트랙 재생
+        # 위치 계산에만 쓰라고 그대로 저장만 한다.
+        "audioOffsetMs": round(downbeat_offset_seconds * 1000),
         "notes": notes,
     }
     return drumscore, unmapped_count
