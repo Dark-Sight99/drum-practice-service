@@ -24,7 +24,10 @@
 - 라이브러리 화면 스크린샷으로 한글 글자(초성·종성 포함 복잡한 글리프)가 기존 시스템 폰트와 다른 Pretendard 특유의 자형으로 렌더링됨을 육안 확인.
 
 ## Codex 모드A
-(진행 예정)
+APPROVE(지적 없음) — Vite `public/` 서빙 규칙과 `/fonts/...` 절대경로 일치(`vite.config.ts`에 `base`·`publicDir` 커스텀 없음) 확인, `app/web/src`에서 700 외 명시적 fontWeight는 `KitIllustration.tsx`의 700 하나뿐이고 나머지 font-family 오버라이드(monospace)는 그대로 명시적이라 이번 변경과 충돌 없음 확인, `package.json`/`package-lock.json` 변경 없음 확인, 라이선스 텍스트의 보존 폰트 이름(Pretendard)이 실제 사용한 family명과 일치함을 확인. REQ-09(오프라인 캐싱)는 이번 폰트 전용 변경 범위 밖(T5-2)이라는 판단에도 동의, `font-display:swap`도 이번 범위에서 액션 불필요로 판단.
+
+## 재검증
+Codex 1차에서 액션 아이템 없어 추가 수정 없이 그대로 병합 진행.
 
 ## 결론
 명세에 있었지만 미구현이던 Pretendard 폰트를 라이선스까지 확인해 자체 호스팅으로 적용. 의뢰인이 승인한 범위(폰트만) 안에서 진행, 그 외 화면별 수치 차이는 손대지 않음.
