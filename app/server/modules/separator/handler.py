@@ -16,17 +16,24 @@ from modules.separator.demucs_separator import (
     apply_gain,
     compute_playback_gain,
     encode_mp3,
+    mix_stems,
     separate,
 )
 
 logger = logging.getLogger("worker.separate")
 
+# T6-3(REQ-06, Q-33) — bass/other/vocals는 더 이상 개별 Asset으로 안 만들고
+# mix_stems()로 합쳐 "music"이라는 이름으로 STEM_MUSIC Asset 하나를 만든다
+# (work/T6-3/plan.md) — 아래 `written` 리스트가 "drums"/"music" 두 이름만
+# 담게 되므로 이 매핑도 그 둘만 있으면 됨.
 STEM_NAME_TO_ASSET_KIND: dict[str, AssetKind] = {
     "drums": AssetKind.STEM_DRUMS,
-    "bass": AssetKind.STEM_BASS,
-    "other": AssetKind.STEM_OTHER,
-    "vocals": AssetKind.STEM_VOCALS,
+    "music": AssetKind.STEM_MUSIC,
 }
+# T6-3 — "음악" 묶음(UI에서 이미 슬라이더 하나로 묶여 있음, T3-8,
+# app/web/src/audio/mixer.ts MUSIC_STEM_KEYS와 이름 순서를 맞춤 — 순서 자체는
+# amix에서 무관하지만 가독성을 위해 맞춤).
+MUSIC_STEM_NAMES = ("bass", "vocals", "other")
 
 
 def _original_asset_path(db, song_id: int) -> Path:
@@ -86,22 +93,27 @@ def separate_handler(job: Job) -> None:
 
             # T3-16-feedback(네트워크 스트리밍) — drums는 T3-2 채보 파이프라인이
             # 그대로 읽으므로(librosa, WAV 입력 전제로 검증됨) 손대지 않고 WAV
-            # 그대로 저장한다. bass/other/vocals는 "음악" 묶음으로 항상 셋이
-            # 동시에 재생되는데(PracticeCanvas.tsx MUSIC_STEM_KEYS) 비압축 WAV
-            # 3개(각 38.7MB, huibigyocha 기준 실측)를 동시 스트리밍하면 원격
-            # 네트워크(Tailscale)에서 끊김 — MP3로 압축해 저장한다.
-            for name, stem_path in stems.items():
-                if name == "drums":
-                    rel_path = write_song_file(
-                        song.id, "stem_drums.wav", apply_gain(stem_path, gain_linear)
-                    )
-                else:
-                    rel_path = write_song_file(
-                        song.id,
-                        f"stem_{name}.mp3",
-                        encode_mp3(stem_path, gain_linear=gain_linear),
-                    )
-                written.append((name, rel_path))
+            # 그대로 저장한다.
+            rel_path = write_song_file(
+                song.id, "stem_drums.wav", apply_gain(stems["drums"], gain_linear)
+            )
+            written.append(("drums", rel_path))
+
+            # T6-3(REQ-06, Q-33 원인 확정) — bass/other/vocals는 "음악" 묶음으로
+            # 항상 셋이 동시에 재생되는데(UI도 이미 슬라이더 하나로 묶음, T3-8),
+            # 이 3개를 개별 <audio> 엘리먼트로 동시 디코딩하는 게 모바일 CPU를
+            # 다 써 fps를 떨어뜨리는 게 실기기로 확정됨(Q-33). 서버에서 미리
+            # 하나로 섞어 저장 — 동시 재생 스트림이 4개→2개(드럼+음악)로
+            # 줄어든다(work/T6-3/plan.md). mix_stems()가 자체적으로 합산 후
+            # 피크를 재측정해 클리핑도 막는다.
+            music_rel_path = write_song_file(
+                song.id,
+                "stem_music.mp3",
+                mix_stems(
+                    [stems[name] for name in MUSIC_STEM_NAMES], gain_linear=gain_linear
+                ),
+            )
+            written.append(("music", music_rel_path))
 
             # T3-16-feedback-2(네트워크 스트리밍) — stem_drums.wav(38.7MB)는
             # Asset으로는 그대로 두되(채보 파이프라인이 이 경로를 읽음, 위

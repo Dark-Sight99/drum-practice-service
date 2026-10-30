@@ -145,6 +145,81 @@ def encode_mp3(wav_path: Path, bitrate_kbps: int = 192, gain_linear: float = 1.0
         tmp_path.unlink(missing_ok=True)
 
 
+def _mix_wavs_to_tempfile(wav_paths: list[Path]) -> Path:
+    """T6-3 — 여러 WAV를 ffmpeg `amix` 필터(공식 문서: ffmpeg.org/ffmpeg-filters.html#amix)로
+    하나의 임시 WAV로 합쳐 그 경로를 돌려준다. 호출자가 다 쓴 뒤 정리할 책임을
+    진다(`_decode_to_wav_for_measurement()`와 같은 패턴).
+
+    `normalize=0`을 명시적으로 줘서 입력을 자동으로 줄이지 않고 그대로 더한다
+    (ffmpeg 공식 문서 확인: `amix`의 기본값은 `normalize=1`로, 켜져 있으면
+    입력을 자동으로 정규화해버려 "여러 스템이 동시에 재생될 때 물리적으로
+    그냥 더해지는" 지금의 체감 음량과 달라진다 — `normalize=0`이라야 순수
+    합산이 돼 기존 동시재생과 수학적으로 같은 결과가 됨, work/T6-3/plan.md
+    "Codex C-002 반영" 참고). 입력 길이가 다르면 `duration=longest`로 가장
+    긴 입력 길이에 맞춘다(짧은 입력은 무음으로 채워짐 — ffmpeg 공식 동작)."""
+    import imageio_ffmpeg
+
+    if not wav_paths:
+        raise SeparationError("mix_stems: 합칠 WAV가 1개도 없음")
+
+    ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
+    fd, tmp_path_str = tempfile.mkstemp(suffix=".wav")
+    tmp_path = Path(tmp_path_str)
+    try:
+        os.close(fd)
+        cmd = [ffmpeg_exe, "-y"]
+        for p in wav_paths:
+            cmd += ["-i", str(p)]
+        # amix는 입력이 1개면 바로 통과(no-op)라 스템이 1개뿐이어도 안전.
+        inputs_labels = "".join(f"[{i}:a]" for i in range(len(wav_paths)))
+        filter_chain = (
+            f"{inputs_labels}amix=inputs={len(wav_paths)}:duration=longest:normalize=0"
+        )
+        cmd += ["-filter_complex", filter_chain, str(tmp_path)]
+        proc = subprocess.run(
+            cmd, capture_output=True, text=True, encoding="utf-8", errors="replace"
+        )
+        if proc.returncode != 0:
+            raise SeparationError(
+                f"스템 믹스 실패(returncode={proc.returncode}): {proc.stderr[-2000:]}"
+            )
+    except Exception:
+        tmp_path.unlink(missing_ok=True)
+        raise
+    return tmp_path
+
+
+def mix_stems(
+    wav_paths: Iterable[Path],
+    gain_linear: float = 1.0,
+    bitrate_kbps: int = 192,
+    clip_peak_limit: float = 0.99,
+) -> bytes:
+    """T6-3(REQ-06, Q-33) — 여러 WAV 스템을 `normalize=0`(순수 합산, 위
+    `_mix_wavs_to_tempfile()` 참고)으로 합친 뒤 MP3로 인코딩해 바이트로
+    돌려준다.
+
+    순수 합산은 개별 입력보다 피크가 커질 수 있다(클리핑 가능성) — 호출자가
+    넘긴 `gain_linear`(보통 `compute_playback_gain()`이 "개별 스템" 기준으로
+    계산한 값, 합산 후 피크는 고려 안 함)를 그대로 믿지 않고, 실제로 합쳐본
+    결과의 피크를 `librosa`로 직접 측정해 `clip_peak_limit`(기본 0.99,
+    `compute_playback_gain()`과 같은 기준)를 넘기면 그 피크 기준으로 게인을
+    추가로 낮춘다 — "개별로는 안전했던 게인도 합치면 클리핑을 낼 수 있다"는
+    실제 위험을 코드로 직접 확인하고 막는다(추측으로 넘어가지 않음,
+    CLAUDE.md §1-1)."""
+    mixed_wav = _mix_wavs_to_tempfile(list(wav_paths))
+    try:
+        y, _ = librosa.load(str(mixed_wav), sr=None, mono=False)
+        effective_gain = gain_linear
+        if y.size > 0:
+            peak = float(np.max(np.abs(y)))
+            if peak > 0 and peak * gain_linear > clip_peak_limit:
+                effective_gain = clip_peak_limit / peak
+        return encode_mp3(mixed_wav, bitrate_kbps=bitrate_kbps, gain_linear=effective_gain)
+    finally:
+        mixed_wav.unlink(missing_ok=True)
+
+
 def apply_gain(wav_path: Path, gain_linear: float) -> bytes:
     """2026-10-27(의뢰인 요청) — `wav_path`의 WAV를 코덱 변환 없이(무손실)
     `gain_linear`만큼 음량만 조절해 바이트로 돌려준다. `encode_mp3()`와 같은

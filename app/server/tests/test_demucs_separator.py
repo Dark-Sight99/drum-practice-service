@@ -9,6 +9,7 @@ import subprocess
 import tempfile
 from pathlib import Path
 
+import librosa
 import numpy as np
 import pytest
 import soundfile as sf
@@ -19,6 +20,7 @@ from modules.separator.demucs_separator import (
     apply_gain,
     compute_playback_gain,
     encode_mp3,
+    mix_stems,
     separate,
 )
 
@@ -450,3 +452,93 @@ def test_decode_to_wav_for_measurement_cleans_up_temp_file_if_subprocess_raises(
 
     assert len(created_tmp_paths) == 1
     assert not created_tmp_paths[0].exists()
+
+
+def _decode_mp3_bytes_peak_and_rms(data: bytes, tmp_path) -> tuple[float, float]:
+    """T6-3 — `mix_stems()`가 돌려주는 MP3 바이트를 실제로 디코딩해 피크·RMS를
+    잰다(이 모듈의 다른 함수들이 `librosa.load()`로 측정하는 것과 같은 방식 —
+    `mix_stems()` 자신의 내부 클리핑 방지 로직과 독립적으로, 결과물을 직접
+    검증하기 위함)."""
+    mp3_path = tmp_path / "out.mp3"
+    mp3_path.write_bytes(data)
+    y, _ = librosa.load(str(mp3_path), sr=None, mono=True)
+    peak = float(np.max(np.abs(y))) if y.size else 0.0
+    rms = float(np.sqrt(np.mean(y.astype(np.float64) ** 2))) if y.size else 0.0
+    return peak, rms
+
+
+def test_mix_stems_sums_without_normalizing_when_no_clipping_risk(tmp_path):
+    """T6-3(Codex 모드C C-002 반영) — `amix`의 기본 `normalize=1`이면 입력을
+    자동으로 줄여버리는데, 이 함수는 `normalize=0`을 명시해 순수 합산이어야
+    한다 — "여러 <audio> 엘리먼트가 동시에 재생되며 물리적으로 그냥 더해지는"
+    지금 체감 음량과 같은 결과를 내는 게 핵심(work/T6-3/plan.md). 같은 주파수·
+    위상의 사인파 2개를 더하면 진폭이 정확히 2배가 돼야 한다(정규화가 켜져
+    있었다면 평균이 돼 1배 그대로였을 것) — 피크가 안전 범위 안에 들게 아주
+    조용한 톤을 써서 클리핑 방지 로직이 개입하지 않게 한다."""
+    rms_linear = 10 ** (-40.0 / 20)  # 매우 조용함 — 2배가 돼도 클리핑과 무관
+    path_a = tmp_path / "a.wav"
+    path_b = tmp_path / "b.wav"
+    _write_tone(path_a, rms_linear)
+    _write_tone(path_b, rms_linear)
+
+    result = mix_stems([path_a, path_b])
+
+    peak, rms = _decode_mp3_bytes_peak_and_rms(result, tmp_path)
+    # MP3 손실 압축 오차를 감안해 넉넉한 허용오차(상대 10%).
+    assert rms == pytest.approx(rms_linear * 2, rel=0.1)
+
+
+def test_mix_stems_prevents_clipping_via_peak_based_gain_reduction(tmp_path):
+    """T6-3 — 개별 스템은 전부 안전해도(0.99 피크 제한 통과) 합치면 피크가
+    1.0을 넘을 수 있다(실제 위험, work/T6-3/plan.md 리스크 항목) — 이 함수
+    자신이 합친 결과의 실제 피크를 재측정해 넘으면 게인을 더 낮춰야 한다."""
+    # 각각 피크 0.6 — 개별로는 완전히 안전(0.99 밑)이지만 둘을 더하면 1.2라
+    # clip_peak_limit(기본 0.99)를 넘음.
+    sr = 44100
+    t = np.linspace(0, 1.0, sr, endpoint=False)
+    y = 0.6 * np.sin(2 * np.pi * 440 * t)
+    path_a = tmp_path / "a.wav"
+    path_b = tmp_path / "b.wav"
+    sf.write(str(path_a), y.astype(np.float32), sr)
+    sf.write(str(path_b), y.astype(np.float32), sr)
+
+    result = mix_stems([path_a, path_b])
+
+    peak, _ = _decode_mp3_bytes_peak_and_rms(result, tmp_path)
+    # MP3 인코딩 자체가 피크를 살짝 넘길 수 있어(손실 압축 오버슈트) 아주 약간의
+    # 여유를 둔다 — 그래도 보정 없이 더한 피크(1.2)보다는 확실히 낮아야 함.
+    assert peak <= 0.99 + 0.02
+    assert peak < 1.2
+
+
+def test_mix_stems_applies_gain_linear_when_no_clipping_risk(tmp_path):
+    """T6-3 — 클리핑 위험이 없을 때는 호출자가 넘긴 `gain_linear`가 그대로
+    적용돼야 한다(`compute_playback_gain()`이 계산한 음량 맞춤 게인 전달 경로,
+    handler.py)."""
+    rms_linear = 10 ** (-40.0 / 20)
+    path_a = tmp_path / "a.wav"
+    _write_tone(path_a, rms_linear)
+
+    result = mix_stems([path_a], gain_linear=0.5)
+
+    _, rms = _decode_mp3_bytes_peak_and_rms(result, tmp_path)
+    assert rms == pytest.approx(rms_linear * 0.5, rel=0.1)
+
+
+def test_mix_stems_raises_on_empty_input(tmp_path):
+    with pytest.raises(SeparationError, match="합칠 WAV가 1개도 없음"):
+        mix_stems([])
+
+
+def test_mix_stems_handles_single_input(tmp_path):
+    """amix는 입력이 1개면 그대로 통과한다(ffmpeg 공식 동작) — 스템이 1개뿐인
+    (예: 보컬이 감지 안 된) 드문 곡에서도 안전해야 한다."""
+    rms_linear = 10 ** (-30.0 / 20)
+    path_a = tmp_path / "a.wav"
+    _write_tone(path_a, rms_linear)
+
+    result = mix_stems([path_a])
+
+    assert len(result) > 0
+    _, rms = _decode_mp3_bytes_peak_and_rms(result, tmp_path)
+    assert rms == pytest.approx(rms_linear, rel=0.1)

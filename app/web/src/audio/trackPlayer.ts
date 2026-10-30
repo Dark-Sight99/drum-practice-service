@@ -471,3 +471,18 @@ export function createTrackPlayer(pool: AudioTrackPool): TrackPlayer {
 
   return { prime, playFrom, seekTo, resync, setChannelGain, pause, resume, stop, reset }
 }
+
+/** T6-3(REQ-06, Q-33) — `available_audio_kinds`에서 'original'을 뺀 뒤, 'stem_music'이
+ * 있으면(서버가 bass/vocals/other를 미리 합쳐둔 곡 — work/T6-3/plan.md) 구
+ * 개별 스템(stem_bass/vocals/other)은 걸러낸다. 안 걸러내면 둘 다 트랙으로
+ * 만들어져(5개) 동시 디코딩 스트림이 오히려 늘어나버림(Codex 모드C C-001
+ * 지적 — 백필로 기존 곡에 stem_music을 "추가"만 하고 구 Asset은 삭제하지
+ * 않기로 했으므로, 이 필터가 항상 최신 쪽을 우선해야 함). 'stem_music'이
+ * 없으면(아직 백필 안 된 곡) 기존처럼 구 3종을 그대로 씀 — 하위 호환. */
+export function selectStemKinds(availableAudioKinds: readonly string[]): string[] {
+  const kinds = availableAudioKinds.filter((kind) => kind !== 'original')
+  if (!kinds.includes('stem_music')) return kinds
+  return kinds.filter(
+    (kind) => kind !== 'stem_bass' && kind !== 'stem_vocals' && kind !== 'stem_other',
+  )
+}

@@ -78,7 +78,17 @@ def _fake_compute_playback_gain(original_path: Path, stem_paths) -> float:
     return 1.0
 
 
-def test_separate_handler_success_creates_four_stem_assets(db, monkeypatch, tmp_path) -> None:
+def _fake_mix_stems(wav_paths, gain_linear: float = 1.0, bitrate_kbps: int = 192) -> bytes:
+    # T6-3 — real ffmpeg amix를 거치지 않고 핸들러의 배선(어떤 스템들을 넘기는지,
+    # 결과를 어디에 쓰는지)만 본다 — mix_stems() 자체의 실제 합산·클리핑 방지
+    # 로직 검증은 test_demucs_separator.py가 진짜 합성 오디오로 전담.
+    names = "-".join(p.name for p in wav_paths)
+    return f"mp3-mix-{names}".encode()
+
+
+def test_separate_handler_success_creates_two_stem_assets(db, monkeypatch, tmp_path) -> None:
+    """T6-3(REQ-06, Q-33) — bass/other/vocals는 더 이상 개별 Asset이 아니라
+    mix_stems()로 합쳐진 STEM_MUSIC 하나로 저장돼야 한다(work/T6-3/plan.md)."""
     _, song, job = _make_user_song_job(db)
 
     def fake_separate(input_path: Path, output_dir: Path, device=None):
@@ -92,6 +102,7 @@ def test_separate_handler_success_creates_four_stem_assets(db, monkeypatch, tmp_
     monkeypatch.setattr(handler_module, "separate", fake_separate)
     monkeypatch.setattr(handler_module, "encode_mp3", _fake_encode_mp3)
     monkeypatch.setattr(handler_module, "apply_gain", _fake_apply_gain)
+    monkeypatch.setattr(handler_module, "mix_stems", _fake_mix_stems)
     monkeypatch.setattr(handler_module, "compute_playback_gain", _fake_compute_playback_gain)
 
     handler_module.separate_handler(job)
@@ -102,16 +113,11 @@ def test_separate_handler_success_creates_four_stem_assets(db, monkeypatch, tmp_
     # 참고.
     assert song.status == SongStatus.PROCESSING
     stems = db.query(Asset).filter(Asset.song_id == song.id, Asset.kind != AssetKind.ORIGINAL).all()
-    assert {a.kind for a in stems} == {
-        AssetKind.STEM_DRUMS,
-        AssetKind.STEM_BASS,
-        AssetKind.STEM_OTHER,
-        AssetKind.STEM_VOCALS,
-    }
+    assert {a.kind for a in stems} == {AssetKind.STEM_DRUMS, AssetKind.STEM_MUSIC}
     for asset in stems:
         path = file_storage.resolve_asset_path(asset.file_path)
         assert path is not None and path.exists()
-        # T3-16-feedback — drums만 WAV 그대로, 나머지 셋은 MP3로 저장돼야 함
+        # T3-16-feedback — drums만 WAV 그대로, music은 MP3로 저장돼야 함
         # (채보 파이프라인이 drums WAV를 직접 읽으므로 손대지 않음).
         if asset.kind == AssetKind.STEM_DRUMS:
             assert path.suffix == ".wav"
@@ -121,6 +127,7 @@ def test_separate_handler_success_creates_four_stem_assets(db, monkeypatch, tmp_
             assert sidecar.exists()
         else:
             assert path.suffix == ".mp3"
+            assert path.name == "stem_music.mp3"
 
 
 def test_separate_handler_success_queues_transcribe_job(db, monkeypatch) -> None:
@@ -139,6 +146,7 @@ def test_separate_handler_success_queues_transcribe_job(db, monkeypatch) -> None
     monkeypatch.setattr(handler_module, "separate", fake_separate)
     monkeypatch.setattr(handler_module, "encode_mp3", _fake_encode_mp3)
     monkeypatch.setattr(handler_module, "apply_gain", _fake_apply_gain)
+    monkeypatch.setattr(handler_module, "mix_stems", _fake_mix_stems)
     monkeypatch.setattr(handler_module, "compute_playback_gain", _fake_compute_playback_gain)
 
     handler_module.separate_handler(job)
@@ -197,6 +205,7 @@ def test_separate_handler_succeeds_even_if_drums_mp3_sidecar_encode_fails(
     monkeypatch.setattr(handler_module, "separate", fake_separate)
     monkeypatch.setattr(handler_module, "encode_mp3", flaky_encode_mp3)
     monkeypatch.setattr(handler_module, "apply_gain", _fake_apply_gain)
+    monkeypatch.setattr(handler_module, "mix_stems", _fake_mix_stems)
     monkeypatch.setattr(handler_module, "compute_playback_gain", _fake_compute_playback_gain)
 
     handler_module.separate_handler(job)
@@ -247,6 +256,7 @@ def test_separate_handler_cleans_up_only_stems_written_this_attempt_on_partial_f
     monkeypatch.setattr(handler_module, "separate", fake_separate)
     monkeypatch.setattr(handler_module, "encode_mp3", _fake_encode_mp3)
     monkeypatch.setattr(handler_module, "apply_gain", _fake_apply_gain)
+    monkeypatch.setattr(handler_module, "mix_stems", _fake_mix_stems)
     monkeypatch.setattr(handler_module, "compute_playback_gain", _fake_compute_playback_gain)
 
     real_write = file_storage.write_song_file
@@ -254,7 +264,7 @@ def test_separate_handler_cleans_up_only_stems_written_this_attempt_on_partial_f
 
     def flaky_write(song_id, fixed_filename, content):
         call_count["n"] += 1
-        if call_count["n"] == 3:  # 4개 중 3번째에서 실패
+        if call_count["n"] == 2:  # T6-3: drums(1번째) 성공 후 music(2번째)에서 실패
             raise OSError("디스크 오류 시뮬레이션")
         return real_write(song_id, fixed_filename, content)
 
@@ -276,12 +286,11 @@ def test_separate_handler_cleans_up_only_stems_written_this_attempt_on_partial_f
         db.query(Asset).filter(Asset.song_id == song.id, Asset.kind != AssetKind.ORIGINAL).all()
     )
     assert stem_assets == []
-    # 이번 시도에서 먼저 쓴 2개(drums.wav, bass.mp3)도 디스크에 안 남아있어야 함
-    # — stems.items() 순서(drums,bass,other,vocals)대로 write_song_file이
-    # 호출되고 3번째(other) 호출에서 실패하므로, 성공한 건 drums·bass뿐.
-    for rel_path in (f"{song.id}/stem_drums.wav", f"{song.id}/stem_bass.mp3"):
-        p = file_storage.resolve_asset_path(rel_path)
-        assert p is None or not p.exists()
+    # 이번 시도에서 먼저 쓴 1개(drums.wav)도 디스크에 안 남아있어야 함 — T6-3부터는
+    # drums(1번째)·music(2번째) 순서로 write_song_file이 호출되고 2번째(music)
+    # 호출에서 실패하므로, 성공한 건 drums뿐.
+    p = file_storage.resolve_asset_path(f"{song.id}/stem_drums.wav")
+    assert p is None or not p.exists()
 
 
 def test_separate_handler_missing_original_asset_fails_cleanly(db) -> None:
@@ -325,6 +334,7 @@ def test_separate_handler_passes_computed_gain_to_stem_writers(db, monkeypatch) 
 
     apply_gain_calls: list[float] = []
     encode_mp3_calls: list[float] = []
+    mix_stems_calls: list[tuple[tuple[str, ...], float]] = []
 
     def spy_apply_gain(wav_path: Path, gain_linear: float) -> bytes:
         apply_gain_calls.append(gain_linear)
@@ -334,10 +344,15 @@ def test_separate_handler_passes_computed_gain_to_stem_writers(db, monkeypatch) 
         encode_mp3_calls.append(gain_linear)
         return f"mp3-{wav_path.name}".encode()
 
+    def spy_mix_stems(wav_paths, gain_linear: float = 1.0, bitrate_kbps: int = 192) -> bytes:
+        mix_stems_calls.append((tuple(p.name for p in wav_paths), gain_linear))
+        return b"mp3-mix"
+
     monkeypatch.setattr(handler_module, "separate", fake_separate)
     monkeypatch.setattr(handler_module, "compute_playback_gain", fake_compute_gain)
     monkeypatch.setattr(handler_module, "apply_gain", spy_apply_gain)
     monkeypatch.setattr(handler_module, "encode_mp3", spy_encode_mp3)
+    monkeypatch.setattr(handler_module, "mix_stems", spy_mix_stems)
 
     handler_module.separate_handler(job)
 
@@ -345,6 +360,8 @@ def test_separate_handler_passes_computed_gain_to_stem_writers(db, monkeypatch) 
     assert song.status == SongStatus.PROCESSING
     # drums(WAV) 1번 — apply_gain()
     assert apply_gain_calls == [FIXED_GAIN]
-    # bass/other/vocals(MP3) 3번 + drums 재생용 MP3 사이드카 1번 = 총 4번,
-    # 전부 같은 게인으로 호출돼야 함.
-    assert encode_mp3_calls == [FIXED_GAIN] * 4
+    # drums 재생용 MP3 사이드카 1번만 encode_mp3()를 직접 씀(T6-3부터
+    # bass/other/vocals는 mix_stems() 경유).
+    assert encode_mp3_calls == [FIXED_GAIN]
+    # bass/vocals/other 3개가 같은 게인으로 mix_stems() 1번에 넘어가야 함.
+    assert mix_stems_calls == [(("bass.wav", "vocals.wav", "other.wav"), FIXED_GAIN)]
