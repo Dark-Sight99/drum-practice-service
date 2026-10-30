@@ -46,3 +46,30 @@ export function ensureIOSAudioContextSampleRate(): void {
      * 가능성을 열어둠(Codex C-002). */
   }
 }
+
+let stemContext: AudioContext | null = null
+let stemContextAttempted = false
+
+/** T6-6(REQ-06, Q-33) — T6-5(위 `ensureIOSAudioContextSampleRate()`)로 Tone 공유
+ * AudioContext의 샘플레이트를 44100Hz로 맞췄는데도 실기기에서 실제 사용 시나리오(음원
+ * 2개 동시 재생)의 fps 개선이 거의 없었음. 실기기 라이브 실험으로 추가 확정(work/T6-6/plan.md
+ * "문제" 절): 완전히 별도의 AudioContext로 같은 음원 2개를 동시 재생하면 60fps 깨끗한데,
+ * Tone의 공유 컨텍스트(가상드럼·Transport가 같이 쓰는 바로 그 컨텍스트)에 새 엘리먼트로
+ * 연결하면 렉이 재현됨 — "공유 컨텍스트 자체"가 범인일 가능성이 높다는 결론. 그래서 iOS에서
+ * 스템(실제 음원) Web Audio 브리지만 Tone과 **완전히 분리된** 전용 컨텍스트를 쓰게 한다.
+ *
+ * 최초 호출 시 1회만 시도(성공/실패 불문 재시도 안 함 — `ensureIOSAudioContextSampleRate()`와
+ * 다른 점: 이 함수가 실패해도 아래 "실패 시 폴백"이 Tone 컨텍스트로 넘어가 그나마 동작은
+ * 하는 상태가 되므로 재시도 압박이 적음, work/T6-6/plan.md 참고). 비iOS는 항상 null —
+ * 이 함수가 호출되는 trackPlayer.ts의 코드 경로 자체가 iOS 전용이라 영향 없음. */
+export function getIOSStemAudioContext(): AudioContext | null {
+  if (!isIOS()) return null
+  if (stemContextAttempted) return stemContext
+  stemContextAttempted = true
+  try {
+    stemContext = new AudioContext({ sampleRate: 44100 })
+  } catch {
+    stemContext = null
+  }
+  return stemContext
+}

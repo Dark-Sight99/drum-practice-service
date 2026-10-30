@@ -50,7 +50,8 @@
 import * as Tone from 'tone'
 // T6-5 — isIOS()는 platformAudioContext.ts로 옮김(main.tsx의 부트스트랩 시점 AudioContext
 // 샘플레이트 고정도 같은 판별이 필요해서 공유 모듈로 분리, 로직 중복 방지).
-import { isIOS } from './platformAudioContext'
+// T6-6 — getIOSStemAudioContext()도 같은 모듈에서 import(iOS 전용 스템 재생 컨텍스트 분리).
+import { getIOSStemAudioContext, isIOS } from './platformAudioContext'
 
 export interface TrackSource {
   kind: string
@@ -159,21 +160,23 @@ function destroyTrack(track: TrackState): void {
 }
 
 export async function createAudioTrackPool(sources: TrackSource[]): Promise<AudioTrackPool> {
-  // T3-12 — Tone.js가 synth_drums/metronome에 이미 쓰고 있는 것과 같은
-  // AudioContext를 공유(실제 설치된 Tone.js 15.1.22 타입 선언으로
-  // `Context.rawContext`가 네이티브 `AudioContext`를 돌려줌을 확인) — 이
-  // context는 `createDrumVoices()`의 `Tone.start()`가 같은 사용자 제스처
-  // 흐름(handlePlay()) 안에서 이미 resume시키므로 별도 unlock 로직이 필요
-  // 없다. `createMediaElementSource()`는 context가 suspended 상태여도 그래프
-  // 구성 자체는 바로 되고, 실제로 소리가 나는 시점(훨씬 뒤, Transport가
-  // playFrom()을 트리거할 때)엔 이미 resume된 뒤다.
-  const context = Tone.getContext().rawContext as unknown as AudioContext
+  // T6-6(REQ-06, Q-33, work/T6-6/plan.md) — T3-12 당시엔 Tone.js가
+  // synth_drums/metronome에 쓰는 공유 AudioContext를 그대로 가져다 썼는데,
+  // 실기기 라이브 실험으로 "그 공유 컨텍스트 위에 실제 음원을 같이 얹는 것"
+  // 자체가 fps 저하의 원인으로 좁혀져(T6-5 실기기 재측정으로 확정) iOS에서만
+  // 완전히 분리된 전용 컨텍스트를 쓴다. 전용 컨텍스트 생성 자체가 실패하는
+  // 드문 경우(iOS인데)에만 예전처럼 Tone 공유 컨텍스트로 폴백 — 그래야 최소한
+  // 음량 조절은 되는 상태를 유지한다(iOS에서 element.volume은 Q-32로 확인된
+  // 대로 무시되므로, 폴백 없이 null이 되면 음량 조절이 아예 안 먹히는 더 나쁜
+  // 상태가 됨). `createMediaElementSource()`는 context가 suspended 상태여도
+  // 그래프 구성 자체는 바로 되고, 실제로 소리가 나는 시점(훨씬 뒤, Transport가
+  // playFrom()을 트리거할 때)엔 이미 resume된 뒤다(아래 prime()의
+  // stemContext.resume() 참고) — 이 전제 자체는 T3-12 때부터 유효.
   // T3-16-feedback-3 — iOS에서만 Web Audio(GainNode) 경로를 쓴다(위 모듈
-  // 상단 주석 참고). 데스크톱은 sourceNode/gainNode가 null이고
+  // 상단 주석 참고). 데스크톱은 null이라 sourceNode/gainNode도 null이 되고
   // setChannelGain()/destroy()가 이를 감지해 element.volume으로 대신 제어.
-  // 풀 생성(화면 진입) 시점에 한 번만 판별 — 화면을 보는 도중 플랫폼이
-  // 바뀔 리 없으므로 세션마다 다시 판별할 필요 없음(모드C 1라운드 확인).
-  const useWebAudioForVolume = isIOS()
+  const stemContext =
+    getIOSStemAudioContext() ?? (isIOS() ? (Tone.getContext().rawContext as unknown as AudioContext) : null)
 
   // T3-16-feedback-7 — 트랙 하나를 "서버 URL에서 전체를 fetch() → blob URL로
   // 바꿔 엘리먼트 생성"까지 만든다. T3-16-feedback-4 모드A 지적(C-001)에서
@@ -194,7 +197,7 @@ export async function createAudioTrackPool(sources: TrackSource[]): Promise<Audi
     const objectUrl = URL.createObjectURL(blob)
     const element = new Audio(objectUrl)
     element.preload = 'auto'
-    if (!useWebAudioForVolume) {
+    if (!stemContext) {
       return {
         kind: source.kind,
         element,
@@ -210,10 +213,10 @@ export async function createAudioTrackPool(sources: TrackSource[]): Promise<Audi
     // 참조해 정리해야 한다(null을 넘기면 disconnect()가 안 불려 노드가 샘).
     let sourceNode: MediaElementAudioSourceNode | null = null
     try {
-      sourceNode = context.createMediaElementSource(element)
-      const gainNode = context.createGain()
+      sourceNode = stemContext.createMediaElementSource(element)
+      const gainNode = stemContext.createGain()
       sourceNode.connect(gainNode)
-      gainNode.connect(context.destination)
+      gainNode.connect(stemContext.destination)
       return { kind: source.kind, element, objectUrl, sourceNode, gainNode, unlocked: false, started: false }
     } catch (err) {
       destroyTrack({
@@ -258,6 +261,14 @@ export async function createAudioTrackPool(sources: TrackSource[]): Promise<Audi
   let primePromise: Promise<{ kind: string; ok: boolean }[]> | null = null
 
   async function prime(): Promise<{ kind: string; ok: boolean }[]> {
+    // T6-6(REQ-06, Q-33, work/T6-6/plan.md "사용자 제스처 안에서 resume() 필요") —
+    // Tone 컨텍스트는 createDrumVoices()의 Tone.start()가 자동으로 resume시키지만,
+    // 이 전용 스템 컨텍스트는 아무도 안 해준다. prime()은 PracticeCanvas.tsx의
+    // handlePlay()가 await 없이 동기적으로 호출하는 지점(모바일 제스처 체인 보존,
+    // T3-3 때부터의 기존 불변식) — early-return 가드보다도 앞에 둬서 매 호출(두 번째
+    // 호출부터는 이후 코드를 안 타는 경우에도) resume()만은 항상 시도되게 한다. 이미
+    // running인 컨텍스트에 resume()을 불러도 안전(스펙상 멱등) — 반복 호출 무해.
+    void stemContext?.resume?.()
     if (primePromise) return primePromise
     primePromise = Promise.all(
       tracks.map(async (track) => {

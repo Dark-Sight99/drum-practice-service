@@ -107,3 +107,59 @@ describe('ensureIOSAudioContextSampleRate', () => {
     expect(setContextMock).toHaveBeenCalledTimes(1)
   })
 })
+
+describe('getIOSStemAudioContext', () => {
+  it('iOS면 44100Hz AudioContext를 만들어 반환한다', async () => {
+    stubUserAgent(IOS_USER_AGENT)
+    const ctorSpy = vi.fn(function (this: unknown, options?: { sampleRate?: number }) {
+      ;(this as { sampleRate?: number }).sampleRate = options?.sampleRate
+    })
+    vi.stubGlobal('AudioContext', ctorSpy)
+
+    const { getIOSStemAudioContext } = await import('./platformAudioContext')
+    const context = getIOSStemAudioContext()
+
+    expect(ctorSpy).toHaveBeenCalledTimes(1)
+    expect(ctorSpy).toHaveBeenCalledWith({ sampleRate: 44100 })
+    expect(context).not.toBeNull()
+  })
+
+  it('iOS가 아니면 항상 null — AudioContext를 만들지도 않는다', async () => {
+    stubUserAgent(DESKTOP_USER_AGENT)
+    const ctorSpy = vi.fn()
+    vi.stubGlobal('AudioContext', ctorSpy)
+
+    const { getIOSStemAudioContext } = await import('./platformAudioContext')
+    expect(getIOSStemAudioContext()).toBeNull()
+    expect(ctorSpy).not.toHaveBeenCalled()
+  })
+
+  it('두 번째 호출부터는 같은 인스턴스를 반환한다(싱글톤, 재생성 안 함)', async () => {
+    stubUserAgent(IOS_USER_AGENT)
+    const ctorSpy = vi.fn(function (this: unknown) {
+      /* no-op */
+    })
+    vi.stubGlobal('AudioContext', ctorSpy)
+
+    const { getIOSStemAudioContext } = await import('./platformAudioContext')
+    const first = getIOSStemAudioContext()
+    const second = getIOSStemAudioContext()
+
+    expect(ctorSpy).toHaveBeenCalledTimes(1)
+    expect(second).toBe(first)
+  })
+
+  it('생성 실패 시 null을 반환하고, Tone.setContext()와 달리 재시도하지 않는다(T6-5와 다른 설계)', async () => {
+    stubUserAgent(IOS_USER_AGENT)
+    const ctorSpy = vi.fn(() => {
+      throw new Error('이 기기는 44100Hz를 지원 안 함')
+    })
+    vi.stubGlobal('AudioContext', ctorSpy)
+
+    const { getIOSStemAudioContext } = await import('./platformAudioContext')
+    expect(getIOSStemAudioContext()).toBeNull()
+    expect(getIOSStemAudioContext()).toBeNull()
+    // 재시도 안 함 — 두 번째 호출에서도 생성자가 다시 불리지 않아야 함.
+    expect(ctorSpy).toHaveBeenCalledTimes(1)
+  })
+})
