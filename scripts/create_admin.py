@@ -9,6 +9,13 @@
 이미 있는 아이디면 만들지 않고 안내만 하고 끝낸다(기존 계정을 실수로 덮어쓰지 않음 —
 비밀번호를 바꾸고 싶으면 관리자 화면의 "비밀번호 재설정" 또는 이 스크립트 대신
 API를 직접 써야 함, 이 스크립트는 "맨 처음 관리자가 하나도 없을 때"만을 위한 것).
+
+2026-10-30(T5-4) — Codex 모드A 지적(C-002, 반영): "맨 처음 관리자가 하나도 없을 때"를
+의도했지만 원래 코드는 그 전제를 실제로 검사하지 않아, 다른 아이디로 반복 실행하면
+관리자를 계속 추가할 수 있었다 — "관리자가 이미 1명이라도 있으면" 기본적으로 거부하도록
+바꾼다(정상적인 추가 계정 생성은 관리자 화면/API를 통해서만 — REQ-08 원칙). 그래도 꼭
+이 스크립트로 추가 관리자를 만들어야 하는 예외 상황(예: 기존 관리자 비밀번호 분실로
+UI 접근 자체가 막힌 복구 상황)을 위해 `--force`로 그 거부를 건너뛸 수 있게만 남겨둔다.
 """
 
 from __future__ import annotations
@@ -33,6 +40,12 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("username", help="관리자 아이디")
     parser.add_argument("--password", help="비밀번호(생략하면 안전하게 입력받음)")
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="관리자가 이미 있어도 강제로 새 관리자 계정을 추가(기존 관리자 비밀번호 "
+        "분실 등 복구 상황 전용 — 평소엔 관리자 화면에서 계정을 추가하세요)",
+    )
     args = parser.parse_args()
 
     password = args.password
@@ -48,6 +61,15 @@ def main() -> int:
 
     db = SessionLocal()
     try:
+        existing_admin = db.query(User).filter(User.is_admin.is_(True)).first()
+        if existing_admin is not None and not args.force:
+            print(
+                f"이미 관리자 계정이 있습니다('{existing_admin.username}') — 이 스크립트는 "
+                "관리자가 하나도 없을 때 최초 1명을 만들기 위한 것입니다. 추가 계정은 "
+                "관리자 화면에서 만들어주세요. 복구 등으로 꼭 필요하면 --force를 추가하세요."
+            )
+            return 0
+
         existing = db.query(User).filter(User.username == args.username).first()
         if existing is not None:
             print(

@@ -6,6 +6,13 @@
 data/run/pids.json에 적힌 PID 두 개(API, 워커)에 종료 신호를 보내고 파일을 지운다.
 PID 파일이 없거나 이미 죽어있는 프로세스는 건너뛴다(에러로 치지 않음 — 이미 멈춰있는
 상태로 다시 stop을 실행해도 안전해야 자동화 스크립트에서 안심하고 쓸 수 있다).
+
+종료 직전 그 PID가 아직 python(.exe) 프로세스인지 재확인한다(common.is_our_python_process) —
+2026-10-30(T5-4) Codex 모드A 지적(C-001, 반영): PID는 프로세스가 죽은 뒤 OS가 완전히
+다른 프로그램에 재사용할 수 있어, 기록된 PID만 믿고 바로 종료 신호를 보내면 엉뚱한
+프로세스를 죽일 위험이 있었다. python 계열이 아니면(=PID가 재사용된 것으로 의심) 건너뛰고
+경고만 남긴다 — 완벽한 신원 증명은 아니지만(여러 python 프로세스가 동시에 있을 수 있음),
+추가 의존성(psutil 등) 없이 "명백히 다른 프로그램"인 경우는 확실히 걸러낸다.
 """
 
 from __future__ import annotations
@@ -20,7 +27,7 @@ import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from common import PID_FILE
+from common import PID_FILE, eprint, is_our_python_process
 
 
 def _terminate(pid: int) -> None:
@@ -52,6 +59,12 @@ def main() -> int:
     for name, key in (("API", "api_pid"), ("워커", "worker_pid")):
         pid = data.get(key)
         if pid is None:
+            continue
+        if not is_our_python_process(pid):
+            eprint(
+                f"⚠ {name}(PID {pid})는 이미 없거나 python 프로세스가 아닙니다(PID 재사용 "
+                "가능성) — 안전하게 건너뜁니다. 작업 관리자에서 직접 확인해주세요."
+            )
             continue
         print(f"{name}(PID {pid}) 종료 시도...")
         _terminate(pid)

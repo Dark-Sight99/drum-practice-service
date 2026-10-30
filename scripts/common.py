@@ -7,6 +7,9 @@
 
 from __future__ import annotations
 
+import csv
+import platform
+import subprocess
 import sys
 from pathlib import Path
 
@@ -50,3 +53,41 @@ def ensure_run_dirs() -> None:
 
 def eprint(*args: object) -> None:
     print(*args, file=sys.stderr)
+
+
+# 2026-10-30(T5-4) — Codex 모드A 지적(C-001/C-005, 반영). 원래는 PID만 보고 살아있는지
+# 확인해 stop.py가 그 PID로 바로 종료 신호를 보냈는데, 그 PID가 우리 프로세스가 죽은 뒤
+# OS가 전혀 다른 프로그램에 재사용했을 가능성(PID 재사용)을 전혀 검증하지 않았다 —
+# start.py가 기록해둔 "이 PID는 python(.exe)이어야 한다"는 걸 종료 직전에 다시 확인해
+# 엉뚱한 프로세스를 죽이는 사고를 막는다. 추가 의존성(psutil 등) 없이 OS 기본 도구만
+# 사용(윈도우 tasklist, 맥/리눅스 ps — 둘 다 기본 설치돼 있음).
+def process_image_name(pid: int) -> str | None:
+    """살아있으면 그 PID의 실행 파일 이름(예: "python.exe", "python3.12")을, 없으면 None."""
+    if platform.system() == "Windows":
+        result = subprocess.run(
+            ["tasklist", "/FI", f"PID eq {pid}", "/FO", "CSV", "/NH"],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0 or not result.stdout.strip():
+            return None
+        line = result.stdout.strip().splitlines()[0]
+        if line.upper().startswith("INFO:"):  # tasklist가 "해당 PID 없음"일 때 내는 안내 줄
+            return None
+        try:
+            fields = next(csv.reader([line]))
+        except (csv.Error, StopIteration):
+            return None
+        return fields[0] if fields else None
+
+    result = subprocess.run(
+        ["ps", "-p", str(pid), "-o", "comm="], capture_output=True, text=True
+    )
+    name = result.stdout.strip()
+    return name or None
+
+
+def is_our_python_process(pid: int) -> bool:
+    """start.py가 띄운 프로세스가 맞는지(=아직 python 계열인지) 종료 직전 재확인."""
+    name = process_image_name(pid)
+    return name is not None and "python" in name.lower()

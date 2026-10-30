@@ -25,7 +25,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import platform
 import subprocess
 import sys
@@ -40,25 +39,17 @@ from common import (
     WEB_DIST_DIR,
     ensure_run_dirs,
     eprint,
+    process_image_name,
     server_venv_python,
 )
 
 
 def _pid_alive(pid: int) -> bool:
-    if platform.system() == "Windows":
-        out = subprocess.run(
-            ["tasklist", "/FI", f"PID eq {pid}"], capture_output=True, text=True
-        ).stdout
-        return str(pid) in out
-    try:
-        os.kill(pid, 0)
-        return True
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        return True  # 프로세스는 있지만 신호 보낼 권한이 없다는 뜻 — 즉 살아있음
-    except OSError:
-        return False
+    # 2026-10-30(T5-4) — Codex 모드A 지적(C-005, 반영). 예전엔 윈도우에서 tasklist 출력
+    # 전체를 "PID 문자열이 어딘가 들어있는지"로만 확인했는데, 메모리 사용량 등 다른 칸에
+    # 같은 숫자가 우연히 나타나도 "살아있음"으로 오판할 수 있었다 — common.py의
+    # process_image_name()이 CSV로 정확히 파싱해 "그 PID 자체가 있는지"만 본다.
+    return process_image_name(pid) is not None
 
 
 def _already_running() -> dict | None:
@@ -138,11 +129,19 @@ def main() -> int:
     )
 
     print("3/3 작업 큐 워커(worker.runner) 시작...")
-    worker_proc = _popen_detached(
-        [str(python), "-m", "worker.runner"],
-        cwd=SERVER_DIR,
-        log_path=LOG_DIR / "worker.log",
-    )
+    # 2026-10-30(T5-4) — Codex 모드A 지적(C-004, 반영). 이 시작 자체가 예외로 실패하면
+    # (예: Popen 호출 실패) 바로 위에서 이미 띄운 API 프로세스만 PID 파일 없이 고아로
+    # 남아 stop.py로 못 찾게 된다 — 실패 시 API 프로세스까지 같이 정리하고 종료.
+    try:
+        worker_proc = _popen_detached(
+            [str(python), "-m", "worker.runner"],
+            cwd=SERVER_DIR,
+            log_path=LOG_DIR / "worker.log",
+        )
+    except OSError as exc:
+        eprint(f"워커 시작 자체가 실패했습니다({exc}) — 이미 시작된 API 서버도 같이 정리합니다.")
+        api_proc.terminate()
+        return 1
 
     time.sleep(1.5)  # 둘 다 즉시 죽는(설정 오류 등) 흔한 실패를 바로 잡아내기 위한 짧은 대기
     api_alive = api_proc.poll() is None

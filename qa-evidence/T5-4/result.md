@@ -50,7 +50,29 @@
 - **맥 스크립트(`scripts/mac/`) 전부 미실행** — 이 작업 환경이 윈도우라 맥/zsh/launchd를 직접 실행할 방법이 없음. `start.sh`/`stop.sh`/`install-autostart.sh`/`uninstall-autostart.sh` 전부 **코드 검토만**(launchd plist 구조·`launchctl bootstrap` 문법은 `man launchctl`·Apple 공식 문서 근거로 작성, 실제 맥에서의 실행은 미검증). 의뢰인이 맥을 쓰게 되면 그때 실제 검증 필요.
 
 ## Codex 모드A
-(진행 예정)
+
+### 1차 — REQUEST_CHANGES
+- **C-001(필수)** `scripts/stop.py`: PID 파일의 PID만 믿고 바로 종료 신호를 보냄 — 그 PID가 죽은 뒤 OS가 전혀 다른 프로그램에 재사용했을 가능성(PID 재사용)을 전혀 검증 안 함.
+- **C-002(필수)** `scripts/create_admin.py`: "관리자가 하나도 없을 때만" 쓰려는 의도인데 실제로는 그 전제를 검사 안 해, 다른 아이디로 반복 실행하면 관리자를 계속 추가할 수 있었음(정상적인 "관리자가 계정을 추가로 만드는" 흐름 우회).
+- **C-003(필수)** `scripts/windows/start.ps1`·`stop.ps1`: `$ErrorActionPreference = "Stop"` 제거 자체는 타당했지만, 파이썬 실행 자체가 실패하는 경우(권한 문제 등) `$LASTEXITCODE`가 이전 호출 값을 그대로 들고 있어 실패를 성공으로 잘못 보고할 위험.
+- C-004(권장)/C-005(권장): 워커 시작 실패 시 API 프로세스 고아화, 윈도우 생존 판정이 tasklist 출력 전체에서 PID 문자열만 찾아 메모리 사용량 칸 등과 혼동될 이론적 위험.
+- C-006(리스크 의견): §5 접속 주소가 §5-1(Serve 재설정) 전에는 안 열린다는 선행조건을 한 문장으로 더 명확히.
+- Codex가 직접 확인: Starlette 공식 라우팅 문서(등록 순서대로 매칭, 구체 경로를 먼저) 근거로 정적 마운트를 API 라우터 뒤에 두는 설계가 올바름을 확인. `/api` 접두사 중복 등록도 경로가 다르므로 충돌 없음을 확인.
+
+### 대응
+- **C-001**: `scripts/common.py`에 `process_image_name()`(윈도우 `tasklist`를 CSV로 정확히 파싱, 맥/리눅스는 `ps -p <pid> -o comm=`)·`is_our_python_process()` 추가. `stop.py`가 종료 직전 이 확인을 거쳐, python 계열이 아니면(재사용 의심) 건너뛰고 경고만 남김.
+- **C-002**: 아이디 중복 검사 앞에 "이미 관리자가 1명이라도 있으면 기본 거부" 검사 추가, 복구용 `--force` 플래그로만 우회 가능하게.
+- **C-003**: `$LASTEXITCODE`를 실행 전 `0`으로 초기화 + `try/catch`로 호출 자체의 실패(명령을 못 찾음 등)도 명시적으로 `exit 1`.
+- **C-004**: 워커 `Popen` 호출을 `try/except OSError`로 감싸, 실패 시 이미 뜬 API 프로세스를 `terminate()`로 정리 후 종료.
+- **C-005**: C-001 대응과 같은 `process_image_name()`이 CSV 파싱으로 해결(더 이상 전체 출력 문자열 포함 여부로 안 봄) — `start.py`의 `_pid_alive()`도 이걸 재사용하도록 교체.
+- **C-006**: §5 맨 앞에 "⚠ 아래 주소는 §5-1을 먼저 한 번 해야 열립니다" 경고 문장 추가.
+
+### 재검증
+- `ruff check`(scripts/ + api/main.py) 전부 통과, `pytest` 238 passed(회귀 없음).
+- 실제 재기동: `start.ps1`(새 `_pid_alive` 포함) 정상 기동 → `/health` 200 확인 → `stop.ps1`(새 신원 확인 포함) 정상 종료, `Get-Process`로 두 PID 모두 사라짐 확인.
+- `is_our_python_process()` 단위 확인: 실제 PID 4(윈도우 "System" 프로세스, python 아님) → `False` 정상 반환, 존재하지 않는 PID → `False` 정상 반환 — PID 재사용 상황을 실제로 재현하진 못했지만(정상 종료라 재사용 PID 자체가 생기지 않음), "python이 아닌 프로세스는 건너뛴다"는 핵심 로직은 실측 확인.
+
+### 2차 — (진행 예정)
 
 ## 결론
 서버(API+워커+정적 프런트)를 한 번에 켜고 끄는 스크립트와 로그인 시 자동 시작 등록 스크립트를 윈도우·맥 양쪽에 마련했다. 윈도우는 실제 기동까지 실행해 확인했고, 맥은 실기기가 없어 코드 검토 수준에 머문다는 것과 자동 시작 등록 자체는 시스템 설정 변경이라 실행하지 않았다는 것을 솔직히 구분해 남긴다. 덕분에 T5-3이 미정으로 남겨뒀던 접속 주소·포트·프로토콜도 전부 확정했다.
