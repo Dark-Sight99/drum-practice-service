@@ -1,47 +1,75 @@
-> 한 줄 요약: T6-11 기획안 — 스템(실제 음원) 재생을 `<audio>` 엘리먼트에서 `Tone.Player`(AudioBufferSourceNode, 노트와 같은 Web Audio 시계)로 바꿔 `resync()`의 seek·playbackRate 보정 자체를 구조적으로 없앤다. Opus 5.5 서브에이전트 2개(코드 감사+공식 문서 조사) 병렬 조사 결과를 마스터가 종합. **아직 구현 전 — Codex 설계 검수·실기기 사전검증·의뢰인 승인 필요.**
+> 한 줄 요약: T6-11 통합 설계 — 스템 재생을 `<audio>`에서 `Tone.Player`(AudioBufferSourceNode)로 전환해 resync() 자체를 없앤다. 음정 유지 배속은 서버가 ffmpeg `atempo`로 미리 변환(요청 안에서 동기 처리, 최대 실측 5.5초)해 캐싱한 파일을 재생. Opus 5.5 서브에이전트 4개(코드감사/공식문서조사/프론트설계/백엔드설계) 결과를 마스터가 종합. **구현 전 — Codex 모드C 검수 필요.**
 
-# T6-11 기획안 — 스템 재생을 Tone.Player(AudioBufferSourceNode)로 전환
+# T6-11 통합 설계 — 스템을 Tone.Player로, 배속은 서버 사전변환으로
 
-근거: `work/T6-10/plan.md`(resync seek이 원인으로 확정, 소프트 보정 2회 실패 후 되돌림), 서브에이전트 2개(Opus 5.5)의 조사 보고(코드 감사 + 공식 문서 조사, 2026-10-30).
+근거: `intent/07-open-questions.md` Q-33, 서브에이전트 4개(Opus 5.5)의 조사·설계 보고(2026-10-30, 대화 기록에 전문 보존). 실기기 사전검증(의뢰인 아이폰 13 Pro): 스템 2개 `decodeAudioData()` + `AudioBufferSourceNode`로 Tone 공유 컨텍스트에 동시 재생 → **메모리·fps 문제 없음(60 유지)** — 가장 큰 두 리스크(메모리, 공유 컨텍스트) 사전 통과.
 
-## 왜 다시 근본으로 돌아가나
+## 결정된 아키텍처
 
-오늘 확정된 사실: "노트"는 `Tone.Transport`(Web Audio 시계), "실제 음원"은 `<audio>` 엘리먼트(별도 미디어 파이프라인) — **두 시계가 다르다는 게 스펙상 원천적인 특성**이지, 버그가 아니다. Web Audio 공식 스펙이 직접 명시: AudioContext의 시간은 "may not be synchronized with other clocks in the system"(시스템의 다른 시계와 동기화되지 않을 수 있음). 그래서 `resync()`(둘을 주기적으로 맞추는 로직) 자체가 애초에 있어야 했던 거고, 그 "맞추는 방법"(seek, 또는 playbackRate 조정)이 전부 iOS에서 무거운 거였다 — **방법을 아무리 바꿔도 "두 시계를 쓴다"는 근본 구조가 남아있는 한 비슷한 문제가 반복될 가능성이 높다.**
+1. **스템 재생**: `<audio>`+`createMediaElementSource()` → `Tone.Player`(`AudioBufferSourceNode`). 노트와 **같은 AudioContext 시계**를 쓰므로 `resync()`가 구조적으로 불필요해짐(드리프트 자체가 안 생김).
+2. **동기화 방식**: `Tone.Transport`의 `start`/`loopStart`/`stop`/`pause` 이벤트를 구독해, 매번 `player.start(time, offset)`을 샘플 단위로 재계산해 예약. `scorePlayer.ts`의 기존 "트랙 재시작 schedule() 콜백"(time 인자 미사용 버그, 루프 경계 20ms 꼼수, 에디터 핸드오프 버그의 공통 원인)은 **삭제**.
+3. **음정 유지 배속**: 재생 중 배속 변경이 이미 UI로 막혀 있음(코드 확인됨) → 서버가 배속 선택 시점에 ffmpeg `atempo`로 1회 변환 + 캐싱, `Tone.Player`는 rate=1(또는 잔차 보정값)로 재생. 실시간 피치 보정 라이브러리(AudioWorklet 기반)는 전부 iOS 미해결 버그 위험이 있어 배제.
+4. **플랫폼 분기 제거**: iOS 전용 `getIOSStemAudioContext()`/`useWebAudioForVolume`/`element.volume` 분기를 전부 없애고 전 플랫폼 단일 경로로 통일(맥 Safari의 Q-37도 부수적으로 해소).
 
-## 핵심 증거(두 서브에이전트 교차 확인)
+## API 계약 (프론트·백엔드 조율 완료 — 최종)
 
-1. **WebKit 소스 코드(main 브랜치, `AudioSourceProviderAVFObjC.mm`) 직접 확인** — iOS에서 `createMediaElementSource()`로 연결된 `<audio>`의 `playbackRate`를 바꾸면, WebKit이 오디오 탭(MTAudioProcessingTap)과 링버퍼를 **통째로 부쉈다가 다시 만든다**(`destroyMixIfNeeded()` → `createMixIfNeeded()`). 재생성 중엔 "충분한 데이터가 쌓일 때까지 무음 출력"(소스 주석 원문 확인). **T6-10의 소프트 보정이 0.75초마다 바로 이 재구성을 반복시켰다는 게 끊김의 직접적 원인으로 보임** — seek도 같은 경로에서 버퍼 플러시를 유발(코드 확인).
-2. **WebKit 미디어 엔지니어 Jer Noble의 공식 답변**(WebKit Bug 301824, 2025-11-07): *"There's no requirement that two `<audio>` elements remain in sync with each other; ... If you want sample accurate playback, you really need a BufferSource, not a HTMLMediaElement."* 같은 버그에서 실제로 BufferSource로 바꾼 사람의 후기: *"It works perfectly, even on iOS Safari."*
-3. **아직 안 고쳐진 관련 WebKit 버그도 확인됨**: Bug 311000(`preservesPitch=true`도 AudioContext에 연결되면 choppy, 2026-06-22에 REOPENED 상태) — 즉 **지금 쓰는 경로(iOS Web Audio 우회 + preservesPitch) 자체가 WebKit의 알려진 미해결 버그 영역**이라는 것도 추가로 확인됨.
-4. **Tone.js의 `Tone.Player`는 이미 이 프로젝트의 의존성**(가상드럼에 이미 씀)이고, 실제 소스 확인 결과 `AudioBufferSourceNode`를 감싼 것이며 `sync()`로 Transport의 재생/일시정지/루프 이벤트를 자동으로 따라갈 수 있음(일부 제약은 아래 리스크 참고). Web Audio 스펙상 버퍼 재생은 AudioContext의 렌더 스레드 안에서 `currentTime`과 **같은 흐름으로** 처리되므로, 드리프트가 구조적으로 생기지 않음(스펙 §1.9.3/§1.7.2/§1.9.6 확인).
+두 설계 에이전트가 병행 작업하며 서로 다른 API 모양을 가정했음 — **백엔드 설계(동기 처리)를 채택**(실측 근거: 최악 5.5초, 큐에 넣는 것보다 단순하고 빠름).
 
-## 설계 방향(1순위, 두 에이전트 공통 권고)
+```
+GET /songs/{song_id}/audio/{kind}/tempo/{permille}
+```
+- `kind`: `AUDIO_ASSET_KINDS`에서 `original` 제외.
+- `permille`: `Math.round(exactRate * 1000)`, 범위 490~1510. **1000이면 변환 없이 원본 스템 그대로 반환**(atempo=1.0도 자체적으로 ~8ms 오프셋을 만든다는 게 실측으로 확인됐기 때문).
+- 응답: 200 `audio/mpeg` + `X-Tempo-Permille` 헤더(또는 404/422/500). **비동기 202/폴링 없음** — 캐시 미스 시 요청 안에서 바로 변환(동기 `def` 라우트라 FastAPI가 스레드풀에서 실행, 이벤트 루프 안 막음).
+- 프론트는 **잔차 playbackRate로 양자화 오차를 보정**: 서버가 실제 적용한 비율은 `permille/1000`이고 사용자가 원하는 정확한 비율은 `exactRate`이므로, `Tone.Player.playbackRate = exactRate / (permille/1000)`로 설정(최대 오차 0.05%, 음정 영향 0.87cent — 가청 임계 이하). **이건 프론트 설계의 `stemNodePlaybackRate(timing, bufferTempoRatio)` 함수가 `bufferTempoRatio = permille/1000`을 받으면 수정 없이 그대로 계산해줌** — 두 설계가 우연히 정확히 들어맞음.
 
-- 스템(`stem_drums`/`stem_music`) 재생을 `trackPlayer.ts`의 `<audio>`+`createMediaElementSource()` 방식에서 `Tone.Player`(`AudioBufferSourceNode`)로 교체.
-- 믹서 게인은 `Tone.Player`/`Source`에 이미 있는 `volume`(dB)으로 — `mixer.ts`의 기존 `linearGainToDb()`를 그대로 재사용 가능(새 변환 로직 불필요). **iOS 전용 `GainNode`/`getIOSStemAudioContext()` 분기 자체가 통째로 불필요해질 가능성**(데스크톱·iOS 구분 없이 하나의 경로로 통일).
-- 언락(iOS 자동재생 정책)도 `prime()`의 play+pause 트릭이 필요 없어지고, AudioContext `resume()`만 있으면 됨 — 코드가 오히려 단순해짐.
+```ts
+// 프론트: api/songs.ts
+export function stemTempoAudioUrl(songId: number, kind: string, permille: number): string {
+  return permille === 1000
+    ? `/api/songs/${songId}/audio/${kind}`
+    : `/api/songs/${songId}/audio/${kind}/tempo/${permille}`
+}
+```
 
-## 가장 큰 걸림돌 — 음정 유지 배속 조절(REQ-04/Q-04)
+## 프론트엔드 설계 요약 (전체 상세는 대화 기록의 서브에이전트 보고 참고, 아래는 핵심)
 
-- `AudioBufferSourceNode.playbackRate`(및 `Tone.Player.playbackRate`)는 **피치도 같이 바뀐다**(스펙·Tone.js 문서 양쪽 확인). 지금 쓰는 `element.preservesPitch`에 해당하는 기능이 Web Audio 표준엔 아직 없음(Web Audio WG 이슈 #2487, "Priority: Soon"이지만 미반영).
-- 실시간 피치 보정 라이브러리(AudioWorklet 기반 — Tone.GrainPlayer, Signalsmith Stretch, SoundTouchJS, Rubber Band 등)는 전부 **iOS 실사용이 검증된 1차 출처가 없고**, 특히 **"iOS에서 AudioWorklet을 쓰면 컨텍스트 전체에 글리치가 나고 컨텍스트를 새로 만들기 전까진 안 없어진다"는 미해결 WebKit 버그(226240)가 공통 리스크**로 깔려있음 — 이 프로젝트가 예전에 SoundTouchJS(AudioWorklet)로 실기기에서 실패했던 것과 같은 범주의 위험일 가능성이 높음.
-- **채택할 우회(두 에이전트 공통 제안)**: 이 앱은 **재생 중 배속을 바꿀 수 없음**(코드로 확인 — BPM 입력이 재생/일시정지 중 비활성화됨, 한 세션 동안 배속은 상수). 그러니 실시간 피치 보정 DSP가 전혀 필요 없음 — **재생 "시작 전에" 그 배속만큼 미리 속도를 바꿔둔 오디오를 만들어서(오프라인 처리), 그걸 `Tone.Player`로 1배속(rate=1)으로 그냥 재생**하면 됨. 오프라인 처리는 SoundTouchJS가 실패했던 "실시간 AudioWorklet 불안정" 조건 자체에 해당하지 않음(서버에서 ffmpeg `atempo`/`rubberband` 필터로 처리 가능 — 로컬 ffmpeg 9.0.2에 둘 다 있음을 실행으로 확인, 서버 번들 ffmpeg에도 있는지는 미확인. `rubberband`는 GPL이라 쓰면 `intent/03-architecture-stack.md` 라이선스 표에 기록 필요, CLAUDE.md §6).
-- 1.0배속(원곡 그대로)일 때는 전처리 자체가 필요 없음 — 서버 스템 파일을 그대로 디코딩해서 재생.
+- **새 파일**: `audio/stemSchedule.ts`(순수 함수, Tone 미의존 — jsdom 테스트 가능: `planStemStart()`가 Transport 이벤트 1개를 "이 AudioContext 시각에 이 버퍼 오프셋으로 시작"으로 변환), `audio/stemPlayer.ts`(`loadStemBufferPool()` + `createStemPlayer()` — `attach(timing)`/`detach()`/`setChannelGain()` 3개만 공개).
+- **`trackPlayer.ts`는 당장 안 지움** — 전환 검증 끝날 때까지 공존, Step 5에서 한 번에 삭제(런타임 플래그로 신/구 공존시키지 않음 — 분기점이 7곳 이상 생겨 그 자체가 버그원이 되므로, 브랜치 단위로 비교).
+- **`resync()`/`TRACK_RESYNC_*`/T6-9 `skipResync` 토글 전부 삭제** — 드리프트가 구조적으로 없어지므로.
+- **`prime()`도 삭제** — 같은 Tone 컨텍스트라 `createDrumVoices()`의 `Tone.start()`(이미 제스처 안에서 동기 호출됨)로 언락 충분.
+- Tone.js 15.1.22 소스를 직접 읽어 확인한 중요 사실들(설계의 전제): `Player.start()`는 매번 새 `AudioBufferSourceNode`를 만듦(1회용), `Source.start()`는 같은 시각 재시작 시 예외를 던지므로 항상 `stop(t)` 후 `start(t)` 순서 필요, `Player.sync()`는 playbackRate≠1일 때 오프셋 계산 버그 의심(소스 레벨, 그래서 `sync()` 대신 Transport 이벤트 직접 구독 채택), Transport의 재생 중 위치 변경은 `stop`+`start`를 동기적으로 연속 발생시키되 드물게 순서가 뒤집힐 수 있어(T9) 단조 가드 필요.
+- **이번 감사로 새로 찾은 숨은 의존**: 지금까지 "재생 중 A-B 루프 구간을 바꿔도 트랙이 새 구간으로 재시작되는" 동작은 사실 resync()의 seek가 몰래 처리해주고 있었음 — resync를 없애면 이 경로가 명시적으로 `loopStart` 이벤트 구독으로 처리돼야 함(설계에 반영됨, 안 하면 회귀).
+- **메모리 해제**: 진단용 전역(`window.__t6_5_tracks`, `window.__t6_11_tone_context`) 반드시 같이 삭제 — 안 그러면 곡이 바뀌어도 버퍼(수백 MB)가 영구히 GC 안 됨.
+- **새로 발견된 리스크**: iOS 무음 스위치(순수 Web Audio는 무음 스위치를 따를 수 있음 — `navigator.audioSession.type='playback'` 검토 필요, 실기기 A/B 확인 필요), 0.5배속 변환본은 재생 길이가 2배가 돼 메모리도 약 2배(~420MB/스템 2개) — 오늘 사전검증은 1.0배속 기준이라 **최저 배속은 미검증**.
+- 에디터 화면(`EditorScreen.tsx`)도 같은 구조 공유 — `trackPlayer.ts`를 완전히 지우려면 에디터도 같이 전환해야 함(plan 초안에서 "범위 밖"으로 뒀던 것을 수정).
 
-## 구현 전 반드시 실기기로 먼저 검증해야 할 것(순서대로, 코드 전면 교체 전에)
+## 백엔드 설계 요약
 
-1. **메모리**: 스템 하나를 float32 PCM으로 통째로 들고 있으면 곡당(스테레오 44.1kHz, ~5분 기준) 스템 2개에 약 237MB(두 에이전트 계산 일치, 118MB 전후/스템). iPhone 13 Pro·iPad mini 5 Safari에서 이 정도 메모리로 탭이 안 죽는지(jetsam) 실기기로 직접 확인 — 안 되면 모노 변환, 필요할 때만 지연 디코딩(`stem_drums`는 기본 볼륨 0이라 토글 전엔 안 받아도 됨) 등 완화책 필요.
-2. **공유 컨텍스트 위험 재확인**: T6-6에서 "Tone 공유 컨텍스트에 실제 음원(MediaElementSource)을 얹으면 렉"을 실기기로 확정했었는데, 그게 **MediaElementSource 특유의 문제였는지, AudioBufferSourceNode도 똑같이 느려지는지 아직 확인 안 됨** — 콘솔에서 같은 스템을 `decodeAudioData()`한 뒤 `AudioBufferSourceNode`로 재생하며 fps 재보려는 실험을 먼저 해봐야 함(코드 전면 교체 전 저비용 사전검증).
-3. iOS 버전 확인(의뢰인 아이폰이 iOS 27 이상인지) — 27.0부터 `preservesPitch`/`playbackRate` 처리가 일부 수정됐지만 27.1/27.2에도 후속 수정 없이 관련 버그(311000)가 남아있어, 지금 겪는 증상이 iOS 버전에 따라 조금씩 다를 수 있음.
+- **변환**: 번들 ffmpeg(이미 씀, 새 의존성 없음)의 `atempo` 필터, 단일 호출(50~150% 범위는 atempo 유효범위 0.5~100 안이라 체이닝 불필요 — 실측 확인). 드럼은 WAV(무손실 Asset)를 입력으로 써서 압축 세대 손실 최소화.
+- **캐시 키**: `permille`(0.1% 단위) — 정수 BPM 환경에서 서로 다른 BPM이 같은 캐시를 나눠 쓸 일이 사실상 없을 만큼 촘촘함.
+- **저장**: 곡 폴더 안 평면 파일 `tempo_<kind>_<permille>.mp3`(하위 디렉터리는 기존 `delete_song_files()`가 못 지움 — 실행으로 확인된 실제 제약). Asset 행은 안 만듦(파생 데이터, DB 마이그레이션 불필요).
+- **정리**: 전체 용량 상한(제안 2GiB) 넘으면 오래 안 쓴 것부터 삭제, 쓸 때마다 mtime 갱신.
+- **동시성**: 키별 락 + 동시 변환 수 제한(세마포어), 최종 쓰기는 임시파일+`replace`(기존 패턴 재사용).
+- **라이선스**: `atempo`는 ffmpeg 본체 필터(LGPL-2.1+), 이미 쓰는 번들 바이너리 안에 있어 새 의존성·새 라이선스 조건 없음. `intent/03-architecture-stack.md` 95행에 용도 설명만 추가 권장(의뢰인 승인 필요).
+- **실측으로 발견한 주의점**: atempo 결과물은 배속별로 일정한(누적 안 되는) 시작 오프셋이 있음(예: 0.5배속 약 −24ms, 1.5배속 약 +1ms, 1.0배속도 약 −8ms). 다른 곡에서도 같은지, 의뢰인이 체감하는지 **확인 필요** — 체감되면 보정(서버 `adelay` 또는 프론트 상수) 검토.
+- rubberband(음질은 더 나을 수 있음, 3.8~4.5배 느림, GPL)는 대안으로만 보류.
 
-## 범위 밖(이번엔 안 건드림)
+## 마이그레이션 단계(프론트 설계안 채택)
 
-- 에디터 화면(`EditorScreen.tsx`)의 같은 구조도 똑같이 영향받지만, 실기기 성능이 중요한 건 연습 화면(모바일)이 우선 — 에디터는 주로 PC 사용으로 보여 범위를 연습 화면으로 먼저 좁히고, 성공하면 에디터도 동일 적용 검토.
-- Rubber Band(GPL) 채택 여부는 라이선스 영향이 있어 의뢰인 결정 필요 — 일단 ffmpeg `atempo`(라이선스 걱정 없음, 이미 쓰는 ffmpeg 번들 안에 있을 가능성 높음)를 1차로 검토.
+| Step | 내용 |
+|---|---|
+| 0 | 이 문서로 API 계약·수용기준 최종 확정(완료) |
+| 1 | `stemSchedule.ts`/`stemPlayer.ts` + 단위 테스트만 추가(아직 미연결) |
+| 2 | `scorePlayer.ts`/`PracticeCanvas.tsx` 전환. 백엔드 API 완성 전엔 개발 확인용으로 "원본 버퍼 rate=r 그대로(피치 변함)" 임시 재생으로 싱크 로직만 먼저 검증 — **이 상태로 merge 금지**(피치 회귀) |
+| 3 | 백엔드 배속 API 연결, 피치 보존 확인 |
+| 4 | `EditorScreen.tsx`도 동일 전환(구 모듈 완전 삭제를 위해 필요) |
+| 5 | `trackPlayer.ts`/`getIOSStemAudioContext()`와 각 테스트, T6-9 진단 토글 전부 삭제 → Codex 검수 → 의뢰인 승인 |
+
+## 실기기 검증 항목(최종 전, 전부 통과 필요)
+
+fps 60 유지, 노트-음원 싱크(5분 끝까지), 로딩 시간, **0.5배속 메모리(iPad mini 5 포함, 미검증)**, A-B 루프 10회 반복(경계 클릭·재진입·**재생 중 구간 변경**), 핸드오프/일시정지/탐색, **무음 스위치 ON 비교**, 카운트인 중 일시정지→재개, 곡 3회 전환 후 메모리 해제 확인, 블루투스 지연보정, 믹서 전체 조작, 맥 Safari Q-37 재현 여부, 합산 클리핑, 배속 변경 시 피치 보존.
 
 ## 다음 단계
 
-이 문서는 **설계 방향 정리까지**이고 구현 전입니다. REQ-04 핵심 재생 경로의 전면 교체라 범위가 크므로:
-1. 위 "구현 전 검증" 2개(메모리, 공유 컨텍스트)부터 실기기로 저비용 사전 확인
-2. 통과하면 상세 설계 문서 작성 → Codex 모드C 검수 → 구현 → 테스트 → 실기기 최종 검증
-3. 의뢰인 승인(이 정도 규모 변경은 Phase 게이트에 준하는 결정으로 판단)
+이 문서로 Codex 모드C 설계 검수 진행 → 반영 → Step 1부터 구현 시작.
