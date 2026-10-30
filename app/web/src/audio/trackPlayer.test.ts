@@ -519,15 +519,18 @@ describe('createTrackPlayer', () => {
     })
 
     it('clamps the soft correction to RESYNC_MAX_RATE_DELTA even for a large-but-sub-hard-snap drift', async () => {
-      const player = await primedUnpausedPlayer(6.9) // 드리프트 1.9초 < 하드 스냅 2.0초
+      const player = await primedUnpausedPlayer(5.3) // 드리프트 0.3초 < 하드 스냅 0.5초
+      const setSpy = vi.spyOn(HTMLMediaElement.prototype, 'currentTime', 'set')
+      setSpy.mockClear()
 
       player.resync(5.0, 0.1, 1)
 
+      expect(setSpy).not.toHaveBeenCalled() // 여전히 소프트 보정 — seek 없음
       expect(createdAudioElements[0].playbackRate).toBeCloseTo(1 - 0.08, 5)
     })
 
     it('hard-snaps currentTime and resets playbackRate when drift exceeds the hard-snap threshold', async () => {
-      const player = await primedUnpausedPlayer(7.5) // 드리프트 2.5초 > 하드 스냅 2.0초
+      const player = await primedUnpausedPlayer(5.8) // 드리프트 0.8초 > 하드 스냅 0.5초
       const setSpy = vi.spyOn(HTMLMediaElement.prototype, 'currentTime', 'set')
       setSpy.mockClear()
 

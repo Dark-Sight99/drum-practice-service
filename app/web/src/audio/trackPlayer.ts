@@ -65,10 +65,17 @@ const RESYNC_EXIT_THRESHOLD_FACTOR = 0.5
 /** "지금 보정 중인지"를 `element.playbackRate`와 `basePlaybackRate`의 차이로
  * 판별할 때 쓰는 허용오차(부동소수점 비교용, 실질적으로는 0과 동일하게 취급). */
 const RESYNC_RATE_EPSILON = 0.001
-/** 이 이상 벗어나면(비정상 상황에 대한 순수 방어선 — 루프 경계는 scorePlayer.ts가
- * playFrom()으로 별도 처리하므로 정상 동작에선 거의 발동 안 해야 함) 기존처럼
- * 즉시 seek. */
-const RESYNC_HARD_SNAP_THRESHOLD_SECONDS = 2.0
+/** 이 이상 벗어나면 기존처럼 즉시 seek(루프 경계는 scorePlayer.ts가 playFrom()으로
+ * 별도 처리하므로 이건 그 외의 "진짜 큰" 격차용 — 특히 iOS에서 재생 시작 직후
+ * 한 번 생기는 큰 초기 오프셋(실기기 확인, 2026-10-30)은 소프트 보정(최대 ±8%)
+ * 으로 따라잡기엔 너무 느려서(수십 초 소요) 체감상 "계속 늦게 들림"이 됨 —
+ * 애초 설계안의 2.0초는 너무 높았음(실기기 재현으로 발견, 작업 기록 참고).
+ * 0.5초로 낮춰, 그런 큰 오프셋은 여전히 즉시 한 번 점프로 바로잡되, 재생 중
+ * 반복적으로 쌓이는 작은(0.1~0.5초) 자연 드리프트만 소프트 보정 대상으로
+ * 남긴다 — 원래 성능 문제의 원인은 "같은 작은 드리프트가 0.75초마다 계속
+ * 재발해 매번 seek되던 것"이었지(work/T6-10/plan.md), seek 자체가 거리와
+ * 무관하게 무거운 건 아닐 수 있어 이 구분이 중요. */
+const RESYNC_HARD_SNAP_THRESHOLD_SECONDS = 0.5
 
 export interface TrackSource {
   kind: string
