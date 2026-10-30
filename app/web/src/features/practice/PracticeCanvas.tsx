@@ -52,7 +52,7 @@ import {
   type StemPlayer,
 } from '../../audio'
 import { fetchMixerSetting, saveMixerSetting } from '../../api/auth'
-import { songAudioUrl, type SongSummary } from '../../api/songs'
+import { stemTempoAudioUrl, type SongSummary } from '../../api/songs'
 import type { DrumPiece, DrumScore, Hand } from '../../score/types'
 import { createLaneRenderer, type LaneRenderer } from '../../render/laneRenderer'
 import { KitIllustration } from '../../render/KitIllustration'
@@ -494,6 +494,28 @@ export function PracticeCanvas({
   useEffect(() => {
     playbackBpmRef.current = playbackBpm
   }, [playbackBpm])
+  // T6-11 Step 3(REQ-04, Q-33) — BPM이 바뀌면 그 배속에 맞는 음정 유지
+  // 변환본을 서버에서 새로 받아야 하는데(아래 스템 풀 로딩 effect), 슬라이더를
+  // 드래그하는 동안 프레임마다 바뀌는 playbackBpm을 그대로 의존성에 넣으면
+  // 드래그 한 번에 서버 변환 요청이 수십 번 나간다 — 믹서 저장
+  // (scheduleMixerSaveGlobal, 이 파일 위쪽)과 같은 400ms 디바운스로 "그만
+  // 움직이고 난 뒤"의 값만 실제 요청에 쓴다.
+  const [debouncedPlaybackBpm, setDebouncedPlaybackBpm] = useState(playbackBpm)
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedPlaybackBpm(playbackBpm), 400)
+    return () => clearTimeout(timer)
+  }, [playbackBpm])
+  // work/T6-11/plan.md "API 계약"의 정의 그대로(Math.round(exactRate * 1000)).
+  const stemTempoPermille = Math.round((debouncedPlaybackBpm / score.meta.bpm) * 1000)
+  // 디바운스 구간(최대 400ms) 동안엔 playbackBpm(방금 확정된 값)과
+  // stemTempoPermille(아직 그 전 값 기준으로 로딩된 풀)이 서로 다를 수 있다 —
+  // 이 틈에 재생을 누르면 `audioTracksLoading`은 아직 false(재요청이 시작도
+  // 안 한 시점)라 막히지 않고, 화면에 쓸 노트 BPM과 실제 로딩된 스템 버퍼의
+  // 배속이 어긋난 채로 세션이 시작될 수 있었다(모드A류 자체 검토로 발견 —
+  // 실기기 재현은 아직 안 함). 재생 버튼 disabled 조건에 이 불일치도 같이
+  // 넣어 막는다(아래 handlePlay() 버튼 참고).
+  const stemTempoPending =
+    Math.round((playbackBpm / score.meta.bpm) * 1000) !== stemTempoPermille
 
   // --- 오디오 지연 보정(2026-10-28, 의뢰인 요청 — 블루투스 이어폰 싱크 밀림) ---
   const [audioLatencyCompensationMs, setAudioLatencyCompensationMs] = useState(
@@ -571,13 +593,17 @@ export function PracticeCanvas({
     if (stemKinds.length === 0) return // MIDI-only 곡 등 — 만들 트랙 자체가 없음
     let cancelled = false
     setAudioTracksLoading(true)
-    // T6-11 Step 2(work/T6-11/plan.md) — 백엔드 배속 변환 API(Step 3) 연결
-    // 전까지는 개발 확인용으로 원본 버퍼를 그대로 쓴다(bufferTempoRatio=1) —
-    // 네이티브 playbackRate가 그대로 재생 속도가 돼 배속 변경 시 피치가
-    // 바뀌는 건 알려진 임시 제약(REQ-04 피치 보존은 Step 3에서 복원).
+    // T6-11 Step 3(REQ-04, Q-33, work/T6-11/plan.md "API 계약") — 지금
+    // debouncedPlaybackBpm(=stemTempoPermille)에 맞는 음정 유지 변환본을
+    // 서버에서 받아온다. permille이 1000(배속 변경 없음)이면
+    // stemTempoAudioUrl()이 기존 songAudioUrl()과 같은 URL을 주므로 그 경우는
+    // 사실상 Step 2와 동일하게 동작(원본 그대로, 변환 없음).
     loadStemBufferPool(
-      stemKinds.map((kind) => ({ kind, url: songAudioUrl(songId, kind) })),
-      { bufferTempoRatio: 1 },
+      stemKinds.map((kind) => ({
+        kind,
+        url: stemTempoAudioUrl(songId, kind, stemTempoPermille),
+      })),
+      { bufferTempoRatio: stemTempoPermille / 1000 },
     )
       .then((pool) => {
         if (cancelled) {
@@ -606,8 +632,11 @@ export function PracticeCanvas({
       audioTrackPoolRef.current?.destroy()
       audioTrackPoolRef.current = null
     }
+    // T6-11 Step 3 — stemTempoPermille을 의존성에 추가(BPM이 바뀌면 그 배속의
+    // 변환본으로 풀을 다시 불러와야 함). debouncedPlaybackBpm을 거쳐서 오므로
+    // 드래그 중엔 400ms 동안 값이 안 바뀌어 재요청이 안 쏟아진다.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [songId, availableAudioKindsKey, audioTracksRetryToken])
+  }, [songId, availableAudioKindsKey, audioTracksRetryToken, stemTempoPermille])
 
   // 재시도 버튼 — songId/availableAudioKindsKey는 그대로지만 토큰만 올려
   // 위 effect를 다시 돌게 한다(cleanup → 재실행, 기존 cancelled 가드 재사용).
@@ -1646,10 +1675,11 @@ export function PracticeCanvas({
         e.preventDefault() // 기본 동작(페이지 스크롤) 방지
         if (isPlaying) {
           handlePause()
-        } else if (!isStarting && !audioTracksLoading) {
-          // 재생 버튼의 disabled 조건(isStarting || audioTracksLoading)과
-          // 동일하게 가드 — 세션 시작 중이거나 오디오 트랙을 아직 불러오는
-          // 중이면 스페이스바로도 새 재생을 시작하지 않는다.
+        } else if (!isStarting && !audioTracksLoading && !stemTempoPending) {
+          // 재생 버튼의 disabled 조건(isStarting || audioTracksLoading ||
+          // stemTempoPending)과 동일하게 가드 — 세션 시작 중이거나 오디오
+          // 트랙을 아직 불러오는 중이거나(BPM 디바운스 대기 포함) 스페이스바로도
+          // 새 재생을 시작하지 않는다.
           void handlePlay()
         }
       } else if (e.code === 'ArrowLeft') {
@@ -1670,7 +1700,7 @@ export function PracticeCanvas({
     // 단축키가 그 state의 구 버전을 계속 참조하는 stale closure 버그가
     // 생긴다. 셋 다 포함해 매 렌더 리스너를 다시 거는 쪽을 택함 — 키보드
     // 리스너 재등록은 가벼운 연산이라 성능상 문제 없음.
-  }, [isPlaying, isStarting, audioTracksLoading, handlePlay, handlePause, handleSeek])
+  }, [isPlaying, isStarting, audioTracksLoading, stemTempoPending, handlePlay, handlePause, handleSeek])
 
   // T3-9(REQ-04, 의뢰인 피드백) — "여기서 시작"/"여기까지": 악보 없이
   // 귀로만 들으며 A-B 루프를 지정할 수 있게, 지금 재생 위치를 가장 가까운
@@ -2607,10 +2637,10 @@ export function PracticeCanvas({
                   type="button"
                   className="transport-btn transport-btn--play"
                   style={{ width: 50, height: 50 }}
-                  title={audioTracksLoading ? '음원 불러오는 중…' : '재생'}
-                  aria-label={audioTracksLoading ? '음원 불러오는 중' : '재생'}
+                  title={audioTracksLoading || stemTempoPending ? '음원 불러오는 중…' : '재생'}
+                  aria-label={audioTracksLoading || stemTempoPending ? '음원 불러오는 중' : '재생'}
                   onClick={handlePlay}
-                  disabled={isStarting || audioTracksLoading}
+                  disabled={isStarting || audioTracksLoading || stemTempoPending}
                 >
                   {/* 2026-10-29(의뢰인 요청) — "다운로드 다 완료될 때까지
                    * 스켈레톤 로딩 넣어서 경험에 방해 없게" — 재생을 막아두는
@@ -2619,7 +2649,7 @@ export function PracticeCanvas({
                    * "지금 실제로 뭔가 진행되고 있다"는 걸 분명히 보여주는
                    * 스피너로 — 업로드 화면의 "노트를 생성하는 중…"과 같은
                    * 컴포넌트(components/Spinner.tsx) 재사용. */}
-                  {audioTracksLoading ? (
+                  {audioTracksLoading || stemTempoPending ? (
                     <Spinner size={22} />
                   ) : (
                     <Play
