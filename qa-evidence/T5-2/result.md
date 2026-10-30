@@ -51,5 +51,8 @@ T5-2(PWA 설치 + 오프라인 저장) 착수를 앞두고 의뢰인에게 "서�
 ### 재검증
 `npx tsc -b` / `npx vitest run`(333 passed) 재실행 통과(wiki 문서만 수정, 코드 변경 없어 실질 영향 없음 확인 차 재실행).
 
+### 3차 — APPROVE
+필수 수정 없음, 권장 사항 없음. `wiki/architecture.md` 정리 확인, `intent/planning-log.md`·`work/`·`logs/`·`qa-evidence/` 과거 기록을 그대로 둔 판단에 동의(OMR 드롭 커밋 때도 `planning-log.md`·`logs/`는 수정 안 됐음을 직접 확인), `intent/09-agent-roles.md:78`의 "오프라인" QA 체크가 REQ-09 드롭 후에도 유효한 일반 실패-경로 테스트라는 판단에 동의. lockfile 패키지 버전 변경 없음 재확인.
+
 ## 결론
 의뢰인 결정에 따라 REQ-09(오프라인 연습)·T5-2(PWA 설치)를 전부 드롭. 작동하지 않던 미사용 설정을 정리했고, intent 문서 전반에 드롭 사유를 남겨 추후 재검토 시 왜 드롭했는지 추적 가능하게 함.
