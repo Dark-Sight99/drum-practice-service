@@ -33,7 +33,7 @@
 - `install-autostart.sh`/`uninstall-autostart.sh` — 맥 **launchd** LaunchAgent(`~/Library/LaunchAgents/`) 등록/해제, `launchctl bootstrap`/`bootout`(Apple이 현재 권장하는 방식 — 구 `load`/`unload`는 레거시, `man launchctl`의 "LEGACY SUBCOMMANDS" 설명 근거).
 
 ### 5. T5-3 가이드 확정 (`docs/원격-접속-안내-Tailscale.md`)
-- §5를 "미정" 표시에서 실제 확인된 값으로 교체: `https://desktop-2j6he5q.tail756a35.ts.net`(포트 불필요, 443 기본) — **서버 PC에 이미 설치된 Tailscale의 `tailscale status`/`tailscale serve status` 실행 결과로 직접 확인**한 실제 기기 이름·설정(추측 아님).
+- §5를 "미정" 표시에서 실제 확인된 값으로 교체: `https://<서버PC-기기이름>.tail756a35.ts.net`(포트 불필요, 443 기본) — **서버 PC에 이미 설치된 Tailscale의 `tailscale status`/`tailscale serve status` 실행 결과로 직접 확인**한 실제 기기 이름·설정(추측 아님).
 - `tailscale serve --bg 8000` 1회 설정 안내 추가 — 명령 문법은 서버 PC의 실제 `tailscale serve --help` 출력으로 확인(기억에 의존 안 함, CLAUDE.md §1-2).
 
 ## 테스트

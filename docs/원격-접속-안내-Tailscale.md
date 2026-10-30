@@ -44,12 +44,12 @@
 **⚠ 아래 주소는 §5-1을 먼저 한 번 해야 열립니다 — 그 전까지는 이 주소로 접속해도 안 됩니다**(기존에 Tailscale Serve가 가리키던 곳은 개발용 5173번 포트였고, §5-1이 그걸 운영용 8000번으로 바꿔주는 단계이기 때문). §5-1까지 끝낸 뒤, 서버 PC가 Tailscale에 연결돼 있으면 같은 tailnet의 어느 기기에서든 브라우저로:
 
 ```
-https://desktop-2j6he5q.tail756a35.ts.net
+https://<서버PC-기기이름>.tail756a35.ts.net
 ```
 
-로 접속합니다. 포트 번호는 안 붙여도 됩니다(https 기본 포트 443으로 Tailscale이 자동 연결해줌).
+로 접속합니다(`<서버PC-기기이름>`은 실제 기기 이름으로 바꿔서 접속 — 서버 PC 터미널에서 `tailscale status` 입력하면 맨 위에 본인 PC 줄에 나옵니다). 포트 번호는 안 붙여도 됩니다(https 기본 포트 443으로 Tailscale이 자동 연결해줌).
 
-기기 이름(`desktop-2j6he5q`)이 나중에 바뀌면, 서버 PC 터미널에서 `tailscale status` 입력 — 맨 위에 본인 PC 줄이 나옵니다. `.tail756a35.ts.net`는 의뢰인의 tailnet 고유 주소(`app/web/vite.config.ts`의 `allowedHosts`에도 등록돼 있음).
+기기 이름이 나중에 바뀌어도 위 방법으로 다시 확인할 수 있습니다. `.tail756a35.ts.net`는 의뢰인의 tailnet 고유 주소(`app/web/vite.config.ts`의 `allowedHosts`에도 등록돼 있음).
 
 ### 5-1. (서버 PC에서, 한 번만) Tailscale Serve 설정
 
@@ -61,7 +61,7 @@ T5-4부터 서버(API)와 화면(프런트엔드)이 같은 포트(8000) 하나�
 tailscale serve --bg 8000
 ```
 
-확인: `tailscale serve status` — `https://desktop-2j6he5q.tail756a35.ts.net`가 `proxy http://127.0.0.1:8000`을 가리키면 성공.
+확인: `tailscale serve status` — `https://<서버PC-기기이름>.tail756a35.ts.net`가 `proxy http://127.0.0.1:8000`을 가리키면 성공.
 
 **참고**: 개발 중에는 이 설정이 Vite 개발 서버(5173번 포트)를 가리키고 있었습니다 — 위 명령을 실행하면 8000번(운영용 서버)으로 바뀝니다. 공개 인터넷에 노출되는 게 아니라 tailnet(의뢰인의 사설망) 안에서만 통하는 주소라 안전합니다(REQ-08 "비공개" 원칙 유지 — Funnel과 다름, §6 참고).
 

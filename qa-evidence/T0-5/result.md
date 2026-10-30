@@ -19,7 +19,7 @@ REQ-04 — 60%/130% 재생 시 오디오-메트로놈 어긋남 측정(목표 ±
    - 이 테스트로 **HTTPS(또는 localhost) 필요성을 직접 재현 확인**: `file://`로 열면 AudioWorklet/WakeLock이 `false`, `http://localhost`로 열면 `true` — research.md의 조사 결과와 일치.
 
 ## 폰·태블릿 HTTPS 배포 (해결됨)
-Tailscale 설치(의뢰인 직접, UAC 동의) + `tailscale serve`로 로컬 포트(8731, admin 권한 불필요한 포트 프록시 방식)를 `https://desktop-2j6he5q.tail756a35.ts.net/`로 테일넷 내 공개. 아이폰·아이패드 둘 다 같은 테일넷에 연결해 Safari로 접속 성공.
+Tailscale 설치(의뢰인 직접, UAC 동의) + `tailscale serve`로 로컬 포트(8731, admin 권한 불필요한 포트 프록시 방식)를 `https://<서버PC-기기이름>.tail756a35.ts.net/`로 테일넷 내 공개. 아이폰·아이패드 둘 다 같은 테일넷에 연결해 Safari로 접속 성공.
 
 ## 실제 iPhone 1차 시도 (2026-10-23, 유선/스피커) — 버그 발견·수정
 - 1구간(preservesPitch 60%)은 정상 완주: **최종=-448.5ms, 최대=448.6ms** (표본 715개, 180초 전체) — 목표 ±30ms를 크게 초과하는 실제 측정값. 단, 이 수치는 위에서 밝힌 측정 범위의 한계(내부 클록 차이일 뿐) 안에서 해석할 것.
