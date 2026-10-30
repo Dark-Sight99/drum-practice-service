@@ -48,19 +48,9 @@
 // 풀 생성이 비동기(시간이 걸림)가 됐고, `PracticeCanvas.tsx`가 이 로딩 중엔
 // 재생 버튼을 막아둔다(`audioTracksLoading`).
 import * as Tone from 'tone'
-
-/** T3-16-feedback-3 — iPhone/iPod/iPad는 보통 UA에 그대로 찍히지만(일부
- * 설정·구버전 iPadOS는 "iPad"가 그대로 남음), iPadOS 13+ 기본값은 데스크톱
- * Safari와 똑같은 UA("Macintosh")를 보내 UA만으론 못 가른다 — 모드A 지적
- * (2026-10-26, C-001): 처음엔 "iPad" 리터럴 자체를 안 보고 "Macintosh+터치"
- * 폴백에만 의존해서, UA에 "iPad"가 남아있는 기기를 놓치고 있었음. 두
- * 가지를 OR로 합쳐 둘 다 잡는다(iPadOS 13+ 위장은 멀티터치로 구분 — Mac은
- * `maxTouchPoints` 0~1). */
-function isIOS(): boolean {
-  const ua = navigator.userAgent
-  if (/iPhone|iPad|iPod/.test(ua)) return true
-  return ua.includes('Macintosh') && navigator.maxTouchPoints > 1
-}
+// T6-5 — isIOS()는 platformAudioContext.ts로 옮김(main.tsx의 부트스트랩 시점 AudioContext
+// 샘플레이트 고정도 같은 판별이 필요해서 공유 모듈로 분리, 로직 중복 방지).
+import { isIOS } from './platformAudioContext'
 
 export interface TrackSource {
   kind: string

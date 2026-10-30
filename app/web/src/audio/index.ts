@@ -22,6 +22,7 @@ export {
 export type { ChannelKey, ChannelState, MixerState } from './mixer'
 export { playDrumScore } from './scorePlayer'
 export type { PlaybackHandle, PlayDrumScoreOptions } from './scorePlayer'
+export { ensureIOSAudioContextSampleRate } from './platformAudioContext'
 export { createAudioTrackPool, createTrackPlayer, selectStemKinds } from './trackPlayer'
 export type { AudioTrackPool, TrackPlayer, TrackSource } from './trackPlayer'
 export {
