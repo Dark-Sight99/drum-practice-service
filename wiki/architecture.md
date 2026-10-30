@@ -11,14 +11,18 @@ app/web/      Vite + React 19 + TypeScript. 린트=oxlint, 포맷=Prettier, 테�
     styles/tokens.css                                 디자인 토큰 — 색·폰트·간격은 여기 한 곳에만(intent/08-design.md §7)
 
 app/server/   FastAPI(Python). 자체 .venv(루트 .venv는 Phase 0 스파이크 전용, 건드리지 않음). 린트=ruff, 테스트=pytest
-  api/            FastAPI 앱(현재 /health만)
+  api/            FastAPI 앱 — auth/admin/songs/jobs 라우터(각 /api 접두사로도 중복 등록,
+                  T5-4 — 운영 땐 Vite 프록시 없이 이 서버가 직접 받음), app/web/dist가
+                  있으면 같은 포트에서 정적 프런트도 서빙
   worker/         작업 큐 워커(Phase 1 T1-4에서 구현)
   modules/{separator,transcriber,omr,importer}/   REQ-01/02 처리 모듈(인터페이스로 교체 가능하게 설계 예정, 03-architecture-stack.md §1)
   db/             SQLAlchemy 2.0 모델(models.py) + 세션 팩토리(session.py) — T1-2 완료
   alembic/        DB 마이그레이션(초기 리비전 1개)
   storage/        (현재 미사용 — 실제 DB/파일은 루트 data/ 아래. 용도 생기면 채움)
 
-data/         (git 제외) 사용자 음원·악보, Phase 0 스파이크 산출물
+scripts/      서버 실행·자동 시작 스크립트(T5-4) — 아래 "실행 방법 > 운영" 참고
+docs/         의뢰인 등 비개발자용 안내 문서(원격 접속 등, T5-3부터)
+data/         (git 제외) 사용자 음원·악보, Phase 0 스파이크 산출물, run/·logs/(T5-4 실행 산출물)
 qa-evidence/<작업ID>/   QA 증거
 work/<작업ID>/          작업 plan.md·report.md
 wiki/          이 폴더(architecture.md, decisions.md, tools.md)
@@ -26,23 +30,41 @@ logs/          기획 대화·Codex 검수 로그
 ```
 
 ## 실행 방법
+
+### 개발 중(핫 리로드)
 ```bash
 # web
 cd app/web
 npm install   # 최초 1회
-npm run dev       # 개발 서버
+npm run dev       # 개발 서버(5173) — /api는 vite.config.ts 프록시로 app/server(8000)에 전달
 npm run lint       # oxlint
 npm run test       # vitest
 npm run build      # tsc + vite build
 npm run format     # prettier --check
 
-# server
+# server (API 따로, 워커 따로 — 각자 다른 터미널)
 cd app/server
 python -m venv .venv   # 최초 1회
 ./.venv/Scripts/python.exe -m pip install -r requirements-dev.txt
 ./.venv/Scripts/python.exe -m ruff check .
 ./.venv/Scripts/python.exe -m pytest
+./.venv/Scripts/python.exe -m uvicorn api.main:app --reload   # API만
+./.venv/Scripts/python.exe -m worker.runner                   # 워커만(별도 터미널)
 ```
+
+### 운영(T5-4, 2026-10-30) — 서버 PC에서 상시 실행
+`scripts/`(프로젝트 루트) — API+워커를 한 번에 띄우고 끄는 OS 공용 파이썬 스크립트,
+윈도우/맥 각각의 얇은 래퍼. 자세한 설명은 각 스크립트 파일 맨 위 docstring 참고.
+```
+scripts/start.py           # alembic 마이그레이션 → uvicorn(0.0.0.0:8000, app/web/dist도 같이 서빙) → worker.runner, 전부 백그라운드
+scripts/stop.py            # start.py가 띄운 두 프로세스 종료
+scripts/create_admin.py    # 최초 관리자 계정 생성(Q-21 부트스트랩)
+scripts/windows/start.ps1, stop.ps1, install-autostart.ps1, uninstall-autostart.ps1
+scripts/mac/start.sh, stop.sh, install-autostart.sh, uninstall-autostart.sh
+```
+`npm run build`로 `app/web/dist`를 먼저 만들어둬야 화면까지 같이 뜬다(API만 떠도
+동작은 함 — start.py가 dist 없으면 경고만 출력). 원격 접속 주소는
+`docs/원격-접속-안내-Tailscale.md` 참고.
 
 ## DB 스키마 (T1-2, 2026-10-23)
 5개 테이블: `users`(계정, is_admin/is_active), `songs`(user_id로 소유, status/needs_review), `assets`(song_id, kind, file_path), `jobs`(user_id+song_id 복합 FK — 다른 사용자 곡 참조 DB 레벨에서 차단), `practice_settings`(song_id 1:1).
