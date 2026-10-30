@@ -77,7 +77,7 @@ Codex 지적: "Transport 이벤트마다 재생기를 다시 시작"이라는 �
 | Step | 내용 |
 |---|---|
 | 0 | 이 문서로 API 계약·수용기준 최종 확정(완료) |
-| 1 | `stemSchedule.ts`/`stemPlayer.ts` + 단위 테스트만 추가(아직 미연결) |
+| 1 | `stemSchedule.ts`/`stemPlayer.ts` + 단위 테스트만 추가(아직 미연결) — **완료(2026-10-30)**. `app/web/src/audio/stemSchedule.ts`(11개 단위 테스트)/`stemPlayer.ts`(Tone.Player 기반 버퍼 풀+Transport 이벤트 동기화, 20개 단위 테스트) 작성. 전체 테스트 스위트 386개 전부 통과(`npx vitest run`), `tsc -p tsconfig.app.json --noEmit` 통과, `oxlint` 통과. 커밋 b2732a0. "같은 틱 이벤트 순서" 등 소스만으로 확정 못 한 가정은 가짜 Transport로 재현해 핸들러가 안전함을 확인(§5 "중요" 문단 참고) — 다만 이건 가짜 Transport이지 실제 브라우저 Transport가 아니므로, Step 2 실기기 검증까지는 여전히 "검증 완료"가 아니라 "설계상 안전성 확인"으로 취급. `scorePlayer.ts`/`PracticeCanvas.tsx`에는 아직 연결 안 함(Step 2에서). |
 | 2 | `scorePlayer.ts`/`PracticeCanvas.tsx` 전환. 백엔드 API 완성 전엔 개발 확인용으로 "원본 버퍼 rate=r 그대로(피치 변함)" 임시 재생으로 싱크 로직만 먼저 검증. **(Codex 모드C 1차 C-004 반영) "merge 금지"를 문서 경고로만 두지 않는다** — Step 2는 **별도 작업 브랜치에서만** 진행하고, Step 3(백엔드 API 연결)과 **원자적으로 묶어 한 번에 main으로 merge**한다(Step 2 단독으로는 PR을 안 만듦 — CLAUDE.md §5 "QA 통과+Codex APPROVE 후에만 main에 병합"과 결합해, 피치가 깨진 중간 상태 자체가 리뷰·머지 대상이 되지 않게 함). |
 | 3 | 백엔드 배속 API 연결, 피치 보존 확인 |
 | 4 | `EditorScreen.tsx`도 동일 전환(구 모듈 완전 삭제를 위해 필요) |
@@ -89,4 +89,4 @@ fps 60 유지, 노트-음원 싱크(5분 끝까지), 로딩 시간, **0.5배속 
 
 ## 다음 단계
 
-이 문서로 Codex 모드C 설계 검수 진행 → 반영 → Step 1부터 구현 시작.
+이 문서로 Codex 모드C 설계 검수 진행 → 반영 → Step 1부터 구현 시작(**Step 1 완료, 2026-10-30**) → Step 2(`scorePlayer.ts`/`PracticeCanvas.tsx` 전환, 별도 브랜치) 진행.
