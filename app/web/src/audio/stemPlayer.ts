@@ -34,7 +34,29 @@ export interface StemBufferPool {
 /** 한 재생 세션(`trackPlayer.ts`의 `TrackPlayer`를 대체). `resync()`에 해당하는
  * 개념 자체가 없다 — Transport 이벤트를 구독해 스스로 따라가므로 호출자가
  * 매 프레임 위치를 맞춰줄 필요가 없다(work/T6-11/plan.md "resync()는 완전히
- * 없앤다" 참고). */
+ * 없앤다" 참고).
+ *
+ * T6-11 Step 2(Codex 모드C 1차 C-005 관련) — 처음엔 "호출자가
+ * `transport.seconds = X`를 직접 대입해 위치를 점프시키면(`clock.
+ * setPositionSeconds()`, 예: `PracticeCanvas.tsx`의 빨리감기/되감기) Transport
+ * 이벤트가 전혀 안 뜬다"고 가정하고 `restartFromCurrentPosition()`이라는 별도
+ * 수동 훅을 만들었었다. **그 가정이 틀렸다** — 설치된 Tone.js 15.1.22 소스
+ * (`node_modules/tone/build/esm/core/clock/Transport.js`의 `set ticks`)로 직접
+ * 확인한 결과, Transport가 `state === "started"`인 동안 `.seconds`/`.ticks`를
+ * 대입하면 그 setter가 **스스로 `'stop'`을 발화한 뒤 `'start'`를 재발화**한다
+ * (`this.emit("stop", time); ...; this.emit("start", time, ...)`, GitHub 이슈
+ * #573 참고 주석 포함 — Tone.js의 의도된 공식 동작). 즉 `attach()`가 이미
+ * 구독해둔 `'start'` 핸들러가 빨리감기/되감기·핸드오프 점프에도 **자동으로
+ * 반응**한다 — 수동 훅이 전혀 필요 없다. 오히려 수동 훅을 같이 부르면 두 번
+ * 연속 재시작되는데, 그 Tone.js 내부 재발화는 `time = now + remainingTick`
+ * (살짝 미래)에 걸려 있어서 그 직후 동기적으로 또 호출한 수동 훅이 "아직 그
+ * 시각이 되기 전"의 **낡은(점프 전) Transport 위치**를 읽어버린다 — 실제로
+ * 이 버그 때문에 노트(Transport 자체 스케줄, 영향 없음)와 스템(수동 훅이 두
+ * 번째로 잘못된 위치에 재시작)이 빨리감기/되감기 때마다 서로 어긋나는 걸
+ * 실기기로 확인(2026-10-30, 의뢰인 보고) — `restartFromCurrentPosition()`과
+ * 그 호출부를 전부 삭제해 해결. 일시정지 중(`state !== "started"`) 대입은 다른
+ * 분기(`emit("ticks", now)`)를 타 아무 재생도 안 시작한다 — 그래서 일시정지
+ * 중 seek가 소리를 안 내는 것도 수동 코드 없이 이미 안전했다. */
 export interface StemPlayer {
   /** `scorePlayer.ts`의 `playDrumScore()`가 `transport.start()` 직전에 1회
    * 호출. Transport 이벤트 구독 + 세션 상태(카운트인 게이트 등) 초기화.
@@ -42,20 +64,6 @@ export interface StemPlayer {
   attach(timing: StemSessionTiming): void
   /** 이벤트 구독 해제 + 즉시 정지. 여러 번 불러도 안전. */
   detach(): void
-  /** T6-11 Step 2(Codex 모드C 1차 C-005 반영) — Transport의 `start`/`loopStart`
-   * 이벤트는 "그 네이티브 메커니즘이 스스로 위치를 바꾸는 순간"에만 발화한다.
-   * `PracticeCanvas.tsx`의 빨리감기/되감기(`handleSeek`)나 편집 화면에서 넘어온
-   * 핸드오프처럼, 호출자가 `transport.seconds = X`를 **직접** 대입해 Transport
-   * 모르게 위치를 점프시키는 경우(`clock.setPositionSeconds()`, work/T6-11/
-   * plan.md "A-B 루프 구간 변경" 참고)엔 그 이벤트가 전혀 안 뜬다 — 그 직후
-   * 호출자가 명시적으로 이걸 불러야 지금 Transport 위치 기준으로 다시 계산해
-   * 재시작한다. (반대로 A-B 구간의 "값"만 바꾸고(`setLoopPoints`) 현재 위치는
-   * 안 건드리는 경우는 호출 불필요 — Transport가 다음 루프 경계에서 스스로
-   * `loopStart`를 발화해 이미 올바르게 처리됨, 위 plan.md 참고.) 일시정지
-   * 중에는 호출하면 안 된다(소리가 의도치 않게 다시 시작됨) — 호출자가
-   * `isPaused`로 가드. 폴링이 아니라 "위치가 바뀐 바로 그 시점에 1회"만 부르는
-   * 것이므로 옛 `resync()`의 상시 폴링과는 다르다. */
-  restartFromCurrentPosition(): void
   /** 믹서 최종 게인(0~1, mute/solo까지 반영된 값). 없는 kind는 조용히 무시
    * (기존 `trackPlayer.ts`와 같은 계약 — stem_music이 없는 곡 등). */
   setChannelGain(kind: string, gain: number): void
@@ -258,9 +266,6 @@ export function createStemPlayer(pool: StemBufferPool): StemPlayer {
       timing = null
       gateSeconds = 0
       pendingGateOpenAt = null
-    },
-    restartFromCurrentPosition() {
-      handleTransportStart(Tone.immediate())
     },
     setChannelGain(kind, gain) {
       const track = pool.tracks.find((t) => t.kind === kind)

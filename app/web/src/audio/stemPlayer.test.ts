@@ -272,6 +272,27 @@ describe('createStemPlayer', () => {
     expect(playerInstances[0].startCalls[1]).toEqual({ time: 12, offset: 0 })
   })
 
+  it('재생 중 Transport.seconds 대입(빨리감기/되감기) 시 Tone.js가 스스로 재발화하는 stop+start 쌍을 그대로 따라간다(실측 회귀 — 2026-10-30, Tone.js 15.1.22 Transport.js의 set ticks 소스로 확인: state===started일 때 .seconds 대입은 emit("stop")→emit("start")를 자동으로 함, 그래서 StemPlayer가 별도 수동 훅 없이도 이 둘만 구독하면 충분함)', async () => {
+    const pool = await makePool()
+    const player = createStemPlayer(pool)
+    player.attach(timing({ songStartSeconds: 0 }))
+    immediateMock.mockReturnValue(0)
+    transportMock.getSecondsAtTime.mockReturnValue(1)
+    emitTransport('start', 0) // 최초 재생
+    playerInstances[0].startCalls.length = 0
+    playerInstances[0].stopCalls.length = 0
+
+    // PracticeCanvas.tsx의 handleSeek()이 clock.setPositionSeconds(target)을
+    // 부르면 Tone.js 내부적으로 이 두 이벤트가 바로 이 순서로 발화된다(수동
+    // 훅 없이 이것만으로 스템이 새 위치로 재시작돼야 함).
+    immediateMock.mockReturnValue(10)
+    emitTransport('stop', 10.05) // Tone.js가 계산한 "다음 틱" 시각(now보다 살짝 미래)
+    transportMock.getSecondsAtTime.mockReturnValue(20) // 점프된 새 위치(예: +10초 탐색)
+    emitTransport('start', 10.05)
+
+    expect(playerInstances[0].startCalls).toEqual([{ time: 10.05, offset: 20 }])
+  })
+
   it('stop/pause 이벤트는 모든 트랙의 player.stop()을 호출한다', async () => {
     const pool = await makePool(['stem_drums', 'stem_bass'])
     const player = createStemPlayer(pool)
@@ -282,27 +303,6 @@ describe('createStemPlayer', () => {
 
     expect(playerInstances[0].stopCalls).toEqual([5])
     expect(playerInstances[1].stopCalls).toEqual([5])
-  })
-
-  it('restartFromCurrentPosition()은 지금 Transport 위치 기준으로 즉시 재시작한다(Codex C-005 — Transport 모르게 점프한 뒤 호출자가 명시적으로 부름)', async () => {
-    const pool = await makePool()
-    const player = createStemPlayer(pool)
-    player.attach(timing({ songStartSeconds: 0 }))
-    immediateMock.mockReturnValue(10)
-    transportMock.getSecondsAtTime.mockReturnValue(20) // handleSeek() 등으로 점프된 새 위치
-
-    player.restartFromCurrentPosition()
-
-    expect(playerInstances[0].stopCalls).toEqual([10])
-    expect(playerInstances[0].startCalls).toEqual([{ time: 10, offset: 20 }])
-  })
-
-  it('restartFromCurrentPosition()은 attach() 전엔 아무 일도 안 한다', async () => {
-    const pool = await makePool()
-    const player = createStemPlayer(pool)
-
-    expect(() => player.restartFromCurrentPosition()).not.toThrow()
-    expect(playerInstances[0].startCalls).toHaveLength(0)
   })
 
   it('새 start 이벤트가 오면 기존 재생 중인 소스를 먼저 stop()하고 새로 start()한다(모드C C-001 — 멱등 재적용)', async () => {

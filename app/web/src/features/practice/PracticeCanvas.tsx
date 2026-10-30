@@ -1460,9 +1460,12 @@ export function PracticeCanvas({
         // 제약(EditorScreen.tsx와 같은 이유) 때문에 핸드오프 경로에서만
         // tracks를 아예 안 넘기고 수동 playFrom()으로 우회했는데, StemPlayer는
         // schedule() 콜백이 아니라 Transport 네이티브 start 이벤트를 구독하므로
-        // 그 제약이 적용되지 않는다 — 대신 핸드오프의 위치 점프 자체는
-        // Transport가 모르는 수동 대입(clock.setPositionSeconds())이라 아래에서
-        // tracks.restartFromCurrentPosition()으로 명시적으로 다시 계산시킨다.
+        // 그 제약이 적용되지 않는다 — 핸드오프의 위치 점프(아래
+        // clock.setPositionSeconds())도 별도 처리 없이 자동으로 반영된다(Tone.js
+        // 15.1.22 Transport.js의 `set ticks` 소스로 확인 — Transport가
+        // 재생 중일 때 `.seconds` 대입은 그 setter 스스로 네이티브
+        // `'stop'`→`'start'`를 재발화함, 2026-10-30 실측 회귀로 확정됨 —
+        // stemPlayer.ts의 StemPlayer 코멘트 참고).
         tracks: tracks ?? undefined,
         // 2026-10-27(의뢰인 요청) — 카운트인 클릭이 믹서 "메트로놈" 채널 설정과
         // 무관하게 항상 고정 음량으로 울려 "음악은 작은데 그 소리만 크다"는
@@ -1505,13 +1508,15 @@ export function PracticeCanvas({
       const songStartSeconds = barSeconds * COUNT_IN_BARS
       const positionSeconds =
         songStartSeconds + (pendingTicks / score.ppq) * (60 / playbackBpm)
+      // T6-11(2026-10-30 수정 — 처음엔 여기서 tracks.restartFromCurrentPosition()을
+      // 명시적으로 불러야 하는 줄 알았으나, 그 가정 자체가 틀렸음이 실측으로
+      // 드러나 삭제함: Transport가 재생 중일 때 `.seconds` 대입은 Tone.js
+      // 자신이 네이티브 'stop'→'start'를 재발화하므로(위 tracks 옵션 코멘트
+      // 참고) StemPlayer가 이미 구독 중인 핸들러가 자동으로 반응한다. 오히려
+      // 수동으로 한 번 더 불렀더니 그 재발화가 아직 안 끝난 시점의 낡은
+      // Transport 위치를 읽어 노트-스템이 서로 어긋나는 실제 버그가 됐었다
+      // (의뢰인 실기기 재현으로 확정, stemPlayer.ts 코멘트에 전체 경위 기록).
       getMasterClock().setPositionSeconds(positionSeconds)
-      // T6-11 — Transport 모르게 위치를 직접 대입했으므로(네이티브 'start'
-      // 이벤트가 안 뜸) StemPlayer에 명시적으로 알려 지금 위치 기준으로
-      // 다시 계산해 재시작시킨다(위 StemPlayer.restartFromCurrentPosition()
-      // 코멘트 참고). 이 세션은 막 시작돼 일시정지 상태일 수 없어 isPaused
-      // 가드가 필요 없다(handleSeek()과의 차이).
-      tracks?.restartFromCurrentPosition()
     }
 
     // 방금 만든 세션에 지금 믹서 상태를 바로 적용(처음부터 맞게 시작 —
@@ -1575,16 +1580,19 @@ export function PracticeCanvas({
     // — 두 곳이 같은 기준(songEndPositionSeconds())을 쓰도록 통일.
     const songEndSeconds = songEndPositionSeconds()
     const target = Math.min(songEndSeconds, Math.max(0, current + deltaSeconds))
+    // T6-11(2026-10-30 수정 — 실기기에서 노트-스템 어긋남으로 확정된 버그를
+    // 고치며 삭제) — 재생 중(state==='started')에 Transport.seconds를 대입하면
+    // Tone.js 자신이 네이티브 'stop'→'start'를 재발화하므로(설치된 Tone.js
+    // 15.1.22 소스 Transport.js `set ticks`로 확인), StemPlayer가 이미
+    // 구독 중인 핸들러가 자동으로 새 위치에서 재시작한다 — 여기서 수동으로
+    // 한 번 더 재시작시키면(이전엔 restartFromCurrentPosition() 호출이
+    // 있었음) 그 네이티브 재발화가 아직 안 끝난 시점의 낡은 위치를 읽어
+    // 두 번째(틀린) 재시작으로 덮어써버리는 실제 버그였다(stemPlayer.ts
+    // 코멘트에 경위 전체 기록). 일시정지 중엔 애초에 'start'가 재발화되지
+    // 않는 다른 분기를 타므로(emit("ticks", ...)) 아무 것도 안 시작되고,
+    // 다음 재생 재개 때 자연스럽게 새 위치로 시작된다 — 이것도 수동 처리
+    // 불필요.
     clock.setPositionSeconds(target)
-    // T6-11 — Transport 모르게 위치를 직접 대입했으므로 StemPlayer에 명시적
-    // 으로 다시 계산시켜야 한다(위 handlePlay() 핸드오프 블록과 같은 이유).
-    // 일시정지 중엔 부르면 안 된다(소리가 의도치 않게 다시 시작됨) — 멈춰있는
-    // 동안 바뀐 위치는 다음 재생 재개(네이티브 'start' 이벤트)가 알아서
-    // 반영한다(모드C 3라운드 C-008과 같은 "재생 중엔 재생, 일시정지 중엔
-    // 위치만" 구분, 이제는 StemPlayer 쪽의 자연스러운 기본 동작으로 대체).
-    if (!isPaused) {
-      session.tracks?.restartFromCurrentPosition()
-    }
     // 모드C 1·2라운드 반영(§7) — 자동 정지 타이머를 새 위치 기준으로
     // 재계산. 루프 모드면 애초에 타이머가 없음(null) — 그대로 둠.
     if (autoStopRemainingMsRef.current !== null) {
