@@ -1,23 +1,12 @@
 import react from '@vitejs/plugin-react'
-import { VitePWA } from 'vite-plugin-pwa'
 import { defineConfig } from 'vitest/config'
 
 // https://vite.dev/config/
+// 2026-10-30(T5-2) — PWA 설치·오프라인은 드롭(의뢰인 결정, intent/02-requirements.md
+// REQ-09 참고) — vite-plugin-pwa는 manifest 설정만 있고 실제 서비스워커 등록
+// 코드가 앱 어디에도 없어 애초에 작동하지 않던 상태였다. 제거.
 export default defineConfig({
-  plugins: [
-    react(),
-    VitePWA({
-      registerType: 'autoUpdate',
-      manifest: {
-        name: '드럼 연습 서비스',
-        short_name: '드럼연습',
-        start_url: '/',
-        display: 'standalone',
-        background_color: '#0f1115',
-        theme_color: '#0f1115',
-      },
-    }),
-  ],
+  plugins: [react()],
   server: {
     // 2026-10-28 — 의뢰인이 Tailscale Funnel/Serve(홈서버를 맥·아이폰 등
     // 다른 기기에서 접속하는 용도, intent/03-architecture-stack.md §2
