@@ -54,6 +54,12 @@ from file_storage import (
     write_song_file,
     write_song_file_streaming,
 )
+from modules.tempo.atempo import (
+    PERMILLE_MAX,
+    PERMILLE_MIN,
+    TempoStretchError,
+    get_or_create_tempo_mp3,
+)
 
 router = APIRouter(prefix="/songs", tags=["songs"])
 
@@ -469,6 +475,72 @@ def get_song_audio(
     # 으로 제한.
     headers = {"Cache-Control": "private, max-age=3600"}
     return FileResponse(path, media_type=media_type, headers=headers)
+
+
+@router.get("/{song_id}/audio/{kind}/tempo/{permille}")
+def get_song_audio_tempo(
+    kind: AudioAssetKind,
+    permille: int,
+    song: Song = Depends(get_owned_song),
+    db: Session = Depends(get_db),
+) -> FileResponse:
+    """T6-11(REQ-04, Q-33) — 음정을 유지한 배속 변환본을 서빙한다(work/T6-11/
+    plan.md "API 계약"). `original`은 배속 변환 대상이 아니라 명시 거부한다
+    (연습 화면은 스템만 배속 변경 — AudioAssetKind는 `get_song_audio`와 공유하는
+    enum이라 `original`도 타입상 들어올 수 있어 여기서 직접 막아야 함).
+
+    캐시 미스면 요청 처리 중 바로 ffmpeg `atempo`로 변환한다(동기 `def` 라우트 —
+    FastAPI가 스레드풀에서 실행해 이벤트 루프를 안 막음, **비동기 202/폴링
+    없음**, 실측 최악 5.5초). 200 응답 헤더의 `X-Tempo-Permille`로 실제 적용된
+    permille(요청값 그대로 — Codex 모드C 1차 C-003)을 알려준다."""
+    if kind == AudioAssetKind.ORIGINAL:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "원본은 배속 변환 대상이 아닙니다")
+    if not PERMILLE_MIN <= permille <= PERMILLE_MAX:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            f"permille 범위를 벗어남({PERMILLE_MIN}~{PERMILLE_MAX})",
+        )
+
+    asset = (
+        db.query(Asset)
+        .filter(Asset.song_id == song.id, Asset.kind == AssetKind(kind.value))
+        .first()
+    )
+    if asset is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "오디오 트랙을 찾을 수 없습니다")
+    source_path = resolve_asset_path(asset.file_path)
+    if source_path is None or not source_path.exists():
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "오디오 트랙을 찾을 수 없습니다")
+
+    # work/T6-11/plan.md "API 계약" — 1000(배속 변경 없음)이면 atempo조차 안
+    # 거치고 원본 스템을 그대로 서빙한다. atempo=1.0도 자체 시작 오프셋(~8ms)을
+    # 만든다는 게 실측으로 확인됐기 때문(plan.md "실측으로 발견한 주의점") —
+    # 불필요한 변환·그 오프셋을 둘 다 피한다. `get_song_audio`와 같은 WAV
+    # 사이드카 우선 로직도 그대로 적용(둘 다 "일반 재생용 파일을 그대로
+    # 준다"는 같은 의미이므로).
+    if permille == 1000:
+        path = source_path
+        if path.suffix == ".wav":
+            sidecar = path.with_suffix(".mp3")
+            if sidecar.exists():
+                path = sidecar
+        # 모드C 1라운드 자체 테스트로 발견 — 사이드카가 없어 WAV 그대로
+        # 서빙되는 경우까지 있으므로 `get_song_audio`와 똑같이 실제 확장자로
+        # media_type을 판정해야 한다(고정 "audio/mpeg"면 WAV를 mp3라고
+        # 거짓 응답하게 됨).
+        media_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+        headers = {"Cache-Control": "private, max-age=3600", "X-Tempo-Permille": "1000"}
+        return FileResponse(path, media_type=media_type, headers=headers)
+
+    try:
+        cache_path = get_or_create_tempo_mp3(song.id, kind.value, permille, source_path)
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from exc
+    except TempoStretchError as exc:
+        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, str(exc)) from exc
+
+    headers = {"Cache-Control": "private, max-age=3600", "X-Tempo-Permille": str(permille)}
+    return FileResponse(cache_path, media_type="audio/mpeg", headers=headers)
 
 
 def _find_edited_asset(db: Session, song_id: int) -> Asset | None:
