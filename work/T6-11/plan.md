@@ -1,4 +1,4 @@
-> 한 줄 요약: T6-11 통합 설계 — 스템 재생을 `<audio>`에서 `Tone.Player`(AudioBufferSourceNode)로 전환해 resync() 자체를 없앤다. 음정 유지 배속은 서버가 ffmpeg `atempo`로 미리 변환(요청 안에서 동기 처리, 최대 실측 5.5초)해 캐싱한 파일을 재생. Opus 5.5 서브에이전트 4개(코드감사/공식문서조사/프론트설계/백엔드설계) 결과를 마스터가 종합. **구현 전 — Codex 모드C 검수 필요.**
+> 한 줄 요약: T6-11 통합 설계 — 스템 재생을 `<audio>`에서 `Tone.Player`(AudioBufferSourceNode)로 전환해 resync() 자체를 없앤다. 음정 유지 배속은 서버가 ffmpeg `atempo`로 미리 변환(요청 안에서 동기 처리, 최대 실측 5.5초)해 캐싱한 파일을 재생. Opus 5.5 서브에이전트 4개(코드감사/공식문서조사/프론트설계/백엔드설계) 결과를 마스터가 종합. **Codex 모드C 1차 검수 완료(수정 후 진행, C-001~C-006 전부 반영) — Step 1부터 구현 시작 가능.**
 
 # T6-11 통합 설계 — 스템을 Tone.Player로, 배속은 서버 사전변환으로
 
@@ -9,7 +9,7 @@
 1. **스템 재생**: `<audio>`+`createMediaElementSource()` → `Tone.Player`(`AudioBufferSourceNode`). 노트와 **같은 AudioContext 시계**를 쓰므로 `resync()`가 구조적으로 불필요해짐(드리프트 자체가 안 생김).
 2. **동기화 방식**: `Tone.Transport`의 `start`/`loopStart`/`stop`/`pause` 이벤트를 구독해, 매번 `player.start(time, offset)`을 샘플 단위로 재계산해 예약. `scorePlayer.ts`의 기존 "트랙 재시작 schedule() 콜백"(time 인자 미사용 버그, 루프 경계 20ms 꼼수, 에디터 핸드오프 버그의 공통 원인)은 **삭제**.
 3. **음정 유지 배속**: 재생 중 배속 변경이 이미 UI로 막혀 있음(코드 확인됨) → 서버가 배속 선택 시점에 ffmpeg `atempo`로 1회 변환 + 캐싱, `Tone.Player`는 rate=1(또는 잔차 보정값)로 재생. 실시간 피치 보정 라이브러리(AudioWorklet 기반)는 전부 iOS 미해결 버그 위험이 있어 배제.
-4. **플랫폼 분기 제거**: iOS 전용 `getIOSStemAudioContext()`/`useWebAudioForVolume`/`element.volume` 분기를 전부 없애고 전 플랫폼 단일 경로로 통일(맥 Safari의 Q-37도 부수적으로 해소).
+4. **플랫폼 분기 제거**: iOS 전용 `getIOSStemAudioContext()`/`useWebAudioForVolume`/`element.volume` 분기를 전부 없애고 전 플랫폼 단일 경로로 통일(맥 Safari의 Q-37도 부수적으로 해소). **(Codex 모드C 1차 C-002 반영) 이 제거는 "완료 조건부"다 — §실기기 검증의 "0.5배속 메모리" 항목이 iPad mini 5를 포함한 최저 사양 기기에서 통과하기 전까지는 Step 5에서 플랫폼 분기 코드를 지우지 않는다.** 실패 시 대응(택1, Step 5 착수 시점에 결정): (a) 0.5배속처럼 메모리 부담이 큰 배속 구간만 기존 `<audio>` 경로로 폴백, (b) `stem_drums`를 모노로 줄여 메모리 절반, (c) 최저 사양 기기에서만 배속 하한을 좁힘(예: 50%→60%). 실패하지 않으면 원래 계획대로 전부 통일.
 
 ## API 계약 (프론트·백엔드 조율 완료 — 최종)
 
@@ -21,7 +21,7 @@ GET /songs/{song_id}/audio/{kind}/tempo/{permille}
 - `kind`: `AUDIO_ASSET_KINDS`에서 `original` 제외.
 - `permille`: `Math.round(exactRate * 1000)`, 범위 490~1510. **1000이면 변환 없이 원본 스템 그대로 반환**(atempo=1.0도 자체적으로 ~8ms 오프셋을 만든다는 게 실측으로 확인됐기 때문).
 - 응답: 200 `audio/mpeg` + `X-Tempo-Permille` 헤더(또는 404/422/500). **비동기 202/폴링 없음** — 캐시 미스 시 요청 안에서 바로 변환(동기 `def` 라우트라 FastAPI가 스레드풀에서 실행, 이벤트 루프 안 막음).
-- 프론트는 **잔차 playbackRate로 양자화 오차를 보정**: 서버가 실제 적용한 비율은 `permille/1000`이고 사용자가 원하는 정확한 비율은 `exactRate`이므로, `Tone.Player.playbackRate = exactRate / (permille/1000)`로 설정(최대 오차 0.05%, 음정 영향 0.87cent — 가청 임계 이하). **이건 프론트 설계의 `stemNodePlaybackRate(timing, bufferTempoRatio)` 함수가 `bufferTempoRatio = permille/1000`을 받으면 수정 없이 그대로 계산해줌** — 두 설계가 우연히 정확히 들어맞음.
+- 프론트는 **잔차 playbackRate로 양자화 오차를 보정**: 서버가 실제 적용한 비율은 `permille/1000`이고 사용자가 원하는 정확한 비율은 `exactRate`이므로, `Tone.Player.playbackRate = exactRate / (permille/1000)`로 설정(최대 오차 0.05%, 음정 영향 0.87cent — 가청 임계 이하). **이건 프론트 설계의 `stemNodePlaybackRate(timing, bufferTempoRatio)` 함수가 `bufferTempoRatio = permille/1000`을 받으면 수정 없이 그대로 계산해줌** — 두 설계가 우연히 정확히 들어맞음. **(Codex 모드C 1차 C-003 반영) 단, 이 보정이 맞으려면 "변환본의 실제 재생 속도 = 요청한 `permille/1000`"이라는 전제가 성립해야 함 — ffmpeg 출력 길이·샘플레이트·시작 패딩이 요청값과 미세하게 다를 수 있음(실제로 atempo=1.0도 자체 오프셋이 있었던 것처럼). 계약을 다음과 같이 고정한다: `permille`(요청값, 정수)을 "적용 비율의 정의"로 삼는다 — 백엔드는 `atempo=permille/1000`을 정확히 그 값으로 ffmpeg에 넘기고(실측 길이가 아니라 요청값 자체가 계약), 프론트의 잔차 보정도 이 정의(요청값) 기준으로 계산한다. 실제 ffmpeg 출력이 이론값과 어긋나는 부분(시작 오프셋 등)은 잔차 playbackRate로 보정할 대상이 아니라 별도 이슈(위 "실측으로 발견한 주의점" 참고)로 다룬다 — 두 종류의 오차를 하나의 보정식에 섞지 않는다.**
 
 ```ts
 // 프론트: api/songs.ts
@@ -39,7 +39,24 @@ export function stemTempoAudioUrl(songId: number, kind: string, permille: number
 - **`resync()`/`TRACK_RESYNC_*`/T6-9 `skipResync` 토글 전부 삭제** — 드리프트가 구조적으로 없어지므로.
 - **`prime()`도 삭제** — 같은 Tone 컨텍스트라 `createDrumVoices()`의 `Tone.start()`(이미 제스처 안에서 동기 호출됨)로 언락 충분.
 - Tone.js 15.1.22 소스를 직접 읽어 확인한 중요 사실들(설계의 전제): `Player.start()`는 매번 새 `AudioBufferSourceNode`를 만듦(1회용), `Source.start()`는 같은 시각 재시작 시 예외를 던지므로 항상 `stop(t)` 후 `start(t)` 순서 필요, `Player.sync()`는 playbackRate≠1일 때 오프셋 계산 버그 의심(소스 레벨, 그래서 `sync()` 대신 Transport 이벤트 직접 구독 채택), Transport의 재생 중 위치 변경은 `stop`+`start`를 동기적으로 연속 발생시키되 드물게 순서가 뒤집힐 수 있어(T9) 단조 가드 필요.
-- **이번 감사로 새로 찾은 숨은 의존**: 지금까지 "재생 중 A-B 루프 구간을 바꿔도 트랙이 새 구간으로 재시작되는" 동작은 사실 resync()의 seek가 몰래 처리해주고 있었음 — resync를 없애면 이 경로가 명시적으로 `loopStart` 이벤트 구독으로 처리돼야 함(설계에 반영됨, 안 하면 회귀).
+
+### Transport 이벤트 핸들러의 상태 전이 규칙(Codex 모드C 1차 C-001 반영)
+
+Codex 지적: "Transport 이벤트마다 재생기를 다시 시작"이라는 설명만으로는 안전을 보장 못 함 — 기존 소스에 `stop(time)`을 예약하고 새 소스를 **같은 시각에** 시작하는 순서, 이벤트 시각이 이미 지난 경우 처리, 그리고 "같은 틱의 `start()`와 `seconds` 변경이 역순 전달될 수 있다"는 가정이 **Tone.js 소스만으로는 확정되지 않았다**는 점을 명시해야 함. 아래 표로 핸들러 동작을 명시하고, 타임스탬프 단조성만으로 이벤트를 거르지 않는다(이벤트 종류 + Transport 상태를 함께 본다):
+
+| Transport 이벤트 | 재생기 쪽 핸들러 동작 |
+|---|---|
+| `start`(최초, 또는 seek로 인한 재시작) | 현재 재생 중인 소스가 있으면 **같은 `time`에** `stop(time)` 예약 → 새 소스를 **같은 `time`**(또는 아래 "이미 지난 시각" 규칙 적용 후)에 `start(time, offset)` 예약. 재생 중인 소스가 없으면 바로 `start`만. |
+| `loopStart`(루프 재진입) | 위 `start`와 동일 취급(새 구간 오프셋으로). |
+| `stop`/`pause` | 재생 중인 소스가 있으면 `stop(time)`만 예약(새 `start` 없음). 재생 중인 소스가 없으면 무시(멱등). |
+| 이벤트의 `time`이 이미 `Tone.immediate()`(현재 AudioContext 시각)보다 과거 | `time`을 `Tone.immediate()`로 올려서 처리(기존 설계의 "늦게 도착한 이벤트" 보정, §T3)와 동일 규칙 — 과거 시각으로 네이티브 노드를 예약하면 스펙 위반이므로 반드시 clamp. |
+| 짧은 시간 안에 `start`가 연속 도착(예: 사용자가 탐색 바를 빠르게 드래그) | 각 이벤트를 **이벤트 종류(start/stop) + 그 시점의 재생기 내부 상태(재생 중/정지)** 조합으로 판단 — "방금 처리한 시각보다 이 이벤트의 시각이 더 이전"이라는 이유만으로 건너뛰지 않는다(그러면 정당한 상태 전이를 놓칠 수 있음, Codex 지적). 대신 "가장 최근에 도착한 이벤트가 최종 상태"로 덮어쓰고, 재생기는 항상 "지금 가지고 있는 소스를 stop → 새 소스를 start" 순서를 그대로 따른다(멱등 재적용 — 중간 이벤트를 놓쳐도 최종 이벤트가 올바른 상태로 수렴). |
+
+**중요**: 위 "같은 틱에서 Transport의 `start()`/`seconds` 변경이 실제로 역순으로 전달되는지"는 **Tone.js 소스 읽기만으로 확정 못 함** — 실제 보장이라고 간주하지 않고, Step 1(단위 테스트, 가짜 Transport로 이 순서를 직접 재현해 핸들러가 안전한지 검증)과 Step 2 실기기 검증(§7 테스트 계획의 브라우저 실측 항목)에서 **실측으로 확정**한다. 그 전까지 이 표는 "설계상 의도"이지 "동작 보장"이 아니다.
+
+- **이번 감사로 새로 찾은 숨은 의존**: 지금까지 "재생 중 A-B 루프 구간을 바꿔도 트랙이 새 구간으로 재시작되는" 동작은 사실 resync()의 seek가 몰래 처리해주고 있었음 — resync를 없애면 이 경로가 명시적으로 처리돼야 함. **(Codex 모드C 1차 C-005 반영)** `Tone.Transport`의 `loopStart`/`loopEnd` **세터(setter)는 그 자체로 `'loopStart'` 이벤트를 emit하지 않는다** — 그 이벤트는 실제로 재생 중 루프 경계를 "통과하는 순간"에만 발생(Transport.js의 `_processTick()` 내부에서 직접 발화, T7). 그래서 "재생 중 사용자가 A-B 구간 값을 바꾸는" 것과 "Transport가 루프 경계를 통과하는" 것은 **서로 다른 이벤트**다. 설계를 다음과 같이 명확히 한다:
+  - **루프 경계를 실제로 통과할 때**(기존 루프가 이미 켜진 채 재생 중): `loopStart` 이벤트로 처리(위 표).
+  - **재생 중 사용자가 A-B 구간 "값 자체"를 바꾸는 순간**(예: 루프 끝 지점을 드래그로 조정): 이건 Transport 이벤트로 감지되지 않으므로, `PracticeCanvas.tsx`의 루프 상태 변경 effect(기존에도 `clock.setLoopPoints()`를 호출하던 지점)에서 **직접** `transport.seconds = transport.seconds`(또는 동등한 강제 재평가)를 호출해 `start`/`stop` 이벤트를 수동으로 재발화시키거나, `stemPlayer`에 별도의 `onLoopRegionChanged()` 같은 명시적 훅을 둬서 그 시점에 현재 Transport 위치 기준으로 재시작 계산을 다시 하게 한다 — **Step 1 구현 시 둘 중 하나로 확정하고 단위 테스트(U-8 확장)로 검증**.
 - **메모리 해제**: 진단용 전역(`window.__t6_5_tracks`, `window.__t6_11_tone_context`) 반드시 같이 삭제 — 안 그러면 곡이 바뀌어도 버퍼(수백 MB)가 영구히 GC 안 됨.
 - **새로 발견된 리스크**: iOS 무음 스위치(순수 Web Audio는 무음 스위치를 따를 수 있음 — `navigator.audioSession.type='playback'` 검토 필요, 실기기 A/B 확인 필요), 0.5배속 변환본은 재생 길이가 2배가 돼 메모리도 약 2배(~420MB/스템 2개) — 오늘 사전검증은 1.0배속 기준이라 **최저 배속은 미검증**.
 - 에디터 화면(`EditorScreen.tsx`)도 같은 구조 공유 — `trackPlayer.ts`를 완전히 지우려면 에디터도 같이 전환해야 함(plan 초안에서 "범위 밖"으로 뒀던 것을 수정).
@@ -50,7 +67,7 @@ export function stemTempoAudioUrl(songId: number, kind: string, permille: number
 - **캐시 키**: `permille`(0.1% 단위) — 정수 BPM 환경에서 서로 다른 BPM이 같은 캐시를 나눠 쓸 일이 사실상 없을 만큼 촘촘함.
 - **저장**: 곡 폴더 안 평면 파일 `tempo_<kind>_<permille>.mp3`(하위 디렉터리는 기존 `delete_song_files()`가 못 지움 — 실행으로 확인된 실제 제약). Asset 행은 안 만듦(파생 데이터, DB 마이그레이션 불필요).
 - **정리**: 전체 용량 상한(제안 2GiB) 넘으면 오래 안 쓴 것부터 삭제, 쓸 때마다 mtime 갱신.
-- **동시성**: 키별 락 + 동시 변환 수 제한(세마포어), 최종 쓰기는 임시파일+`replace`(기존 패턴 재사용).
+- **동시성**: 키별 락 + 동시 변환 수 제한(세마포어), 최종 쓰기는 임시파일+`replace`(기존 패턴 재사용). **(Codex 모드C 1차 C-006 반영) 동기 `def` 라우트가 스레드풀에서 돌아 이벤트 루프는 안 막지만, 그게 "무제한으로 동시 변환해도 된다"는 뜻은 아님** — 이 앱은 사실상 의뢰인 1인(+지인 소수) 사용 환경이므로 동시 변환 상한을 **세마포어 2**(드럼+음악 1곡 분량이 동시에 도는 정도)로 명시 확정하고, 그 이상 요청이 몰리면 세마포어 획득을 기다리게 둔다(거부 응답 없음 — 사용자 수가 적어 큐잉으로 충분, 타임아웃은 `time_stretch_mp3()`의 기존 120초 서브프로세스 타임아웃으로 커버). Step 3 구현 시 이 숫자가 실제로 충분한지 실측으로 재확인.
 - **라이선스**: `atempo`는 ffmpeg 본체 필터(LGPL-2.1+), 이미 쓰는 번들 바이너리 안에 있어 새 의존성·새 라이선스 조건 없음. `intent/03-architecture-stack.md` 95행에 용도 설명만 추가 권장(의뢰인 승인 필요).
 - **실측으로 발견한 주의점**: atempo 결과물은 배속별로 일정한(누적 안 되는) 시작 오프셋이 있음(예: 0.5배속 약 −24ms, 1.5배속 약 +1ms, 1.0배속도 약 −8ms). 다른 곡에서도 같은지, 의뢰인이 체감하는지 **확인 필요** — 체감되면 보정(서버 `adelay` 또는 프론트 상수) 검토.
 - rubberband(음질은 더 나을 수 있음, 3.8~4.5배 느림, GPL)는 대안으로만 보류.
@@ -61,7 +78,7 @@ export function stemTempoAudioUrl(songId: number, kind: string, permille: number
 |---|---|
 | 0 | 이 문서로 API 계약·수용기준 최종 확정(완료) |
 | 1 | `stemSchedule.ts`/`stemPlayer.ts` + 단위 테스트만 추가(아직 미연결) |
-| 2 | `scorePlayer.ts`/`PracticeCanvas.tsx` 전환. 백엔드 API 완성 전엔 개발 확인용으로 "원본 버퍼 rate=r 그대로(피치 변함)" 임시 재생으로 싱크 로직만 먼저 검증 — **이 상태로 merge 금지**(피치 회귀) |
+| 2 | `scorePlayer.ts`/`PracticeCanvas.tsx` 전환. 백엔드 API 완성 전엔 개발 확인용으로 "원본 버퍼 rate=r 그대로(피치 변함)" 임시 재생으로 싱크 로직만 먼저 검증. **(Codex 모드C 1차 C-004 반영) "merge 금지"를 문서 경고로만 두지 않는다** — Step 2는 **별도 작업 브랜치에서만** 진행하고, Step 3(백엔드 API 연결)과 **원자적으로 묶어 한 번에 main으로 merge**한다(Step 2 단독으로는 PR을 안 만듦 — CLAUDE.md §5 "QA 통과+Codex APPROVE 후에만 main에 병합"과 결합해, 피치가 깨진 중간 상태 자체가 리뷰·머지 대상이 되지 않게 함). |
 | 3 | 백엔드 배속 API 연결, 피치 보존 확인 |
 | 4 | `EditorScreen.tsx`도 동일 전환(구 모듈 완전 삭제를 위해 필요) |
 | 5 | `trackPlayer.ts`/`getIOSStemAudioContext()`와 각 테스트, T6-9 진단 토글 전부 삭제 → Codex 검수 → 의뢰인 승인 |
