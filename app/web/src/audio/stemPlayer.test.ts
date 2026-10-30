@@ -430,6 +430,24 @@ describe('createStemPlayer', () => {
     expect(() => player.setChannelGain('nonexistent', 0.5)).not.toThrow()
   })
 
+  it('setChannelGain()은 1을 넘는 게인(의도적 부스트, 예: stemDrumsBoostedGain())도 0dB 너머로 반영한다(2026-10-30, 의뢰인 요청 — 원곡 드럼 100%도 작게 들림)', async () => {
+    const pool = await makePool(['stem_drums'])
+    const player = createStemPlayer(pool)
+
+    player.setChannelGain('stem_drums', 2) // +6dB 부스트에 해당하는 선형값
+
+    expect(playerInstances[0].volume.value).toBeCloseTo(20 * Math.log10(2), 10)
+  })
+
+  it('setChannelGain()은 극단적으로 큰 값이 들어와도 안전 상한(+12dB, 선형 4)에서 잘린다', async () => {
+    const pool = await makePool(['stem_drums'])
+    const player = createStemPlayer(pool)
+
+    player.setChannelGain('stem_drums', 100)
+
+    expect(playerInstances[0].volume.value).toBeCloseTo(20 * Math.log10(4), 10)
+  })
+
   it('풀이 destroy()된 뒤에는 Transport 이벤트가 와도 player.start()/stop()을 건드리지 않는다', async () => {
     const pool = await makePool()
     const player = createStemPlayer(pool)

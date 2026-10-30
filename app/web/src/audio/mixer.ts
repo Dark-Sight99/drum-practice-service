@@ -171,3 +171,19 @@ export const METRONOME_BOOST_DB = 6
 export function metronomeGainToDb(linear: number): number {
   return linearGainToDb(linear) + METRONOME_BOOST_DB
 }
+
+/** 2026-10-30(의뢰인 요청) — "드럼원본소리를 전반적으로 더 키워줄 수 있나?
+ * 100%도 좀 작게들려서." METRONOME_BOOST_DB와 같은 이유·같은 패턴(T3-39) —
+ * Claude가 소리를 직접 들을 수 없어 몇 dB가 "딱 맞는지" 판단 불가(CLAUDE.md
+ * §1), 메트로놈 때 쓴 것과 같은 +6dB(체감 음량 약 2배)를 1차 추정치로 적용.
+ * 모자라거나 과하면 의뢰인이 직접 듣고 조정. 연습 화면(`stemPlayer.ts`,
+ * Tone.Player 기반)에만 적용 — 편집 화면은 아직 구 `<audio>` 엘리먼트 경로라
+ * `element.volume`이 네이티브로 1을 못 넘어서(브라우저 스펙 제약) 같은 방식의
+ * 부스트가 안 먹는다. 그쪽은 Step 4(StemPlayer 전환) 때 같이 적용 예정. */
+export const STEM_DRUMS_BOOST_DB = 6
+
+/** `setChannelGain()`은 선형(0~1) 게인을 받으므로, dB 부스트를 선형 배율로
+ * 환산해 곱한다(20*log10 공식의 역함수 — linearGainToDb()와 쌍을 이룸). */
+export function stemDrumsBoostedGain(linear: number): number {
+  return linear * 10 ** (STEM_DRUMS_BOOST_DB / 20)
+}

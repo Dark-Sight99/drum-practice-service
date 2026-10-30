@@ -64,8 +64,10 @@ export interface StemPlayer {
   attach(timing: StemSessionTiming): void
   /** 이벤트 구독 해제 + 즉시 정지. 여러 번 불러도 안전. */
   detach(): void
-  /** 믹서 최종 게인(0~1, mute/solo까지 반영된 값). 없는 kind는 조용히 무시
-   * (기존 `trackPlayer.ts`와 같은 계약 — stem_music이 없는 곡 등). */
+  /** 믹서 최종 게인(mute/solo까지 반영된 값). 기본 범위는 0~1이지만, 호출자가
+   * 의도적으로 1을 넘는 값(예: `mixer.ts`의 `stemDrumsBoostedGain()`)을 넘기면
+   * 0dB 너머로 부스트할 수 있다(안전 상한 +12dB, 내부에서 clamp). 없는 kind는
+   * 조용히 무시(기존 `trackPlayer.ts`와 같은 계약 — stem_music이 없는 곡 등). */
   setChannelGain(kind: string, gain: number): void
 }
 
@@ -296,7 +298,12 @@ export function createStemPlayer(pool: StemBufferPool): StemPlayer {
     setChannelGain(kind, gain) {
       const track = pool.tracks.find((t) => t.kind === kind)
       if (!track || pool.destroyed) return
-      track.player.volume.value = linearGainToDb(Math.min(1, Math.max(0, gain)))
+      // 2026-10-30(의뢰인 요청 — 원곡 드럼이 100%여도 작게 들림) — 상한을
+      // 1(0dB)로 막아두면 mixer.ts의 stemDrumsBoostedGain()(0dB 너머로
+      // 의도적으로 올리는 부스트)이 여기서 잘려버린다. 호출자(PracticeCanvas.tsx)
+      // 가 의도적으로 넘기는 부스트만 허용하되, 실수로 극단적인 값이 들어와도
+      // 귀를 상하게 하지 않도록 안전 상한(+12dB, 선형 약 3.98배)은 유지한다.
+      track.player.volume.value = linearGainToDb(Math.min(4, Math.max(0, gain)))
     },
   }
 }

@@ -38,6 +38,7 @@ import {
   playDrumScore,
   selectStemKinds,
   setMusicMuted,
+  stemDrumsBoostedGain,
   setMusicVolume,
   toggleDrumlessPreset,
   type ChannelKey,
@@ -930,6 +931,10 @@ export function PracticeCanvas({
         session.synthGain.gain.value = gain
       } else if (key === 'metronome') {
         session.metronome.setVolume(metronomeGainToDb(gain))
+      } else if (key === 'stem_drums') {
+        // 2026-10-30(의뢰인 요청) — 메트로놈(metronomeGainToDb)과 같은 패턴 —
+        // 원곡 드럼이 100%여도 작게 들린다는 지적에 +6dB 부스트.
+        session.tracks?.setChannelGain(key, stemDrumsBoostedGain(gain))
       } else {
         session.tracks?.setChannelGain(key, gain)
       }
@@ -1528,6 +1533,9 @@ export function PracticeCanvas({
         synthGain.gain.value = gain
       } else if (key === 'metronome') {
         metronome.setVolume(metronomeGainToDb(gain))
+      } else if (key === 'stem_drums') {
+        // 2026-10-30(의뢰인 요청) — 위 재생 중 반영 useEffect와 같은 이유.
+        tracks?.setChannelGain(key, stemDrumsBoostedGain(gain))
       } else {
         tracks?.setChannelGain(key, gain)
       }
