@@ -124,19 +124,65 @@ function shapeBottomExtent(shape: NoteShape, size: number): number {
  * 나옴)에 동일하게 적용됨. */
 const NOTE_HALO_PADDING = 2
 
-function drawNoteShapePass(
+/** T6-7(성능, Q-33) — 실기기 Safari 프로파일러로 직접 확인(메인 스레드의
+ * 86.9%가 "페인트"): `drawNoteShapePass()`를 halo용·본체용 두 번 **완전히
+ * 따로** 호출하던 예전 방식은 노트 1개당 경로(path) 구성을 두 번(halo
+ * 크기로 한 번, 본체 크기로 한 번) 새로 하고 있었다 — 화면에 동시에 보이는
+ * 노트가 많을 때(수백 개) 캔버스 명령이 그만큼 배로 불어나 페인트 비용이
+ * 커짐(재생 버튼을 누르기도 전, 화면에 노트가 처음 그려지는 순간부터 CPU가
+ * 치솟는 걸 실기기로 확인 — 오디오와 무관).
+ *
+ * 경로는 **한 번만** 구성하고, 그 위에 "테두리색으로 굵게 칠하기(halo
+ * 크기 자체는 더 안 만듦) → 그 위에 본체색으로 칠하기"만 추가해 같은 시각
+ * 효과(테두리가 비어져 나오는 halo)를 낸다 — 스트로크는 경로를 중심으로
+ * 안팎에 걸쳐 그려지므로(스펙 동작), 바깥쪽 절반만 테두리처럼 남고 안쪽
+ * 절반은 이어지는 채우기가 덮는다. 선으로만 이뤄진 'x' 계열은 채우기가
+ * 없으므로 같은 경로를 굵은 선(halo색) → 가는 선(본체색) 순서로 두 번
+ * 긋는다(경로 재구성은 한 번뿐). 'bar' 계열은 원래도 `fillRect()`(경로
+ * 없는 최소 비용 호출)였으므로 그대로 유지 — 경로 기반으로 바꾸면 오히려
+ * 손해.
+ *
+ * 'x-ring'/'rect-ring'/'bar-ring'의 추가 원(halo 표시용)도 같은 원리로
+ * 경로를 한 번만 만들고 굵은 선→가는 선 순서로 두 번 긋는다.
+ *
+ * 시각적으로 완전히 동일하진 않다(기존 방식은 halo가 본체보다 순수하게
+ * "더 큰 도형"이었는데, 이 방식은 "경로 중심 스트로크"라 테두리 두께가
+ * 약간 다르게 보일 수 있음) — 구현 후 데스크톱 스크린샷으로 비교 확인
+ * 필요(아래 테스트 계획). */
+function drawNoteShape(
   ctx: CanvasRenderingContext2D,
   shape: NoteShape,
   x: number,
   y: number,
   size: number,
   color: string,
-  lineWidth: number,
+  haloColor: string,
 ): void {
-  ctx.fillStyle = color
-  ctx.strokeStyle = color
-  ctx.lineWidth = lineWidth
   const half = size / 2
+  const haloWidth = NOTE_HALO_PADDING * 2
+
+  function strokeHaloThenMain(mainLineWidth: number): void {
+    ctx.strokeStyle = haloColor
+    ctx.lineWidth = mainLineWidth + haloWidth
+    ctx.stroke()
+    ctx.strokeStyle = color
+    ctx.lineWidth = mainLineWidth
+    ctx.stroke()
+  }
+
+  function strokeHaloThenFill(): void {
+    ctx.strokeStyle = haloColor
+    ctx.lineWidth = haloWidth
+    ctx.stroke()
+    ctx.fillStyle = color
+    ctx.fill()
+  }
+
+  function ringHalo(): void {
+    ctx.beginPath()
+    ctx.arc(x, y, half * 1.5, 0, Math.PI * 2)
+    strokeHaloThenMain(2)
+  }
 
   switch (shape) {
     case 'x':
@@ -148,12 +194,8 @@ function drawNoteShapePass(
       ctx.lineTo(x + s, y + s)
       ctx.moveTo(x + s, y - s)
       ctx.lineTo(x - s, y + s)
-      ctx.stroke()
-      if (shape === 'x-ring') {
-        ctx.beginPath()
-        ctx.arc(x, y, half * 1.5, 0, Math.PI * 2)
-        ctx.stroke()
-      }
+      strokeHaloThenMain(2)
+      if (shape === 'x-ring') ringHalo()
       break
     }
     case 'diamond': {
@@ -163,22 +205,17 @@ function drawNoteShapePass(
       ctx.lineTo(x, y + half)
       ctx.lineTo(x - half, y)
       ctx.closePath()
-      ctx.fill()
+      strokeHaloThenFill()
       break
     }
     case 'rounded-rect':
     case 'rect-ring': {
       const w = size
       const h = size * 0.7
-      const r = 4
       ctx.beginPath()
-      ctx.roundRect(x - w / 2, y - h / 2, w, h, r)
-      ctx.fill()
-      if (shape === 'rect-ring') {
-        ctx.beginPath()
-        ctx.arc(x, y, half * 1.5, 0, Math.PI * 2)
-        ctx.stroke()
-      }
+      ctx.roundRect(x - w / 2, y - h / 2, w, h, 4)
+      strokeHaloThenFill()
+      if (shape === 'rect-ring') ringHalo()
       break
     }
     case 'circle':
@@ -186,19 +223,18 @@ function drawNoteShapePass(
       const r = shape === 'circle-large' ? half * 1.2 : half
       ctx.beginPath()
       ctx.arc(x, y, r, 0, Math.PI * 2)
-      ctx.fill()
+      strokeHaloThenFill()
       break
     }
     case 'bar':
     case 'bar-ring': {
       const w = size * 1.8
       const h = size * 0.4
+      ctx.fillStyle = haloColor
+      ctx.fillRect(x - w / 2 - NOTE_HALO_PADDING, y - h / 2 - NOTE_HALO_PADDING, w + haloWidth, h + haloWidth)
+      ctx.fillStyle = color
       ctx.fillRect(x - w / 2, y - h / 2, w, h)
-      if (shape === 'bar-ring') {
-        ctx.beginPath()
-        ctx.arc(x, y, half * 1.5, 0, Math.PI * 2)
-        ctx.stroke()
-      }
+      if (shape === 'bar-ring') ringHalo()
       break
     }
   }
@@ -219,19 +255,6 @@ function lowerBoundIndex<T>(sorted: readonly T[], target: number, keyOf: (item: 
     else hi = mid
   }
   return lo
-}
-
-function drawNoteShape(
-  ctx: CanvasRenderingContext2D,
-  shape: NoteShape,
-  x: number,
-  y: number,
-  size: number,
-  color: string,
-  haloColor: string,
-): void {
-  drawNoteShapePass(ctx, shape, x, y, size + NOTE_HALO_PADDING * 2, haloColor, 2 + NOTE_HALO_PADDING)
-  drawNoteShapePass(ctx, shape, x, y, size, color, 2)
 }
 
 /** 레인 렌더러를 만든다. `render()`를 매 프레임(requestAnimationFrame) 호출하면
