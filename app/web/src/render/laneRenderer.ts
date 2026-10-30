@@ -204,6 +204,21 @@ function drawNoteShapePass(
   }
 }
 
+/** 정렬된 배열에서 `keyOf(item) >= target`인 첫 인덱스를 이진탐색으로 찾는다
+ * (표준 lower_bound). `laneNotesByTick`가 틱(=고정 playbackBpm에서는 시간) 오름차순
+ * 정렬돼 있다는 전제가 있어야 올바름 — `score.notes`가 이미 틱 오름차순(여러 주석에서
+ * 확인된 불변식)이고, 레인별 필터링은 순서를 보존하므로 성립. */
+function lowerBoundIndex<T>(sorted: readonly T[], target: number, keyOf: (item: T) => number): number {
+  let lo = 0
+  let hi = sorted.length
+  while (lo < hi) {
+    const mid = (lo + hi) >>> 1
+    if (keyOf(sorted[mid]) < target) lo = mid + 1
+    else hi = mid
+  }
+  return lo
+}
+
 function drawNoteShape(
   ctx: CanvasRenderingContext2D,
   shape: NoteShape,
@@ -240,6 +255,21 @@ export function createLaneRenderer(
   // 안 나가므로(React state 등에 저장 안 됨) 재사용해도 안전함.
   const visibleNotePool: VisibleNote[] = []
   let visibleNoteCount = 0
+
+  // T6-1(성능, 2026-10-30, Q-33 재착수) — `render()`가 매 프레임 레인 8개 × 전체
+  // 노트(실측 1,809개)를 전부 순회하고 있었음(score.notes가 이미 틱 오름차순인데도
+  // 인덱싱 없이 매 프레임 재스캔) — 8×1809≈14,472회/프레임. 곡이 바뀔 때만(참조
+  // 비교) 레인별로 한 번 필터링해 캐싱해두고, render()에서는 이진탐색으로 보이는
+  // 시간창(+ 판정 허용범위)만 순회한다. 필터링은 순서를 보존하므로 레인별 배열도
+  // 여전히 틱(=고정 playbackBpm에서는 시간) 오름차순 — lowerBoundIndex 전제 충족.
+  let cachedScore: DrumScore | null = null
+  let notesByLaneIndex: DrumNote[][] = []
+  function ensureLaneIndex(score: DrumScore): void {
+    if (score === cachedScore) return
+    notesByLaneIndex = LANES.map((lane) => score.notes.filter((note) => lane.pieces.includes(note.piece)))
+    cachedScore = score
+  }
+
   function nextPooledNote(): VisibleNote {
     if (visibleNoteCount >= visibleNotePool.length) {
       visibleNotePool.push({
@@ -341,13 +371,26 @@ export function createLaneRenderer(
       // 뒤늦게 바뀌어버림 — React의 불변성 전제를 깨는 버그가 됨).
       const activePiecesResult = new Set<DrumPiece>()
       const activeHandResult = new Map<DrumPiece, Hand>()
+      // T6-1(성능) — 레인별 인덱스 구축(곡이 바뀔 때만, 위 ensureLaneIndex 참고).
+      ensureLaneIndex(score)
+      // 이진탐색 경계는 "그리기 가시창"과 "판정 허용범위" 중 더 넓은 쪽을 둘 다
+      // 포함해야 한다(바로 위 모드A 지적과 동일한 이유 — 둘 중 하나만 쓰면 극단적
+      // BPM에서 판정창 안인데 가시창 밖인 노트를 놓칠 수 있음). min/max로 감싸
+      // 원래 전체 스캔과 결과가 항상 동일하도록 보장.
+      const searchLowerBound = Math.min(windowStart, currentTimeSeconds - options.hitWindowSeconds)
+      const searchUpperBound = Math.max(windowEnd, currentTimeSeconds + options.hitWindowSeconds)
       for (let laneIndex = 0; laneIndex < LANES.length; laneIndex++) {
         const lane = LANES[laneIndex]
         const laneCenterX = laneIndex * laneWidth + laneWidth / 2
-        for (const note of score.notes) {
-          if (!lane.pieces.includes(note.piece)) continue
+        const laneNotes = notesByLaneIndex[laneIndex]
+        const startIndex = lowerBoundIndex(laneNotes, searchLowerBound, noteTimeOf)
+        for (let ni = startIndex; ni < laneNotes.length; ni++) {
+          const note = laneNotes[ni]
           const t = noteTimeOf(note)
-          // 모드A 지적(실제 버그) — 판정 허용범위 체크를 그리기 가시창
+          // laneNotes는 틱(=이 호출의 고정 playbackBpm에서는 시간) 오름차순이므로
+          // 경계를 넘으면 이후 노트도 전부 범위 밖 — 안전하게 break.
+          if (t > searchUpperBound) break
+          // 모드A 지적(실제 버그, T3-15) — 판정 허용범위 체크를 그리기 가시창
           // continue보다 먼저 둬야 한다. 가시창(windowEnd=lookaheadSeconds)이
           // 보통은 판정 허용범위(hitWindowSeconds=0.06초 등)보다 넓지만,
           // `lookaheadSeconds`는 `barDurationSeconds × barsVisible`이라

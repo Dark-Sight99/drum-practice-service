@@ -208,7 +208,17 @@ function MixerRow({
   )
 }
 
+// T6-1(성능, 2026-10-30, Q-33 재착수) — 보이는 노트마다(바쁜 구간엔 초당
+// 600~1,800회) getComputedStyle()을 캐싱 없이 호출하고 있었음. getComputedStyle은
+// 스타일 재계산을 강제할 수 있는 비싼 API인데(MDN), --piece-* 색상은 재생 중
+// 절대 안 바뀌는 정적 테마 값(이 앱엔 라이트/다크 테마 전환 기능 자체가 없음 —
+// 그렙으로 확인, 값이 중간에 바뀔 경로가 없음)이라 캐싱해도 안전하다. 피스별로
+// 첫 호출 때만 실제로 읽고, 이후론 재사용.
+const pieceColorCache = new Map<DrumPiece, string>()
+
 function readPieceColor(piece: DrumPiece): string {
+  const cached = pieceColorCache.get(piece)
+  if (cached !== undefined) return cached
   const varName =
     piece === 'hihat_closed' || piece === 'hihat_open'
       ? '--piece-hihat'
@@ -219,7 +229,9 @@ function readPieceColor(piece: DrumPiece): string {
           : piece === 'tom_floor'
             ? '--piece-floortom'
             : `--piece-${piece}`
-  return getComputedStyle(document.documentElement).getPropertyValue(varName).trim() || '#fff'
+  const color = getComputedStyle(document.documentElement).getPropertyValue(varName).trim() || '#fff'
+  pieceColorCache.set(piece, color)
+  return color
 }
 
 /** 2026-10-28(의뢰인 요청) — 노래 진행 시간 표시용 "분:초" 포맷(초는 항상
@@ -1005,6 +1017,15 @@ export function PracticeCanvas({
   const [fpsDisplay, setFpsDisplay] = useState<number | null>(null)
 
   useEffect(() => {
+    // T6-1(성능, 2026-10-30, Q-33 재착수) — 예전엔 getMasterClock()을 loop()
+    // 안에서 매 프레임(최대 60회/초) 호출했음 — 이 함수가 클로저 8개를 포함한
+    // 새 객체를 매번 만들어 초당 ~480개 객체+~3,840개 클로저가 생성되고 있었음
+    // (T3-15/T3-16이 고쳤던 것과 같은 종류의 GC 압박을 놓친 경우). Tone.js의
+    // Transport는 앱 전역 싱글턴이고 이 메서드들은 전부 그 순간 값을 라이브로
+    // 읽으므로(clock.ts 확인 — 캐시된 값을 들고 있지 않음), 이 effect(= 곡/
+    // barsVisible/totalBars가 바뀔 때만 재실행, 아래 deps 참고) 시작 시 한 번만
+    // 만들어 재사용해도 매 프레임 새로 호출하는 것과 동작이 완전히 같다.
+    const clock = getMasterClock()
     function loop() {
       // T3-14 FPS 계측(진단용 임시) — 이 loop() 자체가 매 애니메이션 프레임
       // 호출되므로, 호출 횟수를 1초 단위로 세면 실제 브라우저 프레임레이트.
@@ -1018,7 +1039,6 @@ export function PracticeCanvas({
         fpsWindowStartRef.current = fpsNow
       }
 
-      const clock = getMasterClock()
       const renderer = rendererRef.current
       const positionSeconds = clock.getPositionSeconds()
       // T2-8(Phase 2 게이트 피드백) — scorePlayer.ts가 노트 소리를
