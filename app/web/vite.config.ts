@@ -7,6 +7,15 @@ import { defineConfig } from 'vitest/config'
 // 코드가 앱 어디에도 없어 애초에 작동하지 않던 상태였다. 제거.
 export default defineConfig({
   plugins: [react()],
+  // T6-2(2026-10-30, Q-33 실기기 프로파일링) — 기본값(false)이면 프로덕션 빌드가
+  // 축소(minify)된 번들만 내보내, Safari 웹 속성 관리자의 타임라인 호출 트리가
+  // `index-XXXX.js:276:33169` 같은 읽을 수 없는 위치만 보여줌. 소스맵을 같이
+  // 내보내면 실제 TS 파일·줄 번호로 매핑돼 프로파일링이 가능해짐(공식 문서:
+  // https://vite.dev/config/build-options.html#build-sourcemap). 개인용 내부
+  // 도구라 소스 노출 자체는 문제 아님 — 디버깅 목적으로 계속 켜둠.
+  build: {
+    sourcemap: true,
+  },
   server: {
     // 2026-10-28 — 의뢰인이 Tailscale Funnel/Serve(홈서버를 맥·아이폰 등
     // 다른 기기에서 접속하는 용도, intent/03-architecture-stack.md §2
