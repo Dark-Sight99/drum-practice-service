@@ -24,5 +24,20 @@ T5-2(PWA 설치 + 오프라인 저장) 착수를 앞두고 의뢰인에게 "서�
 - `npx vitest run`: **333 passed**(25 test files)
 - `npm run build`: 프로덕션 빌드 정상 완료(`tsc -b && vite build`, 463ms) — `vite-plugin-pwa` 제거 후에도 빌드 깨지지 않음을 확인. 빌드 산출물(`dist/`)엔 서비스워커·manifest 파일이 더 이상 생성되지 않음(플러그인이 담당하던 부분이라 당연한 결과, 혹시 모를 잔존 참조 없는지 확인 차 직접 빌드해봄).
 
+## Codex 모드A
+
+### 1차 — REQUEST_CHANGES
+- **C-001(권장)**: `CLAUDE.md`(프로젝트 한 줄 "웹앱(PWA)", 폴더 규칙 "app/web/ (PWA)"), `intent/09-agent-roles.md`(프론트 역할 설명에 "PWA 화면"·"오프라인 캐시"), `intent/06-pipeline.md`(위험 작업 목록에 "오프라인 캐시·세션 처리"), `app/web/src/index.css`(Pretendard 자체 호스팅 사유 주석에 "오프라인 PWA 대응") — 이번 diff가 안 건드린 다른 문서·코드 주석들에 여전히 "PWA"·"오프라인"이 남아 실제와 어긋남.
+- **C-002(권장)**: `package-lock.json`이 PWA 패키지 제거 치고 너무 크게 바뀜(순변경 +1,017/-6,241줄) — `@coderline/alphatab`, `@oxlint/*`, `@rolldown/*` 등 PWA와 무관한 패키지 항목도 새로 추가돼 보여, `npm uninstall`이 의도치 않은 lockfile 변경을 포함했는지 확인 필요.
+
+### 대응
+- **C-001**: 지적된 4개 파일 전부 "PWA"·"오프라인" 표현을 정리(`CLAUDE.md` 프로젝트 한 줄에서 "(PWA)" 제거 + 드롭 사유 각주, 폴더 규칙에서 "(PWA)" 제거, `09-agent-roles.md` 프론트 역할에서 "PWA 화면"→"화면", "오프라인 캐시" 취소선, 담당 REQ 목록에서 09 제거, `06-pipeline.md` 위험 작업 목록에서 "오프라인 캐시" 제거+각주, `index.css` 주석에서 "오프라인 PWA 대응" 사유를 "PWA·오프라인은 드롭, 외부 CDN 미의존은 계속 유효"로 수정).
+- **C-002**: `app/web/package.json`에서 `@coderline/alphatab`·`oxlint`가 diff 이전부터 있던 기존 의존성(버전 변경 없음)임을 확인 — `git show main:...package-lock.json`과 현재 버전을 직접 대조해 react/vite/alphatab/oxlint/tone/typescript 전부 **버전 동일**함을 확인. `npm install`(비파괴적 재검증, `npm ci`는 실행 중인 dev 서버가 쥐고 있던 `@rolldown` 네이티브 바이너리 파일에 Windows EPERM 잠금이 걸려 실패해 대신 사용)을 재실행한 결과 "added 87 packages, changed 29 packages, 0 vulnerabilities"로 정상 해소 — `vite-plugin-pwa`(Workbox 전이 의존성 포함 314개) 제거로 npm이 이전부터 살짝 어긋나 있던 lockfile(플랫폼별 optional 패키지 항목 일부 누락)을 같이 정리한 것으로 판단, 의도치 않은 버전 변경은 없음.
+
+### 재검증
+- `npx tsc -b` / `npx vitest run`(333 passed) 재실행 통과.
+
+### 2차 — (진행 예정)
+
 ## 결론
 의뢰인 결정에 따라 REQ-09(오프라인 연습)·T5-2(PWA 설치)를 전부 드롭. 작동하지 않던 미사용 설정을 정리했고, intent 문서 전반에 드롭 사유를 남겨 추후 재검토 시 왜 드롭했는지 추적 가능하게 함.
