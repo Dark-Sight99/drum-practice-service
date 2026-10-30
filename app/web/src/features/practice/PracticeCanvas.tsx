@@ -1054,6 +1054,12 @@ export function PracticeCanvas({
   // 분리하는 세 번째 토글.
   const skipDomWritesRef = useRef(false)
   const [skipDomWritesLabel, setSkipDomWritesLabel] = useState(false)
+  // T6-9 추가 3차 — "그리기만 끄기"·"진행바만 끄기" 둘 다 렉 동일(무죄 확정,
+  // 실기기 확인 완료). "계산 끄기"(전체)만 효과 있었으므로, 남은 범위(위치
+  // 계산+리싱크) 중 리싱크(tracks.resync() — <audio> currentTime 쓰기 포함)만
+  // 분리 테스트.
+  const skipResyncRef = useRef(false)
+  const [skipResyncLabel, setSkipResyncLabel] = useState(false)
 
   useEffect(() => {
     // T6-1(성능, 2026-10-30, Q-33 재착수) — 예전엔 getMasterClock()을 loop()
@@ -1094,7 +1100,7 @@ export function PracticeCanvas({
       // 호출 자체는 가볍지만, 의도적으로 "느슨한 폴링"이라는 설계를 코드로도
       // 분명히 하기 위해 스로틀 자체를 생략하지 않음).
       const tracks = playbackRef.current?.tracks
-      if (isPlayingRef.current && tracks) {
+      if (isPlayingRef.current && tracks && !skipResyncRef.current) {
         const now = Date.now()
         if (now - lastTrackResyncAtRef.current >= TRACK_RESYNC_INTERVAL_MS) {
           lastTrackResyncAtRef.current = now
@@ -2489,6 +2495,27 @@ export function PracticeCanvas({
                   }}
                 >
                   {skipDomWritesLabel ? '진행바 꺼짐' : '진행바만 끄기'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    skipResyncRef.current = !skipResyncRef.current
+                    setSkipResyncLabel(skipResyncRef.current)
+                  }}
+                  style={{
+                    position: 'absolute',
+                    top: 90,
+                    right: 4,
+                    padding: '2px 6px',
+                    background: skipResyncLabel ? 'var(--danger)' : 'rgba(0,0,0,0.6)',
+                    color: 'var(--text)',
+                    fontSize: '0.7em',
+                    borderRadius: 4,
+                    border: 'none',
+                    pointerEvents: 'auto',
+                  }}
+                >
+                  {skipResyncLabel ? '리싱크 꺼짐' : '리싱크만 끄기'}
                 </button>
               </div>
               <div
