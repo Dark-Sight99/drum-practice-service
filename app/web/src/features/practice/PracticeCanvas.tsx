@@ -1842,9 +1842,14 @@ export function PracticeCanvas({
         {/* Q-44(2026-10-30) — 부호 토글 버튼. 음수(소리를 늦춤)/양수(소리를
          * 당김) 전환만 담당 — 크기는 오른쪽 숫자칸이 담당(아래). 0일 때는
          * 부호가 의미 없지만(±0 동일) 눌러도 안전(0 그대로). */}
+        {/* 2026-10-30(의뢰인 지적) — `.settings-trigger`(테두리 없는 순수
+         * 아이콘)로는 "눌러도 되는 버튼"처럼 안 보임 — 실제 토글(상태를
+         * 바꾸는 동작)이라 `.mute-btn`(믹서 Mute 버튼과 같은 테두리 있는
+         * 작은 알약 버튼, 이미 이 화면에 있는 패턴 재사용)으로 바꿔 또렷한
+         * 버튼처럼 보이게 함. */}
         <button
           type="button"
-          className="settings-trigger"
+          className="mute-btn"
           onClick={() => setAudioLatencyCompensationMs((ms) => -ms)}
           disabled={isPlaying || isPaused}
           aria-label={
@@ -1853,7 +1858,6 @@ export function PracticeCanvas({
               : '플러스(소리를 당김) — 눌러서 마이너스로 전환'
           }
           title="부호 전환(+/-)"
-          style={{ width: 28 }}
         >
           {audioLatencyCompensationMs < 0 ? '−' : '+'}
         </button>
