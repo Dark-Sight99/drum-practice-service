@@ -35,7 +35,9 @@ import {
   metronomeGainToDb,
   MUSIC_STEM_KEYS,
   musicVolume,
+  normalizeMusicChannels,
   playDrumScore,
+  selectStemKinds,
   setMusicMuted,
   setMusicVolume,
   toggleDrumlessPreset,
@@ -233,6 +235,7 @@ function readPieceColor(piece: DrumPiece): string {
   pieceColorCache.set(piece, color)
   return color
 }
+
 
 /** 2026-10-28(의뢰인 요청) — 노래 진행 시간 표시용 "분:초" 포맷(초는 항상
  * 2자리, 분은 1자리부터 — 시간 단위는 범위 밖: 연습 음원이 몇 시간씩 가는
@@ -557,7 +560,7 @@ export function PracticeCanvas({
     setAudioTracksLoading(false)
     setAudioTracksFailed(false)
     if (songId === undefined) return
-    const stemKinds = availableAudioKinds.filter((kind) => kind !== 'original')
+    const stemKinds = selectStemKinds(availableAudioKinds)
     if (stemKinds.length === 0) return // MIDI-only 곡 등 — 만들 트랙 자체가 없음
     let cancelled = false
     setAudioTracksLoading(true)
@@ -816,12 +819,19 @@ export function PracticeCanvas({
       setMixerState((prev) => {
         // 모드C 1라운드 C-006 — 알 수 없는/누락된 채널 키는 방어적으로
         // 기본값으로 채움(저장 형식이 나중에 바뀌어도 안 깨지게).
-        const merged = defaultMixerState()
+        let merged = defaultMixerState()
         if (loadedVolumes) {
           for (const key of CHANNEL_KEYS) {
             if (loadedVolumes[key]) merged[key] = loadedVolumes[key]
           }
         }
+        // T6-3(Codex 모드A C-001 반영) — 서버에 저장된 값이 레거시 데이터라
+        // stem_bass/vocals/other가 서로 다를 수 있는데, 이제 이 셋이 서버에서
+        // 미리 합쳐진 'stem_music' 트랙 하나에 대응돼 대표값(stem_bass) 하나만
+        // 읽는 코드가 생겼다(아래 두 setChannelGain('stem_music', ...) 호출부)
+        // — 로드 직후 정규화해 그 대표값이 항상 정확하게 한다(mixer.ts
+        // normalizeMusicChannels() 참고 — 기존 "대표값" 규칙 재사용).
+        merged = normalizeMusicChannels(merged)
         // 로드가 끝나기 전에 사용자가 이미 건드린 채널은 그 값을 유지.
         for (const key of userEditedChannelsRef.current) {
           merged[key] = prev[key]
@@ -911,6 +921,12 @@ export function PracticeCanvas({
         session.tracks?.setChannelGain(key, gain)
       }
     }
+    // T6-3(REQ-06, Q-33) — stem_bass/vocals/other 3채널은 항상 같은 값으로
+    // 묶여 있으므로(setMusicVolume()/setMusicMuted() 불변식, mixer.ts) 그중
+    // 아무거나(stem_bass) 대표로 써서 합쳐진 'stem_music' 트랙에도 같은 게인을
+    // 적용한다 — 풀에 stem_music이 없는 곡(백필 전)이면 setChannelGain이
+    // 조용히 no-op(trackPlayer.ts 확인됨)이라 안전.
+    session.tracks?.setChannelGain('stem_music', effectiveGain(mixerState.stem_bass))
   }, [mixerState])
 
   useEffect(() => {
@@ -1306,10 +1322,11 @@ export function PracticeCanvas({
     // 보존된다(§3·§6) — 그래서 Promise 자체는 여기서 바로 만들고, 기다리는
     // 건 voices 로딩과 동시에 진행한다.
     // work/T3-3/plan.md §범위경계 — "original"(분리 전 원본)은 스템 합과 중복
-    // 재생되므로 T3-3은 스템 4종만 다룬다(원본 선택 UI는 T3-4). 백엔드의
+    // 재생되므로 T3-3은 스템만 다룬다(원본 선택 UI는 T3-4). 백엔드의
     // available_audio_kinds는 범용 목록(이후 T3-4가 "원본"도 쓸 수 있게)이라
-    // 프런트 쪽에서 걸러낸다.
-    const stemKinds = availableAudioKinds.filter((kind) => kind !== 'original')
+    // 프런트 쪽에서 걸러낸다 — T6-3부터는 stem_music 우선 선택도 같이(위
+    // selectStemKinds 참고).
+    const stemKinds = selectStemKinds(availableAudioKinds)
     // T3-16-feedback-6 — 풀이 준비돼 있어야(위 useEffect가 비동기로 만들지
     // 않으므로 보통 화면 진입 직후 바로 준비됨) 실제로 트랙을 쓸 수 있다.
     // 풀이 아직 없으면(드물게: 생성 실패, 또는 렌더 직후 effect가 아직
@@ -1491,6 +1508,9 @@ export function PracticeCanvas({
         tracks?.setChannelGain(key, gain)
       }
     }
+    // T6-3(REQ-06, Q-33) — 위 재생 중 반영 useEffect와 같은 이유로, 세션을
+    // 막 만든 시점에도 'stem_music'에 대표값(stem_bass)을 적용.
+    tracks?.setChannelGain('stem_music', effectiveGain(mixerStateRef.current.stem_bass))
     isPlayingRef.current = true
     setIsPlaying(true)
     // 루프가 켜져 있으면 사용자가 직접 정지할 때까지 계속 반복돼야 하므로

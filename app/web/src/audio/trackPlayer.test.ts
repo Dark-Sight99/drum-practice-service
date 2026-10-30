@@ -44,7 +44,7 @@ vi.mock('tone', () => ({
   }),
 }))
 
-const { createAudioTrackPool, createTrackPlayer } = await import('./trackPlayer')
+const { createAudioTrackPool, createTrackPlayer, selectStemKinds } = await import('./trackPlayer')
 type TrackSource = { kind: string; url: string }
 
 // T3-16-feedback-3 — Web Audio(GainNode) 경로는 이제 iOS에서만 탄다(맥에서
@@ -837,5 +837,35 @@ describe('createTrackPlayer', () => {
       player.setChannelGain('stem_drums', -0.5)
       expect(createdAudioElements[0].volume).toBe(0)
     })
+  })
+})
+
+// T6-3(REQ-06, Q-33) — selectStemKinds()는 순수 함수(Tone.js·DOM 의존 없음)라
+// 위 createTrackPlayer describe 블록과 별개로 둔다.
+describe('selectStemKinds', () => {
+  it('strips "original" regardless of stem_music presence', () => {
+    expect(selectStemKinds(['original', 'stem_drums'])).toEqual(['stem_drums'])
+  })
+
+  it('keeps legacy individual stems when stem_music is absent (하위 호환, 백필 전 곡)', () => {
+    expect(
+      selectStemKinds(['original', 'stem_drums', 'stem_bass', 'stem_vocals', 'stem_other']),
+    ).toEqual(['stem_drums', 'stem_bass', 'stem_vocals', 'stem_other'])
+  })
+
+  it('prefers stem_music and drops legacy individual stems when both are present (Codex 모드C C-001 — 5트랙 방지)', () => {
+    const result = selectStemKinds([
+      'original',
+      'stem_drums',
+      'stem_bass',
+      'stem_vocals',
+      'stem_other',
+      'stem_music',
+    ])
+    expect(result).toEqual(['stem_drums', 'stem_music'])
+  })
+
+  it('returns an empty list for MIDI-only songs (no stems at all)', () => {
+    expect(selectStemKinds(['original'])).toEqual([])
   })
 })

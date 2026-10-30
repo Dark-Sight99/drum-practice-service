@@ -14,6 +14,7 @@ export {
   metronomeGainToDb,
   MUSIC_STEM_KEYS,
   musicVolume,
+  normalizeMusicChannels,
   setMusicMuted,
   setMusicVolume,
   toggleDrumlessPreset,
@@ -21,7 +22,7 @@ export {
 export type { ChannelKey, ChannelState, MixerState } from './mixer'
 export { playDrumScore } from './scorePlayer'
 export type { PlaybackHandle, PlayDrumScoreOptions } from './scorePlayer'
-export { createAudioTrackPool, createTrackPlayer } from './trackPlayer'
+export { createAudioTrackPool, createTrackPlayer, selectStemKinds } from './trackPlayer'
 export type { AudioTrackPool, TrackPlayer, TrackSource } from './trackPlayer'
 export {
   audioTrackPositionSeconds,

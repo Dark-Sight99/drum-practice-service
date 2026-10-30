@@ -8,6 +8,7 @@ import {
   METRONOME_BOOST_DB,
   metronomeGainToDb,
   musicVolume,
+  normalizeMusicChannels,
   setMusicMuted,
   setMusicVolume,
   toggleDrumlessPreset,
@@ -234,6 +235,59 @@ describe('music 묶음(stem_bass/stem_vocals/stem_other) — T3-4 게이트 피�
       expect(next.stem_bass.muted).toBe(false)
       expect(next.stem_vocals.muted).toBe(false)
       expect(next.stem_other.muted).toBe(false)
+    })
+  })
+
+  describe('normalizeMusicChannels', () => {
+    // T6-3(REQ-06, Q-33, Codex 모드A C-001) — 서버 저장 레거시 데이터가
+    // stem_bass/vocals/other를 서로 다르게 갖고 있을 때(합쳐진 'stem_music'
+    // 트랙에 대표값 하나만 적용하는 코드가 이제 이 셋에 의존하므로), 로드
+    // 직후 이 함수로 정규화해야 안전하다는 걸 검증.
+    it('leaves an already-consistent state unchanged', () => {
+      const state = setMusicVolume(defaultMixerState(), 0.4)
+      const result = normalizeMusicChannels(state)
+      // 평균 계산(부동소수점)을 거치므로 toBeCloseTo — musicVolume()가 이미
+      // 같은 이유로 pytest.approx 상당의 허용오차를 쓰는 패턴과 동일.
+      expect(result.stem_bass.volume).toBeCloseTo(0.4)
+      expect(result.stem_vocals.volume).toBeCloseTo(0.4)
+      expect(result.stem_other.volume).toBeCloseTo(0.4)
+    })
+
+    it('averages volume when the 3 legacy values diverge', () => {
+      const state = defaultMixerState()
+      state.stem_bass.volume = 0.2
+      state.stem_vocals.volume = 0.5
+      state.stem_other.volume = 0.8
+      const result = normalizeMusicChannels(state)
+      expect(result.stem_bass.volume).toBeCloseTo(0.5)
+      expect(result.stem_vocals.volume).toBeCloseTo(0.5)
+      expect(result.stem_other.volume).toBeCloseTo(0.5)
+    })
+
+    it('mutes all 3 only when all 3 were already muted (matches isMusicMuted semantics)', () => {
+      const partiallyMuted = defaultMixerState()
+      partiallyMuted.stem_bass.muted = true
+      partiallyMuted.stem_vocals.muted = true
+      // stem_other not muted — should NOT count as "music muted"
+      const result = normalizeMusicChannels(partiallyMuted)
+      expect(result.stem_bass.muted).toBe(false)
+      expect(result.stem_vocals.muted).toBe(false)
+      expect(result.stem_other.muted).toBe(false)
+
+      const fullyMuted = setMusicMuted(defaultMixerState(), true)
+      const resultFullyMuted = normalizeMusicChannels(fullyMuted)
+      expect(resultFullyMuted.stem_bass.muted).toBe(true)
+      expect(resultFullyMuted.stem_vocals.muted).toBe(true)
+      expect(resultFullyMuted.stem_other.muted).toBe(true)
+    })
+
+    it('leaves other channels (stem_drums/synth_drums/metronome) untouched', () => {
+      const state = defaultMixerState()
+      state.stem_drums.volume = 0.6
+      state.synth_drums.muted = true
+      const result = normalizeMusicChannels(state)
+      expect(result.stem_drums.volume).toBe(0.6)
+      expect(result.synth_drums.muted).toBe(true)
     })
   })
 

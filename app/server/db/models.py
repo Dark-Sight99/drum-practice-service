@@ -59,9 +59,17 @@ class SongStatus(enum.StrEnum):
 class AssetKind(enum.StrEnum):
     ORIGINAL = "original"
     STEM_DRUMS = "stem_drums"
+    # T6-3(REQ-06, Q-33) — bass/vocals/other는 UI에서 이미 "음악" 슬라이더
+    # 하나로 묶여 있어(T3-8) 개별 조작 기능이 없는데, 셋 다 실제 <audio>
+    # 엘리먼트로 동시 디코딩되는 게 모바일 CPU를 다 써 fps를 떨어뜨리는 게
+    # 실기기로 확정됨(Q-33 "2차 결과·원인 확정"). 서버에서 미리 1개 파일로
+    # 섞어 동시 스트림을 4개→2개로 줄인다 — STEM_BASS/VOCALS/OTHER는 기존
+    # 곡(DB에 이미 그 kind로 저장된 Asset)과의 하위 호환을 위해 값만 남겨두고
+    # 새로 만들지는 않는다(work/T6-3/plan.md).
     STEM_BASS = "stem_bass"
     STEM_VOCALS = "stem_vocals"
     STEM_OTHER = "stem_other"
+    STEM_MUSIC = "stem_music"
     DRUMSCORE_RAW = "drumscore_raw"
     DRUMSCORE_EDITED = "drumscore_edited"
     SHEET_IMAGE = "sheet_image"
@@ -70,12 +78,16 @@ class AssetKind(enum.StrEnum):
 
 # T3-3(REQ-04) — 실제 오디오로 재생 가능한 종류만(work/T3-3/plan.md §1). 새 공개
 # API(`GET /songs/{id}/audio/{kind}`)가 받을 수 있는 kind를 이 집합으로 제한한다.
+# T6-3 — STEM_MUSIC 추가, STEM_BASS/VOCALS/OTHER는 기존 곡 재생 하위 호환을
+# 위해 그대로 둠(work/T6-3/plan.md §5, 프런트가 STEM_MUSIC 존재 시 이 셋을
+# 걸러냄).
 AUDIO_ASSET_KINDS = (
     AssetKind.ORIGINAL,
     AssetKind.STEM_DRUMS,
     AssetKind.STEM_BASS,
     AssetKind.STEM_VOCALS,
     AssetKind.STEM_OTHER,
+    AssetKind.STEM_MUSIC,
 )
 
 
