@@ -28,7 +28,15 @@
 문서 작업이라 tsc/vitest 해당 없음. 문서 내 링크 3개(tailscale.com/download, login.tailscale.com/admin/users, tailscale.com/kb) 형식 확인(실제 접속은 네트워크 정책상 생략 — 전부 Tailscale 공식 도메인).
 
 ## Codex 모드A
-(진행 예정)
+
+### 1차 — REQUEST_CHANGES
+- **C-001(필수)**: §5 접속 주소를 `https://...`로 단정했는데, 실제론 `vite.config.ts`에 `allowedHosts`(호스트 검증 통과용)만 있고 HTTPS(TLS 인증서)를 켜는 설정은 어디에도 없음 — 지금 상태로는 `http://`(평문)일 가능성이 높아 `https://`로 적어두면 틀릴 수 있음. 지적대로 포트뿐 아니라 프로토콜도 미확정 상태를 반영해야 함.
+
+### 대응
+§5를 `<프로토콜>://<서버PC-기기이름>.tail756a35.ts.net:<포트>` 형태로 바꾸고, "지금 저장소엔 HTTPS를 켜는 설정이 없어 `http://`일 가능성이 높다", "Tailscale Serve를 쓰면 Tailscale이 자동으로 HTTPS를 붙여줄 수도 있지만 이 프로젝트가 그 방식을 쓸지는 T5-4에서 정해질 사항"이라고 명시 — 추측을 사실처럼 적지 않음(CLAUDE.md §1-1).
+
+### 재검증
+(진행 예정 — 2차 리뷰)
 
 ## 결론
 의뢰인이 직접 따라 할 수 있는 Tailscale 설치·연결 절차를 작성했고, 모든 사실관계는 이미 승인된 intent 문서·실제 코드 설정에서만 가져왔다. 아직 결정되지 않은 사항(Funnel 채택, 정확한 포트)은 임의로 채우지 않고 명시적으로 "미정"으로 남겼다.
