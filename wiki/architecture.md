@@ -4,7 +4,7 @@
 
 ## 구조 (T1-1, 2026-10-23)
 ```
-app/web/      Vite + React 19 + TypeScript. PWA(vite-plugin-pwa). 린트=oxlint, 포맷=Prettier, 테스트=Vitest+Testing Library
+app/web/      Vite + React 19 + TypeScript. 린트=oxlint, 포맷=Prettier, 테스트=Vitest+Testing Library. (PWA·오프라인은 2026-10-30 드롭 — intent/02-requirements.md REQ-09 참고)
   src/
     features/{practice,library,editor,mixer,auth}/   화면별 기능(아직 빈 폴더, Phase 2+에서 채움)
     audio/ render/ score/ offline/                    공용 모듈(아직 빈 폴더)
@@ -33,7 +33,7 @@ npm install   # 최초 1회
 npm run dev       # 개발 서버
 npm run lint       # oxlint
 npm run test       # vitest
-npm run build      # tsc + vite build (PWA 서비스워커 포함)
+npm run build      # tsc + vite build
 npm run format     # prettier --check
 
 # server

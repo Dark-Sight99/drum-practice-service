@@ -37,7 +37,19 @@ T5-2(PWA 설치 + 오프라인 저장) 착수를 앞두고 의뢰인에게 "서�
 ### 재검증
 - `npx tsc -b` / `npx vitest run`(333 passed) 재실행 통과.
 
-### 2차 — (진행 예정)
+### 2차 — REQUEST_CHANGES(필수 수정 없음, 권장만)
+- 1차 두 지적 모두 대부분 해소 확인(패키지 버전 동일 — react/vite/alphatab/oxlint/tone/typescript/lucide-react/@vitejs·plugin-react/vitest/jsdom 추가 대조, Pretendard `@font-face` 2개·폰트 URL 변경 없음 확인).
+- **C-001(권장)**: `wiki/architecture.md`(당시 안 고친 상태였음), `intent/planning-log.md`("홈서버형 PWA" 표현)에 PWA/오프라인 잔여 언급.
+- **C-002(권장)**: `work/`·`logs/`·`qa-evidence/`의 과거 PWA/오프라인 언급 — Codex 스스로 "당시 상태를 기록한 역사 자료로 보이므로 현재 기능을 약속한다고 단정할 수는 없다"고 판단.
+
+### 대응
+- `wiki/architecture.md`: "현재 코드 구조... 새 작업 시작 전 이 파일부터 확인"이라고 명시된 살아있는 참조 문서라 PWA 언급 2곳(`app/web/` 한 줄 설명, `npm run build` 주석) 수정 — Codex 2차 검수가 돌아가는 동안 이미 반영, 이번 커밋에 포함.
+- `intent/planning-log.md`: 2026-10-23 기획 대화의 날짜 박힌 결정 기록(`logs/`와 같은 성격의 역사 자료) — OMR 드롭 때도 `planning-log.md`는 소급 수정하지 않은 전례를 따라 그대로 둠.
+- `work/`·`logs/`·`qa-evidence/`(이번 T5-2 것 제외): Codex 2차 스스로 역사 자료로 판단했고, 끝없이 과거 산출물을 소급 수정하는 건 `CLAUDE.md` §1-5 "토큰을 낭비하지 마라"와도 맞지 않아 그대로 둠.
+- `intent/09-agent-roles.md:78`("필수 시나리오"의 "오프라인" 항목): 재확인 결과 이건 "오프라인 상태에서도 기능이 된다"는 약속이 아니라 "네트워크 끊겼을 때 우아하게 실패하는지"를 보는 일반 QA 실패-경로 체크리스트 — REQ-09 드롭과 무관하게 여전히 유효한 테스트 범주라 수정하지 않음.
+
+### 재검증
+`npx tsc -b` / `npx vitest run`(333 passed) 재실행 통과(wiki 문서만 수정, 코드 변경 없어 실질 영향 없음 확인 차 재실행).
 
 ## 결론
 의뢰인 결정에 따라 REQ-09(오프라인 연습)·T5-2(PWA 설치)를 전부 드롭. 작동하지 않던 미사용 설정을 정리했고, intent 문서 전반에 드롭 사유를 남겨 추후 재검토 시 왜 드롭했는지 추적 가능하게 함.
