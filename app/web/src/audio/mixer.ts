@@ -179,8 +179,14 @@ export function metronomeGainToDb(linear: number): number {
  * 모자라거나 과하면 의뢰인이 직접 듣고 조정. 연습 화면(`stemPlayer.ts`,
  * Tone.Player 기반)에만 적용 — 편집 화면은 아직 구 `<audio>` 엘리먼트 경로라
  * `element.volume`이 네이티브로 1을 못 넘어서(브라우저 스펙 제약) 같은 방식의
- * 부스트가 안 먹는다. 그쪽은 Step 4(StemPlayer 전환) 때 같이 적용 예정. */
-export const STEM_DRUMS_BOOST_DB = 6
+ * 부스트가 안 먹는다. 그쪽은 Step 4(StemPlayer 전환) 때 같이 적용 예정.
+ * 2026-10-30 추가(의뢰인 — "6 더 올릴 수 있어? 음질 깨질 걱정은?") — +12dB로
+ * 상향. 클리핑(찢어지는 소리) 걱정에 대응해 `stemPlayer.ts`의
+ * `loadStemBufferPool()`에 공유 Limiter(-1dB, synth_drums의 T3-7과 같은
+ * 설정)를 새로 달아 destination 직전 합산 레벨을 묶어뒀다 — 그 작업과 같이
+ * 올림(순서상 리미터 없이 올리면 안 됨). 그래도 "몇 dB가 듣기 좋은지"는
+ * 여전히 의뢰인이 직접 들어야 아는 영역이라 12도 추정치. */
+export const STEM_DRUMS_BOOST_DB = 12
 
 /** `setChannelGain()`은 선형(0~1) 게인을 받으므로, dB 부스트를 선형 배율로
  * 환산해 곱한다(20*log10 공식의 역함수 — linearGainToDb()와 쌍을 이룸). */

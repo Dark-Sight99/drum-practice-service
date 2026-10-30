@@ -11,6 +11,8 @@ import {
   normalizeMusicChannels,
   setMusicMuted,
   setMusicVolume,
+  STEM_DRUMS_BOOST_DB,
+  stemDrumsBoostedGain,
   toggleDrumlessPreset,
 } from './mixer'
 
@@ -319,5 +321,23 @@ describe('metronomeGainToDb — T3-39(2026-10-27, 의뢰인 요청: 메트로놈
 
   it('stays -Infinity (silent) at zero gain, not a finite boosted value', () => {
     expect(metronomeGainToDb(0)).toBe(-Infinity)
+  })
+})
+
+describe('stemDrumsBoostedGain — 2026-10-30(의뢰인 요청: 원곡 드럼이 100%여도 작게 들림)', () => {
+  it('부스트는 선형 배율(10^(dB/20))로 곱해진다 — 단위 gain에서 그대로 그 배율', () => {
+    expect(stemDrumsBoostedGain(1)).toBeCloseTo(10 ** (STEM_DRUMS_BOOST_DB / 20), 10)
+  })
+
+  it('슬라이더를 낮추면 부스트도 비례해서 같이 줄어든다(배율은 고정, 입력에 곱함)', () => {
+    expect(stemDrumsBoostedGain(0.5)).toBeCloseTo(0.5 * 10 ** (STEM_DRUMS_BOOST_DB / 20), 10)
+  })
+
+  it('0(무음)은 부스트해도 여전히 0', () => {
+    expect(stemDrumsBoostedGain(0)).toBe(0)
+  })
+
+  it('현재 설정(+12dB)에서 setChannelGain()의 안전 상한(선형 4, +12.04dB)을 넘기지 않는다 — stemPlayer.ts와의 계약', () => {
+    expect(stemDrumsBoostedGain(1)).toBeLessThan(4)
   })
 })

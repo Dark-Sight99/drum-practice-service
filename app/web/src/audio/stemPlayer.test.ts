@@ -5,60 +5,92 @@ import type { StemSessionTiming } from './stemSchedule'
 // jsdom에서 단위 테스트하려면 'tone' 전체를 가짜로 바꿔야 한다(trackPlayer.test.ts의
 // vi.mock('tone', ...) 패턴과 같은 이유 — jsdom엔 실제 Web Audio가 없음).
 // vi.hoisted()로 감싸는 이유도 동일(vi.mock 팩토리가 파일 맨 위로 호이스팅됨).
-const { FakePlayer, playerInstances, decodeAudioDataMock, transportMock, immediateMock, emitTransport } =
-  vi.hoisted(() => {
-    class FakePlayer {
-      fadeIn = 0
-      fadeOut = 0
-      playbackRate = 1
-      volume = { value: 0 }
-      buffer: unknown
-      startCalls: Array<{ time: number; offset?: number }> = []
-      stopCalls: number[] = []
-      disposed = false
-      constructor(buffer: unknown) {
-        this.buffer = buffer
-      }
-      toDestination() {
-        return this
-      }
-      start(time: number, offset?: number) {
-        this.startCalls.push({ time, offset })
-      }
-      stop(time?: number) {
-        this.stopCalls.push(time ?? -1)
-      }
-      dispose() {
-        this.disposed = true
-      }
+const {
+  FakePlayer,
+  FakeLimiter,
+  playerInstances,
+  limiterInstances,
+  decodeAudioDataMock,
+  transportMock,
+  immediateMock,
+  emitTransport,
+} = vi.hoisted(() => {
+  class FakePlayer {
+    fadeIn = 0
+    fadeOut = 0
+    playbackRate = 1
+    volume = { value: 0 }
+    buffer: unknown
+    startCalls: Array<{ time: number; offset?: number }> = []
+    stopCalls: number[] = []
+    disposed = false
+    constructor(buffer: unknown) {
+      this.buffer = buffer
     }
-    const playerInstances: FakePlayer[] = []
-    const decodeAudioDataMock = vi.fn(async (bytes: ArrayBuffer) => ({
-      duration: 600, // 충분히 긴 더미 버퍼 — bufferOffset 범위 밖으로 안 나가게
-      byteLength: bytes.byteLength,
-    }))
-    const listeners = new Map<string, Array<(time: number) => void>>()
-    const transportMock = {
-      on: vi.fn((event: string, cb: (time: number) => void) => {
-        const list = listeners.get(event) ?? []
-        list.push(cb)
-        listeners.set(event, list)
-      }),
-      off: vi.fn((event: string, cb?: (time: number) => void) => {
-        if (!cb) {
-          listeners.set(event, [])
-          return
-        }
-        listeners.set(event, (listeners.get(event) ?? []).filter((l) => l !== cb))
-      }),
-      getSecondsAtTime: vi.fn((time: number) => time),
+    toDestination() {
+      return this
     }
-    function emitTransport(event: string, time: number): void {
-      for (const cb of listeners.get(event) ?? []) cb(time)
+    // 2026-10-30(의뢰인 질문 — 부스트 시 클리핑 방지) — 스템 Player가 이제
+    // destination에 바로 안 가고 공유 Limiter를 거친다(stemPlayer.ts 참고).
+    connect(_dest: unknown) {
+      return this
     }
-    const immediateMock = vi.fn(() => 0)
-    return { FakePlayer, playerInstances, decodeAudioDataMock, transportMock, immediateMock, emitTransport }
-  })
+    start(time: number, offset?: number) {
+      this.startCalls.push({ time, offset })
+    }
+    stop(time?: number) {
+      this.stopCalls.push(time ?? -1)
+    }
+    dispose() {
+      this.disposed = true
+    }
+  }
+  class FakeLimiter {
+    disposed = false
+    toDestination() {
+      return this
+    }
+    dispose() {
+      this.disposed = true
+    }
+  }
+  const playerInstances: FakePlayer[] = []
+  const limiterInstances: FakeLimiter[] = []
+  const decodeAudioDataMock = vi.fn(async (bytes: ArrayBuffer) => ({
+    duration: 600, // 충분히 긴 더미 버퍼 — bufferOffset 범위 밖으로 안 나가게
+    byteLength: bytes.byteLength,
+  }))
+  const listeners = new Map<string, Array<(time: number) => void>>()
+  const transportMock = {
+    on: vi.fn((event: string, cb: (time: number) => void) => {
+      const list = listeners.get(event) ?? []
+      list.push(cb)
+      listeners.set(event, list)
+    }),
+    off: vi.fn((event: string, cb?: (time: number) => void) => {
+      if (!cb) {
+        listeners.set(event, [])
+        return
+      }
+      listeners.set(event, (listeners.get(event) ?? []).filter((l) => l !== cb))
+    }),
+    getSecondsAtTime: vi.fn((time: number) => time),
+  }
+  function emitTransport(event: string, time: number): void {
+    for (const cb of listeners.get(event) ?? []) cb(time)
+  }
+  const immediateMock = vi.fn(() => 0)
+  return {
+    FakePlayer,
+    playerInstances,
+    limiterInstances,
+    decodeAudioDataMock,
+    transportMock,
+    immediateMock,
+    emitTransport,
+    FakeLimiter,
+  }
+})
 
 vi.mock('tone', () => ({
   // 화살표 함수는 `new`로 호출할 수 없어("is not a constructor", 실제 실행으로
@@ -68,6 +100,11 @@ vi.mock('tone', () => ({
     const p = new FakePlayer(buffer)
     playerInstances.push(p)
     return p
+  }),
+  Limiter: vi.fn().mockImplementation(function (_threshold: number) {
+    const l = new FakeLimiter()
+    limiterInstances.push(l)
+    return l
   }),
   getContext: () => ({ decodeAudioData: decodeAudioDataMock }),
   getTransport: () => transportMock,
@@ -93,6 +130,7 @@ describe('loadStemBufferPool', () => {
 
   beforeEach(() => {
     playerInstances.length = 0
+    limiterInstances.length = 0
     decodeAudioDataMock.mockClear()
     decodeAudioDataMock.mockImplementation(async (bytes: ArrayBuffer) => ({
       duration: 600,
@@ -211,6 +249,28 @@ describe('loadStemBufferPool', () => {
     expect(() => pool.destroy()).not.toThrow()
     expect(playerInstances[0].disposed).toBe(true)
   })
+
+  it('모든 트랙이 destination에 바로 안 가고 공유 Limiter(클리핑 방지)를 거친다(2026-10-30, 의뢰인 질문 — 부스트 시 음질 걱정)', async () => {
+    await loadStemBufferPool(
+      [
+        { kind: 'stem_drums', url: 'http://x/drums.mp3' },
+        { kind: 'stem_music', url: 'http://x/music.mp3' },
+      ],
+      { bufferTempoRatio: 1 },
+    )
+
+    expect(limiterInstances).toHaveLength(1) // 풀 전체가 리미터 하나를 공유
+  })
+
+  it('destroy()는 공유 Limiter도 dispose()한다(누수 방지)', async () => {
+    const pool = await loadStemBufferPool([{ kind: 'stem_drums', url: 'http://x/drums.mp3' }], {
+      bufferTempoRatio: 1,
+    })
+
+    pool.destroy()
+
+    expect(limiterInstances[0].disposed).toBe(true)
+  })
 })
 
 describe('createStemPlayer', () => {
@@ -218,6 +278,7 @@ describe('createStemPlayer', () => {
 
   beforeEach(() => {
     playerInstances.length = 0
+    limiterInstances.length = 0
     decodeAudioDataMock.mockClear()
     decodeAudioDataMock.mockImplementation(async () => ({ duration: 600, byteLength: 0 }))
     transportMock.on.mockClear()
