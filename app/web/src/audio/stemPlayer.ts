@@ -74,6 +74,32 @@ export interface StemPlayer {
 const STEM_FADE_SECONDS = 0.005
 
 function destroyTrack(track: StemTrack): void {
+  // T6-11(2026-10-30, 의뢰인 실기기 메모리 누수 재현 + Opus 5.5 서브에이전트
+  // 조사로 확정) — **재생 중인 Player를 `stop()` 없이 바로 `dispose()`하면
+  // 안 된다.** 설치된 Tone.js 15.1.22 소스로 확인: `Player._start()`는
+  // 루프가 아닌 재생을 시작할 때 항상 종료 시각(`buffer.duration - offset`
+  // 뒤)에 네이티브 정지를 예약해두는데(`ToneBufferSource.start()` →
+  // `OneShotSource._stopGain()` → `context.setTimeout(...)`), 그 타임아웃은
+  // `Context._timeouts`에 클로저로 잡혀 네이티브 `AudioBufferSourceNode`→
+  // `.buffer`(디코딩된 PCM 전체)까지 강한 참조 사슬로 묶여 있다.
+  // `Player.dispose()`/`ToneBufferSource.dispose()`는 이 타임아웃을 지우지
+  // 않고 네이티브 소스의 `.stop()`도 안 부른다 — 그래서 재생 중에 바로
+  // dispose()하면 **그 버퍼가 "원래 자연히 끝났어야 할 시각"(노래 끝, 최대
+  // 수 분)까지 메모리에 그대로 남는다.** 곡을 떠날 때 이 함수가 세션의
+  // `stop()`보다 먼저 불릴 수도 있어(React effect cleanup 순서가 보장 안 됨)
+  // 재생 중 dispose 경로가 실제로 늘 걸릴 수 있다 — 의뢰인이 Safari 메모리
+  // 타임라인으로 곡 전환 시 계단식 누적을 실측으로 확인, 원인은 Tone.js
+  // GitHub 소스(Player.ts/ToneBufferSource.ts/OneShotSource.ts)로 직접 대조해
+  // 확정(work/T6-11/plan.md 참고). stop()을 먼저 부르면 `_stopGain()`이 그
+  // 긴 타임아웃을 지우고 짧은(수백 ms) 것으로 교체해주므로, 그 다음에
+  // dispose()하면 버퍼가 바로 해제 대상이 된다 — 이미 멈춰 있던 트랙에
+  // stop()을 또 불러도 무해(기존 stopAllTracks()와 같은 전제, try/catch로
+  // 방어).
+  try {
+    track.player.stop()
+  } catch {
+    /* 무시 — 이미 멈춰 있었을 수 있음, dispose()는 계속 진행 */
+  }
   try {
     track.player.dispose()
   } catch {

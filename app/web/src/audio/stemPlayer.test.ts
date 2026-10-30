@@ -191,6 +191,26 @@ describe('loadStemBufferPool', () => {
     expect(playerInstances[0].disposed).toBe(true)
     expect(pool.destroyed).toBe(true)
   })
+
+  it('destroy()는 dispose() 전에 반드시 stop()을 먼저 부른다(실측 회귀 — 재생 중 stop() 없이 바로 dispose()하면 Tone.js가 예약해둔 네이티브 정지 타임아웃이 버퍼 전체를 노래 끝날 때까지 물고 있는 메모리 누수, Opus 5.5 서브에이전트 조사 + Tone.js 15.1.22 Player.ts/ToneBufferSource.ts/OneShotSource.ts 소스로 확인)', async () => {
+    const pool = await loadStemBufferPool([{ kind: 'stem_drums', url: 'http://x/drums.mp3' }], {
+      bufferTempoRatio: 1,
+    })
+
+    pool.destroy()
+
+    expect(playerInstances[0].stopCalls.length).toBeGreaterThan(0)
+    expect(playerInstances[0].disposed).toBe(true)
+  })
+
+  it('이미 멈춰 있던(재생 안 한) 트랙도 destroy()가 stop()을 호출해도 안 터진다', async () => {
+    const pool = await loadStemBufferPool([{ kind: 'stem_drums', url: 'http://x/drums.mp3' }], {
+      bufferTempoRatio: 1,
+    })
+
+    expect(() => pool.destroy()).not.toThrow()
+    expect(playerInstances[0].disposed).toBe(true)
+  })
 })
 
 describe('createStemPlayer', () => {
