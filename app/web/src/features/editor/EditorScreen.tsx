@@ -687,7 +687,7 @@ export function EditorScreen({
           playbackRate,
           stateRef.current.audioOffsetMs / 1000,
         )
-        session.tracks.resync(expectedSongPositionSeconds, TRACK_RESYNC_THRESHOLD_SECONDS, playbackRate)
+        session.tracks.resync(expectedSongPositionSeconds, TRACK_RESYNC_THRESHOLD_SECONDS)
       }
       rafIdRef.current = requestAnimationFrame(loop)
     }

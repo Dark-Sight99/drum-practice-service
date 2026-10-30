@@ -1118,7 +1118,7 @@ export function PracticeCanvas({
               score.audioOffsetMs / 1000, // T3-72(Q-43)
             ) +
             latencyCompensationSeconds * playbackRate
-          tracks.resync(expectedSongPositionSeconds, TRACK_RESYNC_THRESHOLD_SECONDS, playbackRate)
+          tracks.resync(expectedSongPositionSeconds, TRACK_RESYNC_THRESHOLD_SECONDS)
         }
       }
       if (renderer && !skipRenderRef.current) {

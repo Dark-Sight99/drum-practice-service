@@ -478,103 +478,24 @@ describe('createTrackPlayer', () => {
       return player
     }
 
-    // T6-10(REQ-06, Q-33) — resync()가 "임계값 넘으면 항상 즉시 seek"에서
-    // "작은 드리프트는 playbackRate로 서서히 보정, 비정상적으로 큰 드리프트만
-    // 즉시 seek"로 바뀜(실기기에서 seek 자체가 iOS 성능 문제의 원인으로 확정됨,
-    // work/T6-10/plan.md). 아래 테스트들은 새 3단계 분기(무시/소프트 보정/
-    // 하드 스냅)와 히스테리시스를 직접 검증한다.
-    it('does NOT touch currentTime or playbackRate when drift is within the entry threshold', async () => {
+    it('does NOT touch currentTime when drift is within the threshold', async () => {
       const player = await primedUnpausedPlayer(5.02)
       const setSpy = vi.spyOn(HTMLMediaElement.prototype, 'currentTime', 'set')
       setSpy.mockClear() // playFrom() 안의 초기 seek 호출은 제외하고 resync()만 본다
 
-      player.resync(5.0, 0.1, 1) // 드리프트 0.02초 < 진입 임계값 0.1초
+      player.resync(5.0, 0.1) // 드리프트 0.02초 < threshold 0.1초
 
       expect(setSpy).not.toHaveBeenCalled()
-      expect(createdAudioElements[0].playbackRate).toBe(1)
     })
 
-    it('soft-corrects via playbackRate (not a seek) when drift exceeds the entry threshold but stays under the hard-snap threshold', async () => {
+    it('corrects currentTime to the expected position when drift exceeds the threshold', async () => {
       const player = await primedUnpausedPlayer(5.5)
       const setSpy = vi.spyOn(HTMLMediaElement.prototype, 'currentTime', 'set')
       setSpy.mockClear()
 
-      // 드리프트 0.5초(실제가 기대보다 "앞서" 있음) > 진입 임계값 0.1초,
-      // < 하드 스냅 임계값(2.0초) — seek 없이 배속만 살짝 느려져야 한다.
-      player.resync(5.0, 0.1, 1)
-
-      expect(setSpy).not.toHaveBeenCalled()
-      expect(createdAudioElements[0].playbackRate).toBeLessThan(1)
-      expect(createdAudioElements[0].playbackRate).toBeGreaterThanOrEqual(1 - 0.08) // RESYNC_MAX_RATE_DELTA
-    })
-
-    it('soft-corrects in the opposite direction when the track has fallen behind', async () => {
-      const player = await primedUnpausedPlayer(4.5)
-
-      // 드리프트 -0.5초(실제가 기대보다 "뒤처져" 있음) — 배속이 더 빨라져야 한다.
-      player.resync(5.0, 0.1, 1)
-
-      expect(createdAudioElements[0].playbackRate).toBeGreaterThan(1)
-      expect(createdAudioElements[0].playbackRate).toBeLessThanOrEqual(1 + 0.08)
-    })
-
-    it('clamps the soft correction to RESYNC_MAX_RATE_DELTA even for a large-but-sub-hard-snap drift', async () => {
-      const player = await primedUnpausedPlayer(5.3) // 드리프트 0.3초 < 하드 스냅 0.5초
-      const setSpy = vi.spyOn(HTMLMediaElement.prototype, 'currentTime', 'set')
-      setSpy.mockClear()
-
-      player.resync(5.0, 0.1, 1)
-
-      expect(setSpy).not.toHaveBeenCalled() // 여전히 소프트 보정 — seek 없음
-      expect(createdAudioElements[0].playbackRate).toBeCloseTo(1 - 0.08, 5)
-    })
-
-    it('hard-snaps currentTime and resets playbackRate when drift exceeds the hard-snap threshold', async () => {
-      const player = await primedUnpausedPlayer(5.8) // 드리프트 0.8초 > 하드 스냅 0.5초
-      const setSpy = vi.spyOn(HTMLMediaElement.prototype, 'currentTime', 'set')
-      setSpy.mockClear()
-
-      player.resync(5.0, 0.1, 1)
+      player.resync(5.0, 0.1) // 드리프트 0.5초 > threshold 0.1초
 
       expect(setSpy).toHaveBeenCalledWith(5.0)
-      expect(createdAudioElements[0].playbackRate).toBe(1)
-    })
-
-    it('hysteresis: does NOT start correcting for drift between the exit and entry thresholds when not already correcting', async () => {
-      const player = await primedUnpausedPlayer(5.07) // 드리프트 0.07초: 이탈(0.05)~진입(0.1) 사이
-      const setSpy = vi.spyOn(HTMLMediaElement.prototype, 'currentTime', 'set')
-      setSpy.mockClear()
-
-      player.resync(5.0, 0.1, 1)
-
-      expect(setSpy).not.toHaveBeenCalled()
-      expect(createdAudioElements[0].playbackRate).toBe(1) // 보정 시작 안 함
-    })
-
-    it('hysteresis: keeps correcting for drift between the exit and entry thresholds once already correcting', async () => {
-      const player = await primedUnpausedPlayer(5.5)
-      // 1차 호출로 보정 상태 진입(드리프트 0.5초 > 진입 임계값).
-      player.resync(5.0, 0.1, 1)
-      expect(createdAudioElements[0].playbackRate).not.toBe(1)
-
-      // 2차 호출 — 드리프트가 0.07초(이탈 0.05~진입 0.1 사이)로 줄었다고
-      // 가정(currentTime을 직접 되돌려 시뮬레이션). 이미 보정 중이었으므로
-      // 이탈 임계값(0.05초)보다 작아지기 전까진 계속 보정 유지돼야 한다.
-      createdAudioElements[0].currentTime = 5.07
-      player.resync(5.0, 0.1, 1)
-
-      expect(createdAudioElements[0].playbackRate).not.toBe(1)
-    })
-
-    it('hysteresis: resets to basePlaybackRate once drift falls below the exit threshold', async () => {
-      const player = await primedUnpausedPlayer(5.5)
-      player.resync(5.0, 0.1, 1) // 보정 상태 진입
-      expect(createdAudioElements[0].playbackRate).not.toBe(1)
-
-      createdAudioElements[0].currentTime = 5.02 // 드리프트 0.02초 < 이탈 임계값 0.05초
-      player.resync(5.0, 0.1, 1)
-
-      expect(createdAudioElements[0].playbackRate).toBe(1)
     })
 
     it('does NOT correct when currentTime already equals the expected position (0.5x-speed unit-bug regression)', async () => {
@@ -588,10 +509,9 @@ describe('createTrackPlayer', () => {
       const setSpy = vi.spyOn(HTMLMediaElement.prototype, 'currentTime', 'set')
       setSpy.mockClear()
 
-      player.resync(0.5, 0.1, 0.5)
+      player.resync(0.5, 0.1)
 
       expect(setSpy).not.toHaveBeenCalled()
-      expect(createdAudioElements[0].playbackRate).toBe(0.5)
     })
 
     it('skips a track that failed to unlock, even with a huge drift', async () => {
@@ -601,7 +521,7 @@ describe('createTrackPlayer', () => {
       const setSpy = vi.spyOn(HTMLMediaElement.prototype, 'currentTime', 'set')
       setSpy.mockClear()
 
-      player.resync(999, 0.001, 1)
+      player.resync(999, 0.001)
 
       expect(setSpy).not.toHaveBeenCalled()
     })
@@ -613,7 +533,7 @@ describe('createTrackPlayer', () => {
       const setSpy = vi.spyOn(HTMLMediaElement.prototype, 'currentTime', 'set')
       setSpy.mockClear()
 
-      player.resync(999, 0.001, 1)
+      player.resync(999, 0.001)
 
       expect(setSpy).not.toHaveBeenCalled()
     })

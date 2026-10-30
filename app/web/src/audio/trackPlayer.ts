@@ -53,30 +53,6 @@ import * as Tone from 'tone'
 // T6-6 — getIOSStemAudioContext()도 같은 모듈에서 import(iOS 전용 스템 재생 컨텍스트 분리).
 import { getIOSStemAudioContext, isIOS } from './platformAudioContext'
 
-// T6-10(REQ-06, Q-33, work/T6-10/plan.md) — resync()의 소프트 보정(playbackRate
-// 미세 조정) 관련 상수. 전부 추정치로 시작 — 실기기로 "배속 변화가 거슬리는지/
-// 동기화가 잘 맞는지" 확인 후 조정될 수 있음(이 파일의 resync() 주석 참고).
-/** 소프트 보정 시 기준 배속에서 벗어날 수 있는 최대 비율(±8%). */
-const RESYNC_MAX_RATE_DELTA = 0.08
-/** 드리프트(초) → 배속 보정 비율로 바꾸는 비례 상수. */
-const RESYNC_CORRECTION_GAIN = 0.5
-/** 이미 보정 중일 때(히스테리시스 "이탈" 판정)의 임계값 = 진입 임계값 × 이 값. */
-const RESYNC_EXIT_THRESHOLD_FACTOR = 0.5
-/** "지금 보정 중인지"를 `element.playbackRate`와 `basePlaybackRate`의 차이로
- * 판별할 때 쓰는 허용오차(부동소수점 비교용, 실질적으로는 0과 동일하게 취급). */
-const RESYNC_RATE_EPSILON = 0.001
-/** 이 이상 벗어나면 기존처럼 즉시 seek(루프 경계는 scorePlayer.ts가 playFrom()으로
- * 별도 처리하므로 이건 그 외의 "진짜 큰" 격차용 — 특히 iOS에서 재생 시작 직후
- * 한 번 생기는 큰 초기 오프셋(실기기 확인, 2026-10-30)은 소프트 보정(최대 ±8%)
- * 으로 따라잡기엔 너무 느려서(수십 초 소요) 체감상 "계속 늦게 들림"이 됨 —
- * 애초 설계안의 2.0초는 너무 높았음(실기기 재현으로 발견, 작업 기록 참고).
- * 0.5초로 낮춰, 그런 큰 오프셋은 여전히 즉시 한 번 점프로 바로잡되, 재생 중
- * 반복적으로 쌓이는 작은(0.1~0.5초) 자연 드리프트만 소프트 보정 대상으로
- * 남긴다 — 원래 성능 문제의 원인은 "같은 작은 드리프트가 0.75초마다 계속
- * 재발해 매번 seek되던 것"이었지(work/T6-10/plan.md), seek 자체가 거리와
- * 무관하게 무거운 건 아닐 수 있어 이 구분이 중요. */
-const RESYNC_HARD_SNAP_THRESHOLD_SECONDS = 0.5
-
 export interface TrackSource {
   kind: string
   url: string
@@ -346,38 +322,14 @@ export interface TrackPlayer {
    * 분리 트랙만 다시 들리는 모순이 생김(모드C 3라운드 C-008 지적). */
   seekTo(songPositionSeconds: number, playbackRate: number): void
   /** 주기적 호출 — 기대 위치(원곡 파일 기준 초, `audioTrackPositionSeconds`와
-   * 같은 단위)와 실제 위치(`currentTime`, 이미 원곡 파일 기준 초)의 드리프트를
-   * 보정. 모드A 지적(Medium) 반영: `currentTime`은 이미 원곡 파일 기준 초라
-   * playbackRate를 또 곱하면 안 됨(1배속이 아닐 때 비교 단위가 안 맞아 매번
-   * 잘못 보정하는 버그였음).
-   *
-   * T6-10(REQ-06, Q-33) — 예전엔 임계값을 넘기만 하면 항상 `currentTime`을
-   * 강제 점프(seek)시켰는데, 실기기 라이브 토글 실험으로 **이 seek 자체가
-   * iOS에서(Web Audio 우회 경로를 탄 엘리먼트) fps를 크게 떨어뜨리는
-   * 원인임을 확정**(intent/07-open-questions.md Q-33). 루프 경계 같은 큰
-   * 불연속은 이 함수가 아니라 `scorePlayer.ts`가 루프 시작 지점에 맞춰
-   * `playFrom()`을 직접 스케줄해서 이미 따로 처리하고 있음(코드 확인됨,
-   * work/T6-10/plan.md "2단계 보정" 참고) — 그래서 이 함수는 재생 중
-   * 자연적으로 쌓이는 "작은" 드리프트만 상대하면 되고, 그런 작은 드리프트는
-   * seek 대신 `playbackRate`를 기준 배속에서 아주 살짝(±8% 이내) 조정해
-   * 몇 주기에 걸쳐 서서히 따라잡는다(`element.preservesPitch`가 이미
-   * `playFrom()`/`seekTo()`에서 true로 설정돼 있어 음높이는 안 바뀜). 드리프트가
-   * `thresholdSeconds`를 한참 넘는(2초, 정상 동작에선 거의 발생 안 해야 하는)
-   * 비정상적인 경우에만 기존처럼 즉시 seek — 순수 방어선.
-   *
-   * `basePlaybackRate`는 호출자가 이미 계산해 들고 있는 "지금 맞춰야 할 배속"
-   * (예: `playbackBpm / score.meta.bpm`) — 이 값 기준으로 **매 호출마다 새로**
-   * 보정량을 계산하므로(이전 호출의 보정 위에 누적 안 됨) 보정이 계속
-   * 가속되는 버그가 없다. 경계값 근처에서 보정이 매 호출(폴링 간격)마다
-   * 켜졌다 꺼졌다 반복하지 않도록, "지금 보정 중인지"(`element.playbackRate`가
-   * `basePlaybackRate`와 다른지로 판별 — 별도 상태 불필요)에 따라 진입
-   * 임계값(`thresholdSeconds`)과 이탈 임계값(그 절반)을 다르게 쓰는
-   * 히스테리시스를 둔다. */
-  resync(
-    expectedSongPositionSeconds: number,
-    thresholdSeconds: number,
-    basePlaybackRate: number,
-  ): void
+   * 같은 단위)와 실제 위치(`currentTime`, 이미 원곡 파일 기준 초)가
+   * thresholdSeconds를 넘게 벌어지면 currentTime을 보정(루프 경계의 큰 점프
+   * 교정용 — work/T3-3/plan.md §5, threshold는 ±30ms보다 느슨하게 둬서 고정
+   * 지연을 상시 재보정하지 않음). 모드A 지적(Medium) 반영: `currentTime`은
+   * 이미 원곡 파일 기준 초라 playbackRate를 또 곱하면 안 됨(1배속이 아닐 때
+   * 비교 단위가 안 맞아 매번 잘못 보정하는 버그였음) — 그래서 playbackRate를
+   * 받지 않는다. */
+  resync(expectedSongPositionSeconds: number, thresholdSeconds: number): void
   /** T3-4(REQ-05) — 믹서가 mute/solo까지 반영해 계산한 "최종 게인"(0~1)을
    * 그대로 적용(T3-12부터 GainNode 기반 — 선형 0~1 단위라 변환 불필요는
    * 그대로 유지). 이 모듈은 mute/solo 개념을 모른다(책임 분리, work/T3-4/plan.md §3).
@@ -447,33 +399,13 @@ export function createTrackPlayer(pool: AudioTrackPool): TrackPlayer {
     }
   }
 
-  function resync(
-    expectedSongPositionSeconds: number,
-    thresholdSeconds: number,
-    basePlaybackRate: number,
-  ): void {
+  function resync(expectedSongPositionSeconds: number, thresholdSeconds: number): void {
     for (const track of tracks) {
       if (!track.unlocked || track.element.paused) continue
       const actualSongPositionSeconds = track.element.currentTime
-      const driftSeconds = actualSongPositionSeconds - expectedSongPositionSeconds
-      const absDriftSeconds = Math.abs(driftSeconds)
-      const isCorrecting =
-        Math.abs(track.element.playbackRate - basePlaybackRate) > RESYNC_RATE_EPSILON
-      const effectiveThresholdSeconds = isCorrecting
-        ? thresholdSeconds * RESYNC_EXIT_THRESHOLD_FACTOR
-        : thresholdSeconds
-
-      if (absDriftSeconds > RESYNC_HARD_SNAP_THRESHOLD_SECONDS) {
+      const driftSeconds = Math.abs(actualSongPositionSeconds - expectedSongPositionSeconds)
+      if (driftSeconds > thresholdSeconds) {
         track.element.currentTime = Math.max(0, expectedSongPositionSeconds)
-        track.element.playbackRate = basePlaybackRate
-      } else if (absDriftSeconds > effectiveThresholdSeconds) {
-        const delta = Math.min(
-          RESYNC_MAX_RATE_DELTA,
-          Math.max(-RESYNC_MAX_RATE_DELTA, -driftSeconds * RESYNC_CORRECTION_GAIN),
-        )
-        track.element.playbackRate = basePlaybackRate * (1 + delta)
-      } else {
-        track.element.playbackRate = basePlaybackRate
       }
     }
   }
