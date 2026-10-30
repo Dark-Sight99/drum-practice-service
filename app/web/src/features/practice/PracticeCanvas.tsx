@@ -1044,6 +1044,11 @@ export function PracticeCanvas({
   // ref는 loop()가 매 프레임 읽는 값(리렌더 유발 안 함), state는 버튼 표시용.
   const skipLoopBodyRef = useRef(false)
   const [skipLoopBodyLabel, setSkipLoopBodyLabel] = useState(false)
+  // T6-9 추가 — "계산 끄기"(루프 전체 건너뛰기)가 렉을 없앴음(실기기 확인 완료) —
+  // 범위를 좁히려고 renderer.render() 호출(+그 결과로 하는 setActiveHandByPiece)만
+  // 따로 끌 수 있는 두 번째 토글 추가. resync()·진행바·시간표시는 그대로 둠.
+  const skipRenderRef = useRef(false)
+  const [skipRenderLabel, setSkipRenderLabel] = useState(false)
 
   useEffect(() => {
     // T6-1(성능, 2026-10-30, Q-33 재착수) — 예전엔 getMasterClock()을 loop()
@@ -1105,7 +1110,7 @@ export function PracticeCanvas({
           tracks.resync(expectedSongPositionSeconds, TRACK_RESYNC_THRESHOLD_SECONDS)
         }
       }
-      if (renderer) {
+      if (renderer && !skipRenderRef.current) {
         // R/L 표시 제거(2026-10-25, 의뢰인 피드백 "안 맞는 게 너무 많아서") — 자동
         // 추천 손 배정 자체가 부정확해 레인/킷 어느 쪽도 더 이상 표시하지 않음.
         const rendered = renderer.render(
@@ -2433,6 +2438,27 @@ export function PracticeCanvas({
                   }}
                 >
                   {skipLoopBodyLabel ? '계산 꺼짐' : '계산 끄기'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    skipRenderRef.current = !skipRenderRef.current
+                    setSkipRenderLabel(skipRenderRef.current)
+                  }}
+                  style={{
+                    position: 'absolute',
+                    top: 46,
+                    right: 4,
+                    padding: '2px 6px',
+                    background: skipRenderLabel ? 'var(--danger)' : 'rgba(0,0,0,0.6)',
+                    color: 'var(--text)',
+                    fontSize: '0.7em',
+                    borderRadius: 4,
+                    border: 'none',
+                    pointerEvents: 'auto',
+                  }}
+                >
+                  {skipRenderLabel ? '그리기 꺼짐' : '그리기만 끄기'}
                 </button>
               </div>
               <div
