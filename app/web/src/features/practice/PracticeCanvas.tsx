@@ -1049,6 +1049,11 @@ export function PracticeCanvas({
   // 따로 끌 수 있는 두 번째 토글 추가. resync()·진행바·시간표시는 그대로 둠.
   const skipRenderRef = useRef(false)
   const [skipRenderLabel, setSkipRenderLabel] = useState(false)
+  // T6-9 추가 2차 — "그리기만 끄기"는 켜고 꺼도 렉 동일(render()/setActiveHandByPiece
+  // 무죄 확정, 실기기 확인 완료). 남은 용의자(진행바·시간표시 DOM 직접 쓰기)만
+  // 분리하는 세 번째 토글.
+  const skipDomWritesRef = useRef(false)
+  const [skipDomWritesLabel, setSkipDomWritesLabel] = useState(false)
 
   useEffect(() => {
     // T6-1(성능, 2026-10-30, Q-33 재착수) — 예전엔 getMasterClock()을 loop()
@@ -1146,6 +1151,10 @@ export function PracticeCanvas({
           lastActiveMapRef.current = active
           setActiveHandByPiece(active)
         }
+      }
+      if (skipDomWritesRef.current) {
+        rafIdRef.current = requestAnimationFrame(loop)
+        return
       }
       // 마디 진행바 — activePieces와 같은 이유로, 정수 % 단위로 반올림해 실제로
       // 바뀔 때만 setState한다(그렇지 않으면 이 역시 매 프레임 리렌더를 유발해
@@ -2459,6 +2468,27 @@ export function PracticeCanvas({
                   }}
                 >
                   {skipRenderLabel ? '그리기 꺼짐' : '그리기만 끄기'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    skipDomWritesRef.current = !skipDomWritesRef.current
+                    setSkipDomWritesLabel(skipDomWritesRef.current)
+                  }}
+                  style={{
+                    position: 'absolute',
+                    top: 68,
+                    right: 4,
+                    padding: '2px 6px',
+                    background: skipDomWritesLabel ? 'var(--danger)' : 'rgba(0,0,0,0.6)',
+                    color: 'var(--text)',
+                    fontSize: '0.7em',
+                    borderRadius: 4,
+                    border: 'none',
+                    pointerEvents: 'auto',
+                  }}
+                >
+                  {skipDomWritesLabel ? '진행바 꺼짐' : '진행바만 끄기'}
                 </button>
               </div>
               <div
