@@ -149,7 +149,7 @@ const NOTE_HALO_PADDING = 2
  * "더 큰 도형"이었는데, 이 방식은 "경로 중심 스트로크"라 테두리 두께가
  * 약간 다르게 보일 수 있음) — 구현 후 데스크톱 스크린샷으로 비교 확인
  * 필요(아래 테스트 계획). */
-function drawNoteShape(
+function drawNoteShapeToContext(
   ctx: CanvasRenderingContext2D,
   shape: NoteShape,
   x: number,
@@ -238,6 +238,43 @@ function drawNoteShape(
       break
     }
   }
+}
+
+// T6-8(성능, Q-33) — T6-7(halo 경로 1회화)로도 실기기 페인트 비중이 여전히
+// 압도적(77~87%)이었음 — 벡터 경로를 매 프레임 수백 개씩 다시 rasterize하는
+// 비용 자체가 문제였다는 뜻. 웹 기반 "작은 도형 다수를 매 프레임 그리는"
+// 상황의 표준 해법(스프라이트 캐싱) 적용: 모양·색(둘 다 유한한 조합 —
+// `NoteShape` 10종 × `pieceColor()`가 돌려주는 피스별 색 9종 안팎)별로
+// 오프스크린 캔버스에 **딱 한 번만** 벡터로 그려두고, 매 프레임은 그 결과
+// 이미지를 `drawImage()`로 복사해 붙이기만 한다 — 벡터 rasterize가 아니라
+// 이미지 블릿이라 WebKit 캔버스에서 훨씬 쌈(업계 표준 기법, 특히 iOS
+// Safari처럼 캔버스 rasterize 비용이 큰 엔진에서 효과가 큼). 모든 도형·링
+// 변형을 포함해도 안전하게 담을 수 있는 정사각형 한 칸에 중앙 정렬해 그린다
+// (바 모양 가로폭 size*1.8이 가장 넓은 경우라 size*2+여유로 전부 커버).
+// 모듈 스코프 캐시 — 모양·색 조합은 곡과 무관하게 앱 전체에서 유한하므로
+// `readPieceColor()`의 `pieceColorCache`와 같은 수명(계속 유지, 메모리 부담
+// 무시할 수준 — 최대 수십 개의 작은 비트맵).
+const noteSpriteCache = new Map<string, HTMLCanvasElement>()
+
+function getNoteSprite(
+  shape: NoteShape,
+  size: number,
+  color: string,
+  haloColor: string,
+): HTMLCanvasElement {
+  const key = `${shape}|${size}|${color}|${haloColor}`
+  const cached = noteSpriteCache.get(key)
+  if (cached) return cached
+  const side = Math.ceil(size * 2 + NOTE_HALO_PADDING * 2 + 4)
+  const sprite = document.createElement('canvas')
+  sprite.width = side
+  sprite.height = side
+  const sctx = sprite.getContext('2d')
+  if (sctx) {
+    drawNoteShapeToContext(sctx, shape, side / 2, side / 2, size, color, haloColor)
+  }
+  noteSpriteCache.set(key, sprite)
+  return sprite
 }
 
 /** 정렬된 배열에서 `keyOf(item) >= target`인 첫 인덱스를 이진탐색으로 찾는다
@@ -389,7 +426,12 @@ export function createLaneRenderer(
       // 노트 단위로 "도형→글자"를 번갈아 그리던 기존 방식은 간격이 글자 높이보다
       // 좁으면 다음 노트의 도형이 직전 노트의 글자를 그대로 덮어 지워버렸다.
       // 글자를 항상 모든 도형보다 나중(위 레이어)에 그리면 이 문제가 없다.
-      const noteSize = Math.min(laneWidth * 0.5, 28)
+      // T6-8 — 정수로 반올림(스프라이트 캐시 키에 쓰임, 아래 getNoteSprite 참고).
+      // `canvas.clientWidth` 기반 계산이라 프레임마다 소수점 단위로 미세하게
+      // 흔들릴 수 있는데, 반올림 없이 그대로 캐시 키에 쓰면 거의 매 프레임
+      // 캐시가 깨져(사실상 항상 miss) 캔버스를 계속 새로 만드는 역효과가 남
+      // (실기기 이전에 데스크톱에서 먼저 실측 확인됨 — 실측 없이 넘어가지 않음).
+      const noteSize = Math.round(Math.min(laneWidth * 0.5, 28))
       visibleNoteCount = 0
       // T3-15(성능) — 원래 `activePieces()`/`activeHandByPiece()`(layout.ts)를
       // 따로 호출해 `score.notes` 전체(이 레인 루프와 별개로, 그리기 가시창
@@ -471,15 +513,8 @@ export function createLaneRenderer(
       // 우선권을 갖는 통념과도 일치.
       for (let i = visibleNoteCount - 1; i >= 0; i--) {
         const v = visibleNotePool[i]
-        drawNoteShape(
-          ctx,
-          v.shape,
-          v.laneCenterX,
-          v.shapeY,
-          noteSize,
-          v.color,
-          options.stickingTextColor,
-        )
+        const sprite = getNoteSprite(v.shape, noteSize, v.color, options.stickingTextColor)
+        ctx.drawImage(sprite, v.laneCenterX - sprite.width / 2, v.shapeY - sprite.height / 2)
       }
       // REQ-12 — 노트 위 R/L(/RF/LF) 글자. 자동 추천 값은 반투명
       // (intent/08-design.md §3 "자동 추천 값은 50% 투명도"), 사용자 지정은 불투명.
