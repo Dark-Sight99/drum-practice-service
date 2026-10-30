@@ -512,7 +512,15 @@ export function PracticeCanvas({
   }, [audioLatencyCompensationMs])
   const [latencyDraft, setLatencyDraft] = useState('')
   const [isEditingLatency, setIsEditingLatency] = useState(false)
-  const latencyFieldValue = isEditingLatency ? latencyDraft : String(audioLatencyCompensationMs)
+  // Q-44(2026-10-30) — iOS 화면 키보드는 숫자 전용 키패드(type="number"든
+  // inputMode="numeric"/"decimal"이든)에 마이너스 키 자체가 없음(WebKit
+  // Bugzilla #193825·#200226로 확인, type 변경으로 해결 안 되는 WebKit 자체
+  // 제약). 그래서 부호(±)는 별도 버튼으로 토글하고, 이 입력칸은 항상
+  // 음수 없는 "크기"만 다룬다 — 실제 저장값(audioLatencyCompensationMs)은
+  // 그대로 부호 있는 수.
+  const latencyFieldValue = isEditingLatency
+    ? latencyDraft
+    : String(Math.abs(audioLatencyCompensationMs))
 
   // T3-16-feedback-6(네트워크, 2026-10-26, work/T3-16-feedback-6/plan.md) —
   // T3-16-feedback-3(단순 fetch() 프리페치)을 적용한 뒤에도 맥 네트워크
@@ -1773,16 +1781,23 @@ export function PracticeCanvas({
           onChange={(e) => setPlaybackBpm(clampBpm(Number(e.target.value)))}
           disabled={isPlaying || isPaused}
         />
+        {/* Q-44(2026-10-30, 의뢰인 iOS 실기기 발견) — `type="number"`는 iOS
+         * Safari에서 탭 포커스·스피너 동작이 말썽이 많은 것으로 알려진 타입
+         * (WebKit Bugzilla 사례 다수). `type="text"` + `inputMode="numeric"`
+         * 로 바꾸면 그 문제를 피하면서도 숫자 전용 키패드는 그대로 뜬다(MDN
+         * 공식 — inputmode="numeric" 문서: "숫자 키패드가 필요할 때" 권장
+         * 값). BPM은 항상 양수라 이 조합만으로 충분(음수 입력 문제 없음 —
+         * 아래 오디오 지연 보정과 다른 점, 그쪽은 음수가 필요해 별도 처리). */}
         <input
-          type="number"
-          min={minBpm}
-          max={maxBpm}
+          type="text"
+          inputMode="numeric"
+          pattern="[0-9]*"
           value={bpmFieldValue}
           onFocus={() => {
             setBpmDraft(String(playbackBpm))
             setIsEditingBpm(true)
           }}
-          onChange={(e) => setBpmDraft(e.target.value)}
+          onChange={(e) => setBpmDraft(e.target.value.replace(/[^0-9]/g, ''))}
           onBlur={(e) => {
             setPlaybackBpm(clampBpm(Number(e.target.value)))
             setIsEditingBpm(false)
@@ -1824,34 +1839,52 @@ export function PracticeCanvas({
        * 재생부터 적용됨을 혼동하지 않게). */}
       <label style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
         오디오 지연 보정
+        {/* Q-44(2026-10-30) — 부호 토글 버튼. 음수(소리를 늦춤)/양수(소리를
+         * 당김) 전환만 담당 — 크기는 오른쪽 숫자칸이 담당(아래). 0일 때는
+         * 부호가 의미 없지만(±0 동일) 눌러도 안전(0 그대로). */}
+        <button
+          type="button"
+          className="settings-trigger"
+          onClick={() => setAudioLatencyCompensationMs((ms) => -ms)}
+          disabled={isPlaying || isPaused}
+          aria-label={
+            audioLatencyCompensationMs < 0
+              ? '마이너스(소리를 늦춤) — 눌러서 플러스로 전환'
+              : '플러스(소리를 당김) — 눌러서 마이너스로 전환'
+          }
+          title="부호 전환(+/-)"
+          style={{ width: 28 }}
+        >
+          {audioLatencyCompensationMs < 0 ? '−' : '+'}
+        </button>
+        {/* Q-44(2026-10-30, 의뢰인 iOS 실기기 발견) — `type="number"`를 BPM과
+         * 같은 이유로 `type="text"` + `inputMode="numeric"`로 교체. 다만
+         * 이 칸은 음수를 안 다룬다(위 부호 버튼이 담당) — iOS 화면 키보드는
+         * 숫자 전용 키패드에 마이너스 키가 아예 없어서(위 latencyFieldValue
+         * 코멘트 참고) 음수까지 한 칸에서 타이핑하게 두면 못 치는 상태가
+         * 그대로 남는다. */}
         <input
-          type="number"
-          min={AUDIO_LATENCY_COMPENSATION_MIN_MS}
-          max={AUDIO_LATENCY_COMPENSATION_MAX_MS}
-          step={10}
+          type="text"
+          inputMode="numeric"
+          pattern="[0-9]*"
           value={latencyFieldValue}
           onFocus={() => {
-            setLatencyDraft(String(audioLatencyCompensationMs))
+            setLatencyDraft(String(Math.abs(audioLatencyCompensationMs)))
             setIsEditingLatency(true)
           }}
-          onChange={(e) => setLatencyDraft(e.target.value)}
+          onChange={(e) => setLatencyDraft(e.target.value.replace(/[^0-9]/g, ''))}
           onBlur={(e) => {
-            const parsed = Number(e.target.value)
-            setAudioLatencyCompensationMs(
-              Number.isFinite(parsed)
-                ? Math.min(
-                    AUDIO_LATENCY_COMPENSATION_MAX_MS,
-                    Math.max(AUDIO_LATENCY_COMPENSATION_MIN_MS, parsed),
-                  )
-                : 0,
-            )
+            const digits = e.target.value.replace(/[^0-9]/g, '')
+            const magnitude = digits === '' ? 0 : Number(digits)
+            const clampedMagnitude = Math.min(AUDIO_LATENCY_COMPENSATION_MAX_MS, magnitude)
+            setAudioLatencyCompensationMs((ms) => (ms < 0 ? -clampedMagnitude : clampedMagnitude))
             setIsEditingLatency(false)
           }}
           onKeyDown={(e) => {
             if (e.key === 'Enter') e.currentTarget.blur()
           }}
           disabled={isPlaying || isPaused}
-          style={{ width: 64 }}
+          style={{ width: 56 }}
         />
         <span style={{ color: 'var(--text-muted)' }}>ms</span>
         {/* 2026-10-28(의뢰인 요청, 3차) — "기본값이 몇인지 모른다"는 지적 —
