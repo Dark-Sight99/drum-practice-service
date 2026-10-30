@@ -42,6 +42,20 @@ export interface StemPlayer {
   attach(timing: StemSessionTiming): void
   /** 이벤트 구독 해제 + 즉시 정지. 여러 번 불러도 안전. */
   detach(): void
+  /** T6-11 Step 2(Codex 모드C 1차 C-005 반영) — Transport의 `start`/`loopStart`
+   * 이벤트는 "그 네이티브 메커니즘이 스스로 위치를 바꾸는 순간"에만 발화한다.
+   * `PracticeCanvas.tsx`의 빨리감기/되감기(`handleSeek`)나 편집 화면에서 넘어온
+   * 핸드오프처럼, 호출자가 `transport.seconds = X`를 **직접** 대입해 Transport
+   * 모르게 위치를 점프시키는 경우(`clock.setPositionSeconds()`, work/T6-11/
+   * plan.md "A-B 루프 구간 변경" 참고)엔 그 이벤트가 전혀 안 뜬다 — 그 직후
+   * 호출자가 명시적으로 이걸 불러야 지금 Transport 위치 기준으로 다시 계산해
+   * 재시작한다. (반대로 A-B 구간의 "값"만 바꾸고(`setLoopPoints`) 현재 위치는
+   * 안 건드리는 경우는 호출 불필요 — Transport가 다음 루프 경계에서 스스로
+   * `loopStart`를 발화해 이미 올바르게 처리됨, 위 plan.md 참고.) 일시정지
+   * 중에는 호출하면 안 된다(소리가 의도치 않게 다시 시작됨) — 호출자가
+   * `isPaused`로 가드. 폴링이 아니라 "위치가 바뀐 바로 그 시점에 1회"만 부르는
+   * 것이므로 옛 `resync()`의 상시 폴링과는 다르다. */
+  restartFromCurrentPosition(): void
   /** 믹서 최종 게인(0~1, mute/solo까지 반영된 값). 없는 kind는 조용히 무시
    * (기존 `trackPlayer.ts`와 같은 계약 — stem_music이 없는 곡 등). */
   setChannelGain(kind: string, gain: number): void
@@ -244,6 +258,9 @@ export function createStemPlayer(pool: StemBufferPool): StemPlayer {
       timing = null
       gateSeconds = 0
       pendingGateOpenAt = null
+    },
+    restartFromCurrentPosition() {
+      handleTransportStart(Tone.immediate())
     },
     setChannelGain(kind, gain) {
       const track = pool.tracks.find((t) => t.kind === kind)

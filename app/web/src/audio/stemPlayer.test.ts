@@ -284,6 +284,27 @@ describe('createStemPlayer', () => {
     expect(playerInstances[1].stopCalls).toEqual([5])
   })
 
+  it('restartFromCurrentPosition()은 지금 Transport 위치 기준으로 즉시 재시작한다(Codex C-005 — Transport 모르게 점프한 뒤 호출자가 명시적으로 부름)', async () => {
+    const pool = await makePool()
+    const player = createStemPlayer(pool)
+    player.attach(timing({ songStartSeconds: 0 }))
+    immediateMock.mockReturnValue(10)
+    transportMock.getSecondsAtTime.mockReturnValue(20) // handleSeek() 등으로 점프된 새 위치
+
+    player.restartFromCurrentPosition()
+
+    expect(playerInstances[0].stopCalls).toEqual([10])
+    expect(playerInstances[0].startCalls).toEqual([{ time: 10, offset: 20 }])
+  })
+
+  it('restartFromCurrentPosition()은 attach() 전엔 아무 일도 안 한다', async () => {
+    const pool = await makePool()
+    const player = createStemPlayer(pool)
+
+    expect(() => player.restartFromCurrentPosition()).not.toThrow()
+    expect(playerInstances[0].startCalls).toHaveLength(0)
+  })
+
   it('새 start 이벤트가 오면 기존 재생 중인 소스를 먼저 stop()하고 새로 start()한다(모드C C-001 — 멱등 재적용)', async () => {
     const pool = await makePool()
     const player = createStemPlayer(pool)

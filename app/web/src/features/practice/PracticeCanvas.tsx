@@ -18,20 +18,19 @@ import {
   type LucideIcon,
 } from 'lucide-react'
 import {
-  audioTrackPositionSeconds,
   barDurationSeconds,
   barIndexForSeconds,
   barIndexForTick,
   CHANNEL_KEYS,
-  createAudioTrackPool,
   createDrumVoices,
   createMetronome,
-  createTrackPlayer,
+  createStemPlayer,
   defaultMixerState,
   disposeDrumVoices,
   effectiveGain,
   getMasterClock,
   isMusicMuted,
+  loadStemBufferPool,
   metronomeGainToDb,
   MUSIC_STEM_KEYS,
   musicVolume,
@@ -41,7 +40,6 @@ import {
   setMusicMuted,
   setMusicVolume,
   toggleDrumlessPreset,
-  type AudioTrackPool,
   type ChannelKey,
   type ChannelState,
   type DrumVoiceMap,
@@ -49,7 +47,8 @@ import {
   type Metronome,
   type MixerState,
   type PlaybackHandle,
-  type TrackPlayer,
+  type StemBufferPool,
+  type StemPlayer,
 } from '../../audio'
 import { fetchMixerSetting, saveMixerSetting } from '../../api/auth'
 import { songAudioUrl, type SongSummary } from '../../api/songs'
@@ -67,12 +66,11 @@ import { useCompactHeaderLayout } from '../../useCompactHeaderLayout'
  * 호출(handlePlay)이 같은 값을 써야 하므로 상수로 공유한다. */
 const COUNT_IN_BARS = 1
 
-// T3-3(REQ-04, work/T3-3/plan.md §5) — 느슨한 값(최종 확정 아님, 실기기 QA로
-// 조정 가능). ±30ms처럼 빡빡하게 두면 T0-5가 실측한 "고정 지연처럼 보이는
-// 어긋남"을 매번 다시 감지해 끊어 재생하는(stutter) 역효과를 낼 위험이 있어,
-// "루프 경계 같은 큰 점프"만 잡고 고정 지연 수준은 상시 보정하지 않게 한다.
-const TRACK_RESYNC_INTERVAL_MS = 750
-const TRACK_RESYNC_THRESHOLD_SECONDS = 0.1
+// T3-3(REQ-04) → T6-11(REQ-06, Q-33, work/T6-11/plan.md)에서 이 폴링 기반
+// 리싱크 자체를 없앴다 — StemPlayer는 Transport 네이티브 이벤트를 직접
+// 구독해 스스로 따라가므로(resync() 없이), 여기서 750ms마다 드리프트를
+// 재보던 로직이 통째로 불필요해졌다(옛 TRACK_RESYNC_INTERVAL_MS/
+// TRACK_RESYNC_THRESHOLD_SECONDS 상수와 아래 rAF 루프 안의 호출부 삭제).
 
 // 2026-10-28(의뢰인 요청) — 블루투스 이어폰 등 출력 장치 자체의 물리적 지연
 // (보통 100~300ms, 기기·코덱마다 다름)을 보정하는 값. 기기별 특성이라
@@ -456,7 +454,7 @@ export function PracticeCanvas({
   const playbackRef = useRef<{
     handle: PlaybackHandle
     voices: DrumVoiceMap
-    tracks: TrackPlayer | null
+    tracks: StemPlayer | null
     // T3-4(REQ-05) — 신스 드럼 9종이 공용으로 거치는 게인(한 값으로 전체
     // 조절). Metronome은 이번에 처음 재생 흐름에 연결됨(work/T3-4/plan.md §1).
     synthGain: Tone.Gain
@@ -541,7 +539,7 @@ export function PracticeCanvas({
   // "현재 곡"의 상태를 자동으로 분리한다(다른 곡의 로딩 상태를 잘못 false로
   // 내리는 일이 없음) — ref 대입뿐 아니라 `setAudioTracksLoading` 호출도
   // 전부 이 가드 뒤에서만 한다.
-  const audioTrackPoolRef = useRef<AudioTrackPool | null>(null)
+  const audioTrackPoolRef = useRef<StemBufferPool | null>(null)
   const [audioTracksLoading, setAudioTracksLoading] = useState(false)
   // 2026-10-29(의뢰인 요청) — "음원을 못 받았으면 다시 시도해서 받게 하자,
   // 신스 드럼만 재생해봤자 드럼 소리만 날 뿐이다" — 실패해도 신스 폴백으로
@@ -564,7 +562,14 @@ export function PracticeCanvas({
     if (stemKinds.length === 0) return // MIDI-only 곡 등 — 만들 트랙 자체가 없음
     let cancelled = false
     setAudioTracksLoading(true)
-    createAudioTrackPool(stemKinds.map((kind) => ({ kind, url: songAudioUrl(songId, kind) })))
+    // T6-11 Step 2(work/T6-11/plan.md) — 백엔드 배속 변환 API(Step 3) 연결
+    // 전까지는 개발 확인용으로 원본 버퍼를 그대로 쓴다(bufferTempoRatio=1) —
+    // 네이티브 playbackRate가 그대로 재생 속도가 돼 배속 변경 시 피치가
+    // 바뀌는 건 알려진 임시 제약(REQ-04 피치 보존은 Step 3에서 복원).
+    loadStemBufferPool(
+      stemKinds.map((kind) => ({ kind, url: songAudioUrl(songId, kind) })),
+      { bufferTempoRatio: 1 },
+    )
       .then((pool) => {
         if (cancelled) {
           // 이미 다른 곡으로 넘어갔거나 화면을 떠남 — 이 결과는 안 쓰고
@@ -574,11 +579,6 @@ export function PracticeCanvas({
         }
         audioTrackPoolRef.current = pool
         setAudioTracksLoading(false)
-        // T6-5(진단용 임시, 2026-10-30) — 샘플레이트를 44100으로 맞췄는데도 렉이
-        // 그대로라, T6-4와 같은 방식으로 다시 한번 개별 트랙을 콘솔에서 직접
-        // 조작해 범위를 좁힌다. 확인 끝나면 제거.
-        // @ts-expect-error 진단용 임시 전역 — 프로덕션 코드 패턴 아님
-        window.__t6_5_tracks = pool.tracks
       })
       .catch((err) => {
         if (cancelled) return
@@ -1023,8 +1023,6 @@ export function PracticeCanvas({
   // — 위 progressBarRef와 같은 이유(매 프레임 갱신, React state 안 거침)로
   // textContent를 직접 DOM에 쓴다.
   const timeDisplayRef = useRef<HTMLDivElement>(null)
-  // T3-3(REQ-04) — 오디오 트랙 리싱크 폴링 스로틀(위 TRACK_RESYNC_INTERVAL_MS).
-  const lastTrackResyncAtRef = useRef(0)
 
   // T3-14(2026-10-25, 의뢰인 피드백 "모바일에서 노트 내려오는게 렉 걸린 것처럼
   // 버벅인다") — 원인 진단용 임시 FPS 계측. 영상을 ffmpeg로 프레임 분석해
@@ -1055,11 +1053,10 @@ export function PracticeCanvas({
   const skipDomWritesRef = useRef(false)
   const [skipDomWritesLabel, setSkipDomWritesLabel] = useState(false)
   // T6-9 추가 3차 — "그리기만 끄기"·"진행바만 끄기" 둘 다 렉 동일(무죄 확정,
-  // 실기기 확인 완료). "계산 끄기"(전체)만 효과 있었으므로, 남은 범위(위치
-  // 계산+리싱크) 중 리싱크(tracks.resync() — <audio> currentTime 쓰기 포함)만
-  // 분리 테스트.
-  const skipResyncRef = useRef(false)
-  const [skipResyncLabel, setSkipResyncLabel] = useState(false)
+  // 실기기 확인 완료). "계산 끄기"(전체)만 효과 있었으므로 남은 용의자는
+  // 리싱크(tracks.resync() — <audio> currentTime 쓰기 포함)였다 — T6-11에서
+  // resync() 자체를 없앴으므로(위 코멘트 참고) 이 토글은 더 이상 의미가 없어
+  // 삭제(실기기로 리싱크가 fps 저하의 원인임을 이미 확정, work/T6-11/plan.md).
 
   useEffect(() => {
     // T6-1(성능, 2026-10-30, Q-33 재착수) — 예전엔 getMasterClock()을 loop()
@@ -1095,32 +1092,12 @@ export function PracticeCanvas({
       // 기준으로 그려야 판정선 통과 시점과 소리가 맞는다.
       const barSeconds = barDurationSeconds(score.meta.timeSignature, playbackBpmRef.current)
       const songStartSeconds = barSeconds * COUNT_IN_BARS
-      // T3-3(REQ-04, work/T3-3/plan.md §5) — 저빈도 리싱크. 매 프레임이 아니라
-      // TRACK_RESYNC_INTERVAL_MS마다만 확인(60fps로 매번 돌리면 아래 Date.now()
-      // 호출 자체는 가볍지만, 의도적으로 "느슨한 폴링"이라는 설계를 코드로도
-      // 분명히 하기 위해 스로틀 자체를 생략하지 않음).
-      const tracks = playbackRef.current?.tracks
-      if (isPlayingRef.current && tracks && !skipResyncRef.current) {
-        const now = Date.now()
-        if (now - lastTrackResyncAtRef.current >= TRACK_RESYNC_INTERVAL_MS) {
-          lastTrackResyncAtRef.current = now
-          const playbackRate = playbackBpmRef.current / score.meta.bpm
-          // 2026-10-28 — 트랙이 audioLatencyCompensationMs만큼 "일찍" 틀어지기
-          // 시작했으므로(scorePlayer.ts), 정상 상태에서의 currentTime도 그만큼
-          // 앞서 있는 게 맞다 — 이 보정을 빼먹으면 resync()가 보정 자체를
-          // "어긋남"으로 오인해 매 750ms마다 되돌려버려 보정이 무력화된다.
-          const latencyCompensationSeconds = audioLatencyCompensationMsRef.current / 1000
-          const expectedSongPositionSeconds =
-            audioTrackPositionSeconds(
-              positionSeconds,
-              songStartSeconds,
-              playbackRate,
-              score.audioOffsetMs / 1000, // T3-72(Q-43)
-            ) +
-            latencyCompensationSeconds * playbackRate
-          tracks.resync(expectedSongPositionSeconds, TRACK_RESYNC_THRESHOLD_SECONDS)
-        }
-      }
+      // T6-11(REQ-06, Q-33, work/T6-11/plan.md) — 예전엔 여기서 750ms마다
+      // tracks.resync()로 오디오 트랙 드리프트를 재보고 있었다. StemPlayer는
+      // Transport 네이티브 이벤트로 스스로 따라가 드리프트가 구조적으로
+      // 안 생기므로(scorePlayer.ts 참고) 이 rAF 루프에서는 더 이상 트랙을
+      // 전혀 건드리지 않는다 — 바로 이 폴링(과 그 안의 <audio> currentTime
+      // 강제 seek)이 iOS fps 저하의 확정된 원인이었다.
       if (renderer && !skipRenderRef.current) {
         // R/L 표시 제거(2026-10-25, 의뢰인 피드백 "안 맞는 게 너무 많아서") — 자동
         // 추천 손 배정 자체가 부정확해 레인/킷 어느 쪽도 더 이상 표시하지 않음.
@@ -1271,12 +1248,10 @@ export function PracticeCanvas({
     // 지운다(이미 끊긴 뒤라 안전).
     playbackRef.current.limiter.dispose()
     playbackRef.current.metronome.dispose()
-    // T3-16-feedback-6 — 예전엔 TrackPlayer가 재생 1회당 1개 수명이라 여기서
-    // dispose()로 <audio> 엘리먼트까지 버렸음(work/T3-3/plan.md §4). 이제
-    // 엘리먼트는 풀(AudioTrackPool)이 화면 수명 동안 들고 있으므로, 여기선
-    // 이번 세션만 정리(일시정지+위치 0으로)하고 엘리먼트는 그대로 둬 다음
-    // 재생이 재사용하게 한다 — work/T3-16-feedback-6/plan.md.
-    playbackRef.current.tracks?.reset()
+    // T3-16-feedback-6 → T6-11 — 풀(StemBufferPool)이 화면 수명 동안 버퍼·
+    // Tone.Player를 들고 있으므로, 여기선 이번 세션의 Transport 이벤트 구독만
+    // 해제(detach)하고 버퍼 자체는 그대로 둬 다음 재생이 재사용하게 한다.
+    playbackRef.current.tracks?.detach()
     playbackRef.current = null
     isPlayingRef.current = false
     lastActiveMapRef.current = new Map()
@@ -1293,17 +1268,14 @@ export function PracticeCanvas({
   // 동기적으로 완결한다.
   function handlePause() {
     if (!playbackRef.current) return
+    // T6-11 — handle.pause()가 transport.pause()를 호출하면 Transport의
+    // 네이티브 'pause' 이벤트가 뜨고, StemPlayer가 그 이벤트를 직접 구독해
+    // 스스로 멈춘다(scorePlayer.ts의 attach() 참고) — 더 이상 tracks를 따로
+    // pause()할 필요가 없다. (2026-10-29 의뢰인 지적으로 추가됐던 별도 호출은
+    // 옛 트랙이 handle.pause() 경로를 안 타는 경우(편집 화면 핸드오프)를 위한
+    // 것이었는데, 이제 핸드오프 경로도 항상 tracks를 playDrumScore()에
+    // 넘기므로(아래 handlePlay() 참고) 그 구분 자체가 없어졌다.)
     playbackRef.current.handle.pause()
-    // 2026-10-29(의뢰인 지적 — "일시정지해있는데 음원소리랑 원본드럼은
-    // 일시정지가 안된다") — handle.pause()는 playDrumScore()에 넘긴 tracks를
-    // 내부적으로만 pause()하는데, 편집 화면에서 "연습 화면으로" 넘어와 시작한
-    // 세션은(위 pendingInitialPositionTicksRef 소비 블록 참고) 실측으로 확인된
-    // Tone.js 스케줄 발화 문제를 피하려고 playDrumScore()에 tracks를 일부러
-    // 안 넘긴다 — 그 경로에서는 handle이 tracks를 전혀 모른다. 여기서 직접
-    // pause()를 호출해야 두 경로 모두 확실히 멈춘다(보통 경로에선 handle이
-    // 이미 멈춘 트랙을 또 멈추는 것뿐이라 안전 — HTMLMediaElement.pause()는
-    // 중복 호출해도 무해).
-    playbackRef.current.tracks?.pause()
     playbackRef.current.metronome.stopRinging()
     pauseAutoStopTimer()
     isPlayingRef.current = false
@@ -1331,10 +1303,10 @@ export function PracticeCanvas({
         setIsPaused(false)
         return
       }
+      // T6-11 — handle.resume()의 transport.start()가 Transport 네이티브
+      // 'start' 이벤트를 발화하고 StemPlayer가 그걸 직접 구독해 스스로
+      // 재개한다(위 handlePause()와 같은 이유) — tracks.resume() 별도 호출 불필요.
       session.handle.resume()
-      // 위 handlePause()와 같은 이유 — handle이 tracks를 모르는 경로(편집
-      // 화면에서 넘어온 세션)에서도 확실히 재개되도록 직접 호출.
-      session.tracks?.resume()
       // 기존 자동 정지 타이머와 같은 handle 아이덴티티 가드 재사용(새 세대
       // 토큰 없이 — work/T3-6/plan.md §4).
       resumeAutoStopTimer(() => {
@@ -1380,12 +1352,12 @@ export function PracticeCanvas({
     // 다른 handlePlay()가 끼어들거나(세션 id가 바뀜) (b) 생성 자체가 실패하면,
     // 그때까지 만든 리소스(트랙·Gain·voices·메트로놈)를 전부 정리하고
     // 중단한다 — 안 그러면 취소된 세션의 오디오가 계속 돌거나 리소스가 샌다.
-    // T3-13 모드A 2라운드 지적(Medium) — `tracks`를 `createTrackPlayer()`
+    // T3-13 모드A 2라운드 지적(Medium) — `tracks`를 `createStemPlayer()`
     // 호출과 함께 `const`로 선언하면, 그 호출 자체가 던질 때(예: Web Audio
     // 그래프 생성 실패) `tracks` 바인딩이 아예 안 만들어져 `cleanupAbortedSetup`
     // 안의 `tracks?.dispose()`가 TDZ 참조 에러를 낸다 — `let`으로 미리
     // `null` 선언해두고 try 안에서 대입(아래 synthGain 등과 같은 패턴).
-    let tracks: TrackPlayer | null = null
+    let tracks: StemPlayer | null = null
     let synthGain: Tone.Gain | undefined
     let limiter: Tone.Limiter | undefined
     let voices: DrumVoiceMap | undefined
@@ -1403,7 +1375,7 @@ export function PracticeCanvas({
     // `tsc -b`)으로 타입체크한다.
     let handle: PlaybackHandle | undefined
     function cleanupAbortedSetup(): void {
-      tracks?.reset()
+      tracks?.detach()
       synthGain?.dispose()
       limiter?.dispose()
       if (voices) disposeDrumVoices(voices)
@@ -1419,11 +1391,16 @@ export function PracticeCanvas({
       // T3-13 모드A 2라운드 지적 — 이 호출이 try 밖에 있으면 여기서 던질 때
       // isStarting 플래그가 영영 안 풀려 재생 버튼이 계속 비활성 상태로
       // 멈춘다(원래 버그보다 더 나쁜 회귀) — try 안으로 이동.
+      // T6-11 — createStemPlayer()는 Web Audio 그래프를 즉시 안 건드리고
+      // Transport 이벤트 구독 객체만 만들 뿐이라(attach() 전까지는 아무
+      // 것도 안 함), TrackPlayer.prime()처럼 모바일 자동재생 정책을 미리
+      // 풀어둘 제스처 체인이 필요 없다(AudioBufferSourceNode는 `<audio>`
+      // 엘리먼트와 달리 play()/pause() 선언, 선행 언락이 없음 — Tone.js
+      // 소스·work/T6-11/plan.md 참고).
       tracks =
         canUseAudioTracks && audioTrackPoolRef.current
-          ? createTrackPlayer(audioTrackPoolRef.current)
+          ? createStemPlayer(audioTrackPoolRef.current)
           : null
-      const primePromise = tracks?.prime()
       // T3-4(REQ-05, work/T3-4/plan.md §3) — 신스 드럼 9종이 공용으로 거치는
       // Gain(linear 게인, Tone.Gain 기본 단위가 "gain" — 실제 설치된 Tone.js
       // 소스로 확인) 하나를 만들어 destination에 연결해두고 넘긴다 — 이걸로
@@ -1456,7 +1433,6 @@ export function PracticeCanvas({
       // 메트로놈은 이번에 처음 재생 흐름에 연결됨(§범위경계 — T2-4가 믹서로
       // 미뤄뒀던 부분).
       metronome = createMetronome({ timeSignature: score.meta.timeSignature })
-      if (primePromise) await primePromise
       if (playSessionIdRef.current !== mySessionId) {
         cleanupAbortedSetup()
         return
@@ -1470,12 +1446,16 @@ export function PracticeCanvas({
         countInBars: COUNT_IN_BARS,
         playbackBpm,
         loop,
-        // 핸드오프 위치로 바로 이동할 때는 tracks를 아예 안 넘긴다 —
-        // EditorScreen.tsx와 같은 이유(실제 Tone.js 15.1.22로 실측 확인):
-        // transport.schedule()로 예약된 트랙 시작 콜백이 시작 직후 같은
-        // 틱에 위치를 점프시키면 전혀 발화하지 않는다. 대신 아래에서 위치를
-        // 옮긴 뒤 tracks.playFrom()을 직접 호출한다(이 경우에만).
-        tracks: pendingInitialPositionTicksRef.current === undefined ? tracks ?? undefined : undefined,
+        // T6-11 — 핸드오프(아래 pendingTicks 블록) 때도 이제 항상 tracks를
+        // 넘긴다. 예전엔 transport.schedule() 기반 트랙 시작 콜백이 "시작
+        // 직후 같은 틱에 위치를 점프시키면 발화하지 않는" Tone.js 실측
+        // 제약(EditorScreen.tsx와 같은 이유) 때문에 핸드오프 경로에서만
+        // tracks를 아예 안 넘기고 수동 playFrom()으로 우회했는데, StemPlayer는
+        // schedule() 콜백이 아니라 Transport 네이티브 start 이벤트를 구독하므로
+        // 그 제약이 적용되지 않는다 — 대신 핸드오프의 위치 점프 자체는
+        // Transport가 모르는 수동 대입(clock.setPositionSeconds())이라 아래에서
+        // tracks.restartFromCurrentPosition()으로 명시적으로 다시 계산시킨다.
+        tracks: tracks ?? undefined,
         // 2026-10-27(의뢰인 요청) — 카운트인 클릭이 믹서 "메트로놈" 채널 설정과
         // 무관하게 항상 고정 음량으로 울려 "음악은 작은데 그 소리만 크다"는
         // 불편의 원인이었다 — 재생 시작 시점의 메트로놈 게인을 그대로 넘겨
@@ -1518,18 +1498,12 @@ export function PracticeCanvas({
       const positionSeconds =
         songStartSeconds + (pendingTicks / score.ppq) * (60 / playbackBpm)
       getMasterClock().setPositionSeconds(positionSeconds)
-      if (tracks) {
-        const playbackRate = playbackBpm / score.meta.bpm
-        tracks.playFrom(
-          audioTrackPositionSeconds(
-            positionSeconds,
-            songStartSeconds,
-            playbackRate,
-            score.audioOffsetMs / 1000, // T3-72(Q-43)
-          ),
-          playbackRate,
-        )
-      }
+      // T6-11 — Transport 모르게 위치를 직접 대입했으므로(네이티브 'start'
+      // 이벤트가 안 뜸) StemPlayer에 명시적으로 알려 지금 위치 기준으로
+      // 다시 계산해 재시작시킨다(위 StemPlayer.restartFromCurrentPosition()
+      // 코멘트 참고). 이 세션은 막 시작돼 일시정지 상태일 수 없어 isPaused
+      // 가드가 필요 없다(handleSeek()과의 차이).
+      tracks?.restartFromCurrentPosition()
     }
 
     // 방금 만든 세션에 지금 믹서 상태를 바로 적용(처음부터 맞게 시작 —
@@ -1585,8 +1559,6 @@ export function PracticeCanvas({
     if (!session) return
     const clock = getMasterClock()
     const current = clock.getPositionSeconds()
-    const barSeconds = barDurationSeconds(score.meta.timeSignature, playbackBpm)
-    const songStartSeconds = barSeconds * COUNT_IN_BARS
     // 모드A 지적(High) 반영 — 예전엔 "총 마디 수" 기준(totalBars, 마지막
     // 노트가 속한 마디의 끝)으로 클램프했는데, 이건 자동 정지 타이머가 쓰는
     // songEndPositionSeconds()(마지막 노트 시각 + 4초 여유)와 다른 기준이라
@@ -1596,27 +1568,14 @@ export function PracticeCanvas({
     const songEndSeconds = songEndPositionSeconds()
     const target = Math.min(songEndSeconds, Math.max(0, current + deltaSeconds))
     clock.setPositionSeconds(target)
-    const tracks = session.tracks
-    if (tracks) {
-      const playbackRate = playbackBpm / score.meta.bpm
-      // 2026-10-28 — 재생 중 seek도 오디오 지연 보정 적용(§resync 주석과 같은
-      // 이유 — 보정 없이 두면 바로 다음 resync()가 "어긋났다"며 되돌려버림).
-      const latencyCompensationSeconds = audioLatencyCompensationMsRef.current / 1000
-      const positionInTrackSeconds =
-        audioTrackPositionSeconds(
-          target,
-          songStartSeconds,
-          playbackRate,
-          score.audioOffsetMs / 1000, // T3-72(Q-43)
-        ) +
-        latencyCompensationSeconds * playbackRate
-      // 모드C 3라운드 C-008 반영 — 일시정지 중엔 재생을 시작하면 안 되므로
-      // seekTo()(위치만 이동)를, 재생 중엔 기존 playFrom()(위치 이동 + 재생)을.
-      if (isPaused) {
-        tracks.seekTo(positionInTrackSeconds, playbackRate)
-      } else {
-        tracks.playFrom(positionInTrackSeconds, playbackRate)
-      }
+    // T6-11 — Transport 모르게 위치를 직접 대입했으므로 StemPlayer에 명시적
+    // 으로 다시 계산시켜야 한다(위 handlePlay() 핸드오프 블록과 같은 이유).
+    // 일시정지 중엔 부르면 안 된다(소리가 의도치 않게 다시 시작됨) — 멈춰있는
+    // 동안 바뀐 위치는 다음 재생 재개(네이티브 'start' 이벤트)가 알아서
+    // 반영한다(모드C 3라운드 C-008과 같은 "재생 중엔 재생, 일시정지 중엔
+    // 위치만" 구분, 이제는 StemPlayer 쪽의 자연스러운 기본 동작으로 대체).
+    if (!isPaused) {
+      session.tracks?.restartFromCurrentPosition()
     }
     // 모드C 1·2라운드 반영(§7) — 자동 정지 타이머를 새 위치 기준으로
     // 재계산. 루프 모드면 애초에 타이머가 없음(null) — 그대로 둠.
@@ -2495,27 +2454,6 @@ export function PracticeCanvas({
                   }}
                 >
                   {skipDomWritesLabel ? '진행바 꺼짐' : '진행바만 끄기'}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    skipResyncRef.current = !skipResyncRef.current
-                    setSkipResyncLabel(skipResyncRef.current)
-                  }}
-                  style={{
-                    position: 'absolute',
-                    top: 90,
-                    right: 4,
-                    padding: '2px 6px',
-                    background: skipResyncLabel ? 'var(--danger)' : 'rgba(0,0,0,0.6)',
-                    color: 'var(--text)',
-                    fontSize: '0.7em',
-                    borderRadius: 4,
-                    border: 'none',
-                    pointerEvents: 'auto',
-                  }}
-                >
-                  {skipResyncLabel ? '리싱크 꺼짐' : '리싱크만 끄기'}
                 </button>
               </div>
               <div
