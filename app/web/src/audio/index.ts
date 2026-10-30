@@ -14,6 +14,7 @@ export {
   metronomeGainToDb,
   MUSIC_STEM_KEYS,
   musicVolume,
+  normalizeMusicChannels,
   setMusicMuted,
   setMusicVolume,
   toggleDrumlessPreset,

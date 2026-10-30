@@ -129,6 +129,22 @@ export function setMusicMuted(state: MixerState, muted: boolean): MixerState {
   return next
 }
 
+/** T6-3(REQ-06, Q-33, Codex 모드A C-001 반영) — bass/vocals/other 3채널은
+ * "UI를 거치면" 항상 같은 값이 되지만(setMusicVolume/setMusicMuted), 서버에
+ * 저장된 값은 그 불변식이 생기기 전(T3-8 이전, 솔로 기능이 있던 시절 등)의
+ * 레거시 데이터일 수 있어 셋이 서로 다를 수 있다 — 원래는 "다음 클릭에서
+ * 정규화됨"(위 isMusicMuted 코멘트)으로 무해했지만, bass/vocals/other가
+ * 이제 서버에서 미리 합쳐진 'stem_music' 트랙 하나에 대응되면서(work/T6-3/
+ * plan.md) 셋 중 하나(stem_bass)를 대표값으로 그 트랙에 적용하는 코드가
+ * 생겼다(PracticeCanvas.tsx) — 불러온 직후 바로 정규화해 그 대표값이 항상
+ * 정확하게 한다("다음 클릭" 전에도 맞아야 함). 음량은 평균(musicVolume(),
+ * 기존 UI 대표값 표시와 같은 기준), 음소거는 "전부 음소거"였을 때만 유지
+ * (isMusicMuted(), 기존 체크박스 표시와 같은 기준) — 새 규칙을 만들지 않고
+ * 이미 있던 대표값 규칙을 그대로 재사용. */
+export function normalizeMusicChannels(state: MixerState): MixerState {
+  return setMusicMuted(setMusicVolume(state, musicVolume(state)), isMusicMuted(state))
+}
+
 /** 0(무음)~1(최대) 선형 게인을 데시벨로 변환 — Tone.js(신스 드럼 공용
  * Gain·메트로놈 synth)가 쓰는 단위. 실제 dB 공식(20*log10) 그대로 — T3-2
  * normalize_loudness()의 같은 공식과 일관. 0 이하는 -Infinity(완전 무음,

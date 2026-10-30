@@ -35,6 +35,7 @@ import {
   metronomeGainToDb,
   MUSIC_STEM_KEYS,
   musicVolume,
+  normalizeMusicChannels,
   playDrumScore,
   selectStemKinds,
   setMusicMuted,
@@ -818,12 +819,19 @@ export function PracticeCanvas({
       setMixerState((prev) => {
         // 모드C 1라운드 C-006 — 알 수 없는/누락된 채널 키는 방어적으로
         // 기본값으로 채움(저장 형식이 나중에 바뀌어도 안 깨지게).
-        const merged = defaultMixerState()
+        let merged = defaultMixerState()
         if (loadedVolumes) {
           for (const key of CHANNEL_KEYS) {
             if (loadedVolumes[key]) merged[key] = loadedVolumes[key]
           }
         }
+        // T6-3(Codex 모드A C-001 반영) — 서버에 저장된 값이 레거시 데이터라
+        // stem_bass/vocals/other가 서로 다를 수 있는데, 이제 이 셋이 서버에서
+        // 미리 합쳐진 'stem_music' 트랙 하나에 대응돼 대표값(stem_bass) 하나만
+        // 읽는 코드가 생겼다(아래 두 setChannelGain('stem_music', ...) 호출부)
+        // — 로드 직후 정규화해 그 대표값이 항상 정확하게 한다(mixer.ts
+        // normalizeMusicChannels() 참고 — 기존 "대표값" 규칙 재사용).
+        merged = normalizeMusicChannels(merged)
         // 로드가 끝나기 전에 사용자가 이미 건드린 채널은 그 값을 유지.
         for (const key of userEditedChannelsRef.current) {
           merged[key] = prev[key]
