@@ -205,9 +205,11 @@ function drawNoteShapePass(
 }
 
 /** 정렬된 배열에서 `keyOf(item) >= target`인 첫 인덱스를 이진탐색으로 찾는다
- * (표준 lower_bound). `laneNotesByTick`가 틱(=고정 playbackBpm에서는 시간) 오름차순
- * 정렬돼 있다는 전제가 있어야 올바름 — `score.notes`가 이미 틱 오름차순(여러 주석에서
- * 확인된 불변식)이고, 레인별 필터링은 순서를 보존하므로 성립. */
+ * (표준 lower_bound). `sorted`가 `keyOf` 기준 오름차순이어야 올바름 — 호출부
+ * (아래 `ensureLaneIndex`)가 `score.notes`의 원래 순서를 믿지 않고 직접 틱으로
+ * 정렬해서 넘기므로 이 전제가 항상 성립(Codex 모드A C-001, `ensureLaneIndex`
+ * 주석 참고 — 편집기가 배열 순서는 그대로 두고 tick 값만 바꾸는 경로가 있어
+ * `score.notes` 자체는 항상 정렬돼 있다고 믿으면 안 됨). */
 function lowerBoundIndex<T>(sorted: readonly T[], target: number, keyOf: (item: T) => number): number {
   let lo = 0
   let hi = sorted.length
@@ -260,13 +262,25 @@ export function createLaneRenderer(
   // 노트(실측 1,809개)를 전부 순회하고 있었음(score.notes가 이미 틱 오름차순인데도
   // 인덱싱 없이 매 프레임 재스캔) — 8×1809≈14,472회/프레임. 곡이 바뀔 때만(참조
   // 비교) 레인별로 한 번 필터링해 캐싱해두고, render()에서는 이진탐색으로 보이는
-  // 시간창(+ 판정 허용범위)만 순회한다. 필터링은 순서를 보존하므로 레인별 배열도
-  // 여전히 틱(=고정 playbackBpm에서는 시간) 오름차순 — lowerBoundIndex 전제 충족.
+  // 시간창(+ 판정 허용범위)만 순회한다.
+  //
+  // Codex 모드A 1차 지적(C-001, 실제 버그로 확인·반영) — "score.notes는 틱
+  // 오름차순"이라는 전제를 그대로 믿고 필터링 결과를 바로 썼는데, 이 전제가
+  // *항상* 보장되지 않음: `EditorScreen.tsx`가 노트를 수정할 때 배열 내 위치는
+  // 그대로 두고 해당 원소의 tick 값만 바꾸는 경로가 있어(`toDrumScore()`가 그
+  // 배열 순서를 그대로 보존), 편집 후 저장된 DrumScore가 틱 오름차순이 아닐 수
+  // 있다. 기존(T6-1 이전) 전체 스캔 코드는 순서에 의존하지 않아 문제없었지만,
+  // 이번에 추가한 이진탐색+조기 종료는 정렬을 전제로 하므로 깨진다. 원본
+  // `score.notes`의 순서를 믿는 대신, 레인별 배열을 만들 때 틱 기준으로 직접
+  // 정렬해 이 함수가 그 전제를 스스로 보장하게 한다(곡이 바뀔 때 한 번만 하는
+  // O(n log n) 정렬이라 비용 미미, 매 프레임 비용과 무관).
   let cachedScore: DrumScore | null = null
   let notesByLaneIndex: DrumNote[][] = []
   function ensureLaneIndex(score: DrumScore): void {
     if (score === cachedScore) return
-    notesByLaneIndex = LANES.map((lane) => score.notes.filter((note) => lane.pieces.includes(note.piece)))
+    notesByLaneIndex = LANES.map((lane) =>
+      score.notes.filter((note) => lane.pieces.includes(note.piece)).sort((a, b) => a.tick - b.tick),
+    )
     cachedScore = score
   }
 
