@@ -5,35 +5,37 @@ import { Spinner } from '../../components/Spinner'
 import { Modal } from '../../components/Modal'
 import type { DrumNote, DrumPiece, DrumScore, Hand } from '../../score/types'
 import { alternateHandsByTick, validateDrumScore } from '../../score'
-import { saveSongDrumScore, songAudioUrl, type SongSummary } from '../../api/songs'
+import { saveSongDrumScore, stemTempoAudioUrl, type SongSummary } from '../../api/songs'
 import { fetchMixerSetting, saveMixerSetting } from '../../api/auth'
 import { ApiError } from '../../api/client'
 import {
-  audioTrackPositionSeconds,
   barIndexForTick,
   CHANNEL_KEYS,
-  createAudioTrackPool,
   createDrumVoices,
   createMetronome,
-  createTrackPlayer,
+  createStemPlayer,
   defaultMixerState,
   disposeDrumVoices,
   effectiveGain,
   getMasterClock,
+  loadStemBufferPool,
   metronomeGainToDb,
+  MUSIC_STEM_KEYS,
   musicVolume,
   playDrumScore,
+  selectStemKinds,
   setMusicVolume,
+  stemDrumsBoostedGain,
   ticksPerBar,
   ticksToSeconds,
-  type AudioTrackPool,
   type ChannelKey,
   type ChannelState,
   type DrumVoiceMap,
   type Metronome,
   type MixerState,
   type PlaybackHandle,
-  type TrackPlayer,
+  type StemBufferPool,
+  type StemPlayer,
 } from '../../audio'
 import {
   canRedo,
@@ -64,34 +66,45 @@ const CHANNEL_LABEL: Record<ChannelKey, string> = {
   stem_other: '그 외',
 }
 
+// T6-11 Step 4(2026-10-31) — 믹서 채널 중 StemPlayer 트랙 게인 적용 대상
+// (synth_drums/metronome은 별도 경로로 처리 — 아래 handlePlay()/믹서 동기화
+// useEffect 참고). PracticeCanvas.tsx가 `CHANNEL_KEYS`로 돌며 stem_music은
+// 대표값(stem_bass)으로 따로 적용하는 것과 같은 패턴을 쓰기 위한 목록.
+const TRACK_CHANNEL_KEYS: readonly ChannelKey[] = ['stem_drums', ...MUSIC_STEM_KEYS]
+
 // 2026-10-29(의뢰인 요청) — "편집시에도 음악을 들으면서". 처음엔 신스
 // 드럼+메트로놈만 재생하도록 범위를 좁혔었는데, 의뢰인 재지적("편집화면에서
 // 오히려 신스드럼보다 원곡 음원이 더 중요한거 아니야? 원곡을 듣고 고쳐야지
 // 신스드럼은 이미 노트대로 드럼을 치는데 그거듣고 편집을 할 수 있는게
 // 없지")이 맞아 원곡 분리 음원(스템)까지 재생하도록 확장했다.
 //
-// practice 화면(PracticeCanvas.tsx)의 스템 재생은 scorePlayer.ts의
-// playDrumScore()에 tracks를 넘겨 내부적으로 transport.schedule()이
-// tracks.playFrom()을 "곡 시작 시각"에 예약하게 하는데, 이 화면처럼 재생을
-// 시작하자마자 임의 위치로 점프하면 그 예약된 콜백이 점프 전에 이미
-// 커밋됐는지 불확실했다 — **실제로 Tone.js 15.1.22를 브라우저에서 직접
-// 실행해 확인**(2026-10-29, CLAUDE.md §2 "기억에 의존한 API 사용 금지"):
-// transport.schedule(cb, 0) 후 transport.start() 바로 다음 줄(같은 동기
-// 구간, await 없음)에서 transport.seconds를 점프시키면 그 콜백은 **전혀
-// 발화하지 않는다**(2초 대기 후에도 fired=false로 직접 측정). 그래서
-// scorePlayer.ts에 tracks를 넘기는 설계였다면 원곡 음원이 아예 안 들렸을
-// 것 — 아래처럼 **scorePlayer.ts에는 tracks를 아예 안 넘기고**(노트/
-// 메트로놈 스케줄링만 맡김) 커서 위치로 점프한 **뒤에 직접**
-// `tracks.playFrom()`을 호출하는 지금 방식이 맞는 선택이었음을 실측으로
-// 확인했다.
+// T6-11 Step 4(work/T6-11/plan.md) — 처음엔(옛 trackPlayer.ts 시절) 이
+// 화면이 `scorePlayer.ts`의 `playDrumScore()`에 tracks를 아예 안 넘기고
+// (노트/메트로놈 스케줄링만 맡김) 재생 시작 직후 커서 위치로 점프한 **뒤에
+// 직접** `tracks.playFrom()`을 호출하는 우회 경로를 썼다 — 당시의
+// `TrackPlayer`(`<audio>` 기반)는 `transport.schedule()`로 "최초 진입 + 매
+// 루프 재진입" 시각에 맞춰 트랙 시작을 예약했는데, 같은 동기 구간(await
+// 없음)에서 재생 시작 직후 위치를 점프시키면 그 예약 콜백이 점프 전에 이미
+// 커밋됐는지 불확실해(실제 Tone.js 15.1.22로 직접 측정 — transport.schedule(cb,
+// 0) 후 transport.start() 바로 다음 줄에서 transport.seconds를 점프시키면
+// 그 콜백이 전혀 발화하지 않음을 확인) tracks를 안 넘기는 우회가 필요했다.
+// 또 그 직접 호출 경로는 Tone.js의 정밀한 Web Audio 클록이 아니라 평범한
+// HTMLMediaElement.play()라 시작 시점이 정확하지 않아, 매 750ms 리싱크
+// (`tracks.resync()`)로 계속 교정해야 했다.
 //
-// 다만 이 직접 호출 방식은 Tone.js의 정밀한 Web Audio 클록이 아니라 평범한
-// HTMLMediaElement.play()라 시작 시점이 신스 드럼(Tone.js 노트)만큼
-// 정확하진 않다(Codex 모드A 지적, 반영) — handleSeek()(PracticeCanvas.tsx)도
-// 같은 특성이지만 그쪽은 재생 "중" 리싱크(tracks.resync(), 아래 TRACK_RESYNC_*
-// 상수)가 매 750ms 계속 교정해주는 반면 이 화면은 처음엔 그 교정이 빠져
-// 있었다 — 아래 startRaf()의 리싱크 호출로 추가해 시작 오차·재생 중
-// 누적 드리프트 둘 다 PracticeCanvas.tsx와 같은 수준으로 바로잡는다.
+// `StemPlayer`(Tone.Player 기반)로 바뀐 지금은 이 제약 자체가 없다 —
+// `StemPlayer.attach()`는 `transport.schedule()`이 아니라 Transport의
+// 네이티브 `start`/`stop`/`pause`/`loopStart` 이벤트를 직접 구독하므로,
+// `playDrumScore()`에 tracks를 그냥 넘기고 재생 시작 직후 `clock.
+// setPositionSeconds()`로 점프시켜도(practice 화면의 핸드오프와 완전히
+// 같은 패턴) Transport가 재생 중일 때 `.seconds` 대입 자체가 네이티브
+// `'stop'`→`'start'`를 재발화하는 Tone.js 공식 동작(stemPlayer.ts의
+// StemPlayer 코멘트 참고)에 기대 자동으로 반응한다 — 수동 `playFrom()`·
+// `pause()`·주기적 리싱크(옛 `TRACK_RESYNC_*`/`resync()`)가 전부 불필요해져
+// 삭제했다. 핸드오프(연습→편집) 때 소리가 빨리감기처럼 들리던 증상
+// (Q-45, `intent/07-open-questions.md`)도 이 우회 경로 자체가 사라지며
+// 함께 해소될 것으로 보임(웹에서는 원래도 재현 안 됐음 — iOS 재확인은
+// 의뢰인 몫).
 export interface EditorScreenProps {
   song: SongSummary
   initialScore: DrumScore
@@ -180,12 +193,6 @@ const ROW_LABEL_WIDTH = 64
 // initialPositionTicks effect)과 재생 중 자동 추적(T3-75, startRaf) 둘 다
 // 같은 값을 써서 "재생 위치가 화면의 같은 자리에 있다"는 인상을 유지한다.
 const PLAYHEAD_SCROLL_LEAD_PX = 80
-
-// PracticeCanvas.tsx의 같은 상수와 같은 값 — 원곡 음원(HTMLMediaElement)이
-// Tone.js의 Web Audio 클록만큼 정밀하지 않아 생기는 오차를 저빈도로
-// 바로잡는다(T3-3, work/T3-3/plan.md §5).
-const TRACK_RESYNC_INTERVAL_MS = 750
-const TRACK_RESYNC_THRESHOLD_SECONDS = 0.1
 
 export function EditorScreen({
   song,
@@ -366,6 +373,24 @@ export function EditorScreen({
   useEffect(() => {
     playbackBpmRef.current = playbackBpm
   }, [playbackBpm])
+  // T6-11 Step 4(work/T6-11/plan.md) — PracticeCanvas.tsx Step 3과 완전히
+  // 같은 패턴(§stemTempoPermille 주석 참고). 슬라이더를 드래그하는 동안
+  // 프레임마다 바뀌는 playbackBpm을 그대로 서버 변환 요청에 쓰면 드래그
+  // 한 번에 요청이 수십 번 나간다 — 400ms 디바운스로 "그만 움직이고 난
+  // 뒤"의 값만 쓴다.
+  const [debouncedPlaybackBpm, setDebouncedPlaybackBpm] = useState(playbackBpm)
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedPlaybackBpm(playbackBpm), 400)
+    return () => clearTimeout(timer)
+  }, [playbackBpm])
+  // work/T6-11/plan.md "API 계약"의 정의 그대로 — meta.bpm이 이 화면의
+  // "원곡 BPM"(편집 불가, 위 주석 참고).
+  const stemTempoPermille = Math.round((debouncedPlaybackBpm / meta.bpm) * 1000)
+  // PracticeCanvas.tsx의 같은 가드와 같은 이유 — 디바운스 구간(최대 400ms)
+  // 동안 재생을 누르면 화면에 쓸 노트 BPM과 실제 로딩된 스템 버퍼의 배속이
+  // 어긋난 채로 세션이 시작될 수 있다.
+  const stemTempoPending =
+    Math.round((playbackBpm / meta.bpm) * 1000) !== stemTempoPermille
 
   function clampBpm(value: number): number {
     if (Number.isNaN(value)) return playbackBpm
@@ -486,8 +511,22 @@ export function EditorScreen({
   // useMemo로 참조를 안정시킴 — song.available_audio_kinds는 이 화면에서
   // 안 바뀌지만, .filter()가 매 렌더 새 배열을 만들면 아래 effect들의
   // 의존성 배열에 넣었을 때 매번 다시 돌게 된다.
+  // T6-11 Step 4(2026-10-31, 자체 발견·수정 — 실행 중 에러로 확인) — 예전엔
+  // 'original'만 걸러내 그대로 썼는데, 이 목록은 StemBufferPool에 넘길
+  // "실제 파일 종류"(stem_music처럼 믹서 채널이 아닌 값도 포함 가능)라서,
+  // 이 값을 그대로 믹서 채널 키로 써서 `mixerState[key]`를 읽으면(아래 가스
+  // 적용 루프들) 'stem_music'이 있는 곡(T6-3 백필 — 음악 3채널을 서버가
+  // 미리 합친 경우)에서 `mixerState['stem_music']`이 undefined라
+  // `effectiveGain()`이 그대로 TypeError로 터졌다(라이브 브라우저 검증
+  // 중 재현 — "Cannot read properties of undefined (reading 'muted')").
+  // PracticeCanvas.tsx도 똑같은 문제를 겪어 `selectStemKinds()`로 미리
+  // 해결해 뒀던 것(stem_music이 있으면 bass/vocals/other 개별 항목은
+  // 걸러내고 stem_music만 남김)을 여기도 그대로 가져온다 — 이 stemKinds는
+  // 이제부터 "풀에 로딩할 파일 종류"로만 쓰고, 믹서 채널 게인 적용은
+  // 아래에서 CHANNEL_KEYS 기반 TRACK_CHANNEL_KEYS로 분리한다(PracticeCanvas.tsx의
+  // "CHANNEL_KEYS로 돌고 stem_music은 대표값으로 따로 적용" 패턴과 동일).
   const stemKinds = useMemo(
-    () => song.available_audio_kinds.filter((k) => k !== 'original') as ChannelKey[],
+    () => selectStemKinds(song.available_audio_kinds),
     [song.available_audio_kinds],
   )
   // 2026-10-29(T3-72, REQ-02, Q-43) — audioOffsetMs===0 가드를 뺐다(PracticeCanvas.tsx와
@@ -533,13 +572,27 @@ export function EditorScreen({
     // 배열에 넣어도 정직하게(eslint-disable 없이) 마운트 1회만 실행된다.
   }, [canUseAudioTracks, stemKinds])
 
-  const audioTrackPoolRef = useRef<AudioTrackPool | null>(null)
+  const audioTrackPoolRef = useRef<StemBufferPool | null>(null)
   const [audioTracksLoading, setAudioTracksLoading] = useState(canUseAudioTracks)
   const [audioTracksAvailable, setAudioTracksAvailable] = useState(false)
+  // T6-11 Step 4(work/T6-11/plan.md) — PracticeCanvas.tsx Step 2/3과 같은
+  // 전환: `createAudioTrackPool()`(`<audio>` 기반)이 아니라
+  // `loadStemBufferPool()`(Tone.Player 기반)로 스템을 받는다. 위
+  // `stemTempoPermille`에 맞는 음정 유지 변환본 URL(`stemTempoAudioUrl()`)을
+  // 받아오므로, BPM이 바뀌면(의존성 배열의 stemTempoPermille) 그 배속의
+  // 변환본으로 풀을 다시 불러온다 — permille===1000(배속 변경 없음)이면
+  // stemTempoAudioUrl()이 기존 원본 URL과 같아 Step 2와 동일하게 동작.
   useEffect(() => {
+    audioTrackPoolRef.current = null
+    setAudioTracksLoading(false)
+    setAudioTracksAvailable(false)
     if (!canUseAudioTracks) return
     let cancelled = false
-    createAudioTrackPool(stemKinds.map((kind) => ({ kind, url: songAudioUrl(song.id, kind) })))
+    setAudioTracksLoading(true)
+    loadStemBufferPool(
+      stemKinds.map((kind) => ({ kind, url: stemTempoAudioUrl(song.id, kind, stemTempoPermille) })),
+      { bufferTempoRatio: stemTempoPermille / 1000 },
+    )
       .then((pool) => {
         if (cancelled) {
           pool.destroy()
@@ -563,11 +616,10 @@ export function EditorScreen({
       audioTrackPoolRef.current?.destroy()
       audioTrackPoolRef.current = null
     }
-    // song.id·canUseAudioTracks·stemKinds 전부 이 화면 안에서 안 바뀌는
-    // 값이라(song이 교체되지 않음, stemKinds는 위에서 useMemo로 고정) 의존성
-    // 배열에 넣어도 사실상 마운트 1회만 실행된다 — eslint-disable 없이도
-    // 정직하게 규칙을 지킬 수 있어 그렇게 둔다.
-  }, [canUseAudioTracks, song.id, stemKinds])
+    // song.id·canUseAudioTracks·stemKinds는 이 화면 안에서 안 바뀌는 값이라
+    // (song이 교체되지 않음, stemKinds는 위에서 useMemo로 고정) 사실상
+    // stemTempoPermille(BPM 디바운스 변경)에만 반응해 재실행된다.
+  }, [canUseAudioTracks, song.id, stemKinds, stemTempoPermille])
 
   // 신스 드럼 음색(샘플 로딩)은 한 번만 만들어 재생/일시정지를 반복할 때마다
   // 재사용 — 매번 다시 만들면 비용도 크고 소리가 잠깐 끊길 수 있다.
@@ -582,11 +634,10 @@ export function EditorScreen({
   const playbackSessionRef = useRef<{
     handle: PlaybackHandle
     metronome: Metronome
-    tracks: TrackPlayer | null
+    tracks: StemPlayer | null
   } | null>(null)
   const rafIdRef = useRef<number | null>(null)
   const lastRafUpdateRef = useRef(0)
-  const lastTrackResyncAtRef = useRef(0)
   // 2026-10-29(의뢰인 요청) — 재생 위치선을 아래 10회/초 state 갱신보다 더
   // 자주(매 프레임) 움직이기 위한 DOM 직접 접근 — PracticeCanvas.tsx의
   // progressBarRef와 같은 이유.
@@ -611,16 +662,33 @@ export function EditorScreen({
     if (session) {
       session.metronome.setVolume(metronomeGainToDb(effectiveGain(mixerState.metronome)))
       if (session.tracks) {
-        for (const key of stemKinds) {
+        // T6-11 Step 4(2026-10-31) — stemKinds(풀에 실제로 로딩된 파일
+        // 종류, 'stem_music' 가능)가 아니라 TRACK_CHANNEL_KEYS(믹서 채널
+        // 4개, 'stem_music'은 믹서 채널이 아님)로 돈다 — 위 stemKinds
+        // useMemo 코멘트 참고. setChannelGain()은 풀에 없는 kind를 조용히
+        // 무시하므로(stemPlayer.ts 확인됨), 이 곡에 stem_bass/vocals/other
+        // 개별 트랙이 없어도(stem_music으로 대체된 경우) 안전하다.
+        for (const key of TRACK_CHANNEL_KEYS) {
           const gain =
             key === 'stem_drums' && drumOverrideEngaged
               ? drumOverrideVolume
               : effectiveGain(mixerState[key])
-          session.tracks.setChannelGain(key, gain)
+          // 2026-10-30(T6-11 Step 4) — PracticeCanvas.tsx와 같은 이유로
+          // 원곡 드럼만 stemDrumsBoostedGain()을 거친다(드럼원곡 오버레이로
+          // 빌려온 값이든, 평소 믹서 값이든 동일하게 적용).
+          session.tracks.setChannelGain(
+            key,
+            key === 'stem_drums' ? stemDrumsBoostedGain(gain) : gain,
+          )
         }
+        // PracticeCanvas.tsx와 같은 이유 — stem_bass/vocals/other 3채널은
+        // 항상 같은 값으로 묶여 있으므로(setMusicVolume()/setMusicMuted()
+        // 불변식) 그중 대표(stem_bass)로 합쳐진 'stem_music' 트랙에도 같은
+        // 게인을 적용한다. 그 트랙이 풀에 없는 곡이면 조용히 no-op.
+        session.tracks.setChannelGain('stem_music', effectiveGain(mixerState.stem_bass))
       }
     }
-  }, [mixerState, stemKinds, drumOverrideEngaged, drumOverrideVolume])
+  }, [mixerState, drumOverrideEngaged, drumOverrideVolume])
 
   function stopRaf() {
     if (rafIdRef.current !== null) {
@@ -632,7 +700,6 @@ export function EditorScreen({
   function startRaf() {
     const clock = getMasterClock()
     lastRafUpdateRef.current = 0
-    lastTrackResyncAtRef.current = 0
     function loop(ts: number) {
       // 60fps 그대로 setState하면 노트가 많을 때 매 프레임 전체 그리드이
       // 다시 렌더돼 버벅일 수 있어, 시간 표시·선택/편집 로직이 쓰는
@@ -668,27 +735,10 @@ export function EditorScreen({
         setCurrentSeconds(seconds)
         setCursorTicks(secondsToTicks(seconds))
       }
-      // Codex 지적(필수, 반영) — 원곡 음원(HTMLMediaElement)은 Tone.js의
-      // Web Audio 클록만큼 정밀하게 시작되지 않는다(직접 측정 확인 —
-      // 아래 "자체 재검토" 참고). PracticeCanvas.tsx와 같은 저빈도
-      // 리싱크(TRACK_RESYNC_INTERVAL_MS마다 확인)로 시작 시점 오차뿐
-      // 아니라 재생 중 누적될 수 있는 드리프트까지 계속 바로잡는다.
-      const session = playbackSessionRef.current
-      if (session?.tracks && ts - lastTrackResyncAtRef.current > TRACK_RESYNC_INTERVAL_MS) {
-        lastTrackResyncAtRef.current = ts
-        // meta.bpm은 이제 이 화면에서 편집할 수 없어(위 playbackBpm 주석 참고)
-        // 항상 "원곡 BPM"이다 — PracticeCanvas.tsx의 같은 리싱크 계산과 동일.
-        const playbackRate = playbackBpmRef.current / stateRef.current.meta.bpm
-        // T3-72(Q-43) — 네 번째 인자(오프셋)만 추가, 두 번째 인자가 계속
-        // 리터럴 0인 이유는 아래 handlePlay()의 같은 호출부 코멘트 참고.
-        const expectedSongPositionSeconds = audioTrackPositionSeconds(
-          seconds,
-          0,
-          playbackRate,
-          stateRef.current.audioOffsetMs / 1000,
-        )
-        session.tracks.resync(expectedSongPositionSeconds, TRACK_RESYNC_THRESHOLD_SECONDS)
-      }
+      // T6-11 Step 4 — StemPlayer는 Transport 네이티브 이벤트를 직접
+      // 구독해 스스로 따라가므로(파일 맨 위 주석 참고) 옛 TrackPlayer의
+      // 주기적 리싱크(TRACK_RESYNC_*/resync()) 호출이 더 이상 필요 없어
+      // 삭제했다.
       rafIdRef.current = requestAnimationFrame(loop)
     }
     rafIdRef.current = requestAnimationFrame(loop)
@@ -756,16 +806,18 @@ export function EditorScreen({
   }
 
   async function handlePlay() {
+    // T6-11 Step 4 — PracticeCanvas.tsx의 같은 가드(§stemTempoPending 주석
+    // 참고)와 같은 이유. 디바운스 구간(최대 400ms) 동안 재생을 누르면
+    // 노트 BPM과 실제 로딩된 스템 버퍼의 배속이 어긋난 채로 시작될 수 있다.
+    if (stemTempoPending) return
     setPlaybackError(null)
-    // 트랙 언락(prime)은 사용자 제스처 체인이 살아있는 지금(동기 호출
-    // 시작 지점) 바로 걸어둔다 — PracticeCanvas.tsx의 handlePlay()와 같은
-    // 이유(모바일 자동재생 정책, work/T3-16-feedback-6/plan.md). 음색
-    // 로딩(ensureVoicesSession)과 동시에 진행되게 await는 나중에.
-    const tracks = audioTrackPoolRef.current ? createTrackPlayer(audioTrackPoolRef.current) : null
-    const primePromise = tracks?.prime()
-
+    // T6-11 Step 4 — StemPlayer는 createStemPlayer() 호출 자체가 Web Audio
+    // 그래프를 즉시 안 건드리고(attach() 전까지는 아무 것도 안 함) 모바일
+    // 자동재생 정책을 미리 풀어둘 제스처 체인이 필요 없다(AudioBufferSourceNode는
+    // `<audio>` 엘리먼트와 달리 play()/pause() 선언형 언락이 없음 —
+    // stemPlayer.ts·PracticeCanvas.tsx 참고) — 옛 TrackPlayer의 prime() 호출이
+    // 통째로 필요 없어졌다.
     const voicesSession = await ensureVoicesSession()
-    if (primePromise) await primePromise
     if (!voicesSession || !isMountedRef.current) return
 
     // await 이후엔 이 함수가 호출될 당시(클로저)의 state가 아니라 ref로
@@ -774,12 +826,13 @@ export function EditorScreen({
     const latestState = stateRef.current
     const latestScore = toDrumScore(latestState)
 
+    // T6-11 Step 4 — handle.stop()이 내부적으로 tracks?.detach()를 호출하므로
+    // (scorePlayer.ts) 이전 세션의 StemPlayer 구독도 여기서 같이 정리된다.
     playbackSessionRef.current?.handle.stop()
     playbackSessionRef.current?.metronome.dispose()
     const metronome = createMetronome({ timeSignature: latestState.meta.timeSignature })
     metronome.setVolume(metronomeGainToDb(effectiveGain(mixerStateRef.current.metronome)))
-    // tracks는 일부러 안 넘긴다 — 파일 맨 위 주석 참고(handleSeek()와 같은
-    // "위치부터 옮기고 직접 playFrom()" 패턴을 쓰기 위함).
+    const tracks = audioTrackPoolRef.current ? createStemPlayer(audioTrackPoolRef.current) : null
     const handle = playDrumScore(latestScore, voicesSession.voices, {
       // 편집 중 임의 위치부터 듣는 용도라 카운트인은 불필요(처음부터 들을
       // 땐 0초부터라 어차피 카운트인이 의미 없고, 중간부터면 더더욱).
@@ -789,43 +842,52 @@ export function EditorScreen({
       // 빨라지거나 느려져야 스템과 안 어긋난다(scorePlayer.ts는 이 옵션이
       // 없으면 latestScore.meta.bpm, 즉 원곡 속도로 고정 스케줄해버림).
       playbackBpm: playbackBpmRef.current,
+      // T6-11 Step 4(파일 맨 위 주석 참고) — StemPlayer는 Transport 네이티브
+      // 이벤트를 구독하므로, 예전처럼 tracks를 안 넘기고 직접 playFrom()을
+      // 호출하는 우회가 더 이상 필요 없다.
+      tracks: tracks ?? undefined,
     })
     playbackSessionRef.current = { handle, metronome, tracks }
+
+    // 방금 만든 세션에 지금 믹서 상태를 바로 적용 — PracticeCanvas.tsx의
+    // handlePlay()와 같은 이유(재생 중 반영 useEffect는 mixerState가 바뀔
+    // 때만 재실행되므로, 세션을 막 만든 시점엔 기본 게인인 채로 몇 프레임
+    // 재생될 수 있다).
+    if (tracks) {
+      // 위 믹서 동기화 useEffect와 같은 이유로 stemKinds가 아니라
+      // TRACK_CHANNEL_KEYS로 돈다(stem_music은 믹서 채널이 아님).
+      for (const key of TRACK_CHANNEL_KEYS) {
+        const gain =
+          key === 'stem_drums' && drumOverrideEngaged
+            ? drumOverrideVolume
+            : effectiveGain(mixerStateRef.current[key])
+        tracks.setChannelGain(key, key === 'stem_drums' ? stemDrumsBoostedGain(gain) : gain)
+      }
+      tracks.setChannelGain('stem_music', effectiveGain(mixerStateRef.current.stem_bass))
+    }
 
     const clock = getMasterClock()
     // scorePlayer.ts는 항상 0초부터 스케줄하고 시작한다(count-in 없이도
     // "곡 시작"은 0초) — 재생 시작 직후 바로 지금 커서 위치로 점프한다.
-    // 이미 지난 노트의 schedule() 콜백은 그 시각을 넘어서면 자동으로
-    // 스킵되는 Tone.js 표준 동작이라(실제 설치된 Transport 소스 기준) 안전.
-    // ticksToSeconds도 노트 스케줄과 같은 playbackBpm 기준이어야 위치가 맞다.
+    // StemPlayer가 attach() 때 구독해둔 Transport 네이티브 'stop'→'start'
+    // 재발화(위 파일 맨 위 주석 참고)가 이 점프에 자동으로 반응하므로, 더
+    // 이상 tracks.playFrom()을 직접 부를 필요가 없다.
     const positionSeconds = ticksToSeconds(
       cursorTicksRef.current,
       latestState.ppq,
       playbackBpmRef.current,
     )
     clock.setPositionSeconds(positionSeconds)
-    if (tracks) {
-      // "원곡 속도"(meta.bpm, 더는 편집 불가) 대비 "지금 연습 속도"의 비율 —
-      // PracticeCanvas.tsx의 playbackRate = playbackBpm/score.meta.bpm과 같은 식.
-      // 2026-10-29(T3-72 Codex 모드C 2차 지적 반영 — 이전 주석의 "audioOffsetMs===0
-      // 일 때만 tracks가 있어 기준점이 항상 0"이라는 근거는 틀렸다. 진짜
-      // 이유는 EditorScreen이 playDrumScore()에 countInBars: 0을 넘겨서다
-      // (위 playDrumScore 호출부 참고, audioOffsetMs 값과 무관하게 항상
-      // 성립) — computePlaybackSchedule()의 songStartSeconds = barSeconds *
-      // countInBars이므로 countInBars=0이면 songStartSeconds는 항상 0.
-      const playbackRate = playbackBpmRef.current / latestState.meta.bpm
-      tracks.playFrom(
-        audioTrackPositionSeconds(positionSeconds, 0, playbackRate, latestState.audioOffsetMs / 1000),
-        playbackRate,
-      )
-    }
     setIsPlaying(true)
     startRaf()
   }
 
   function handlePause() {
+    // T6-11 Step 4 — handle.pause()의 transport.pause()가 Transport 네이티브
+    // 'pause' 이벤트를 발화하고 StemPlayer가 그걸 직접 구독해 스스로
+    // 멈춘다(scorePlayer.ts의 attach() 참고) — tracks를 따로 pause()할
+    // 필요가 없어졌다.
     playbackSessionRef.current?.handle.pause()
-    playbackSessionRef.current?.tracks?.pause()
     stopRaf()
     const seconds = getMasterClock().getPositionSeconds()
     setCurrentSeconds(seconds)
@@ -845,17 +907,12 @@ export function EditorScreen({
     setCurrentSeconds(target)
     setCursorTicks(secondsToTicks(target))
     if (isPlaying) {
-      const clock = getMasterClock()
-      clock.setPositionSeconds(target)
-      const session = playbackSessionRef.current
-      if (session?.tracks) {
-        // handlePlay()의 같은 위치 점프 블록과 같은 식 — playbackRate 계산 근거도 동일.
-        const playbackRate = playbackBpmRef.current / stateRef.current.meta.bpm
-        session.tracks.playFrom(
-          audioTrackPositionSeconds(target, 0, playbackRate, stateRef.current.audioOffsetMs / 1000),
-          playbackRate,
-        )
-      }
+      // T6-11 Step 4 — PracticeCanvas.tsx의 같은 수정과 같은 이유(파일 맨 위
+      // 주석 참고). 재생 중 Transport.seconds 대입은 Tone.js 자신이 네이티브
+      // 'stop'→'start'를 재발화하므로, StemPlayer가 이미 구독 중인 핸들러가
+      // 자동으로 새 위치에서 재시작한다 — 수동 재시작은 더 이상 불필요
+      // (오히려 노트-스템 어긋남 버그의 원인이었음, stemPlayer.ts 참고).
+      getMasterClock().setPositionSeconds(target)
     }
   }
 
@@ -1424,12 +1481,26 @@ export function EditorScreen({
           onClick={() => void (isPlaying ? handlePause() : handlePlay())}
           // T3-16-feedback-7(PracticeCanvas.tsx)과 같은 보호장치 — 원곡
           // 음원이 아직 다 안 받아졌는데 재생을 누르면 끊김 재현 이력 있음.
-          disabled={!isPlaying && audioTracksLoading}
-          aria-label={isPlaying ? '일시정지' : audioTracksLoading ? '원곡 음원 불러오는 중' : '재생'}
-          title={isPlaying ? '일시정지' : audioTracksLoading ? '원곡 음원 불러오는 중…' : '재생'}
+          // T6-11 Step 4 — stemTempoPending도 같은 이유로 같이 막는다(위
+          // §stemTempoPending 주석 참고).
+          disabled={!isPlaying && (audioTracksLoading || stemTempoPending)}
+          aria-label={
+            isPlaying
+              ? '일시정지'
+              : audioTracksLoading || stemTempoPending
+                ? '원곡 음원 불러오는 중'
+                : '재생'
+          }
+          title={
+            isPlaying
+              ? '일시정지'
+              : audioTracksLoading || stemTempoPending
+                ? '원곡 음원 불러오는 중…'
+                : '재생'
+          }
           style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}
         >
-          {!isPlaying && audioTracksLoading ? (
+          {!isPlaying && (audioTracksLoading || stemTempoPending) ? (
             <Spinner size={16} />
           ) : isPlaying ? (
             <Pause size={16} aria-hidden="true" fill="currentColor" />
