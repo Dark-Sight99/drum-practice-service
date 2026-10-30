@@ -574,6 +574,11 @@ export function PracticeCanvas({
         }
         audioTrackPoolRef.current = pool
         setAudioTracksLoading(false)
+        // T6-5(진단용 임시, 2026-10-30) — 샘플레이트를 44100으로 맞췄는데도 렉이
+        // 그대로라, T6-4와 같은 방식으로 다시 한번 개별 트랙을 콘솔에서 직접
+        // 조작해 범위를 좁힌다. 확인 끝나면 제거.
+        // @ts-expect-error 진단용 임시 전역 — 프로덕션 코드 패턴 아님
+        window.__t6_5_tracks = pool.tracks
       })
       .catch((err) => {
         if (cancelled) return
@@ -1031,6 +1036,14 @@ export function PracticeCanvas({
   const fpsFrameCountRef = useRef(0)
   const fpsWindowStartRef = useRef(performance.now())
   const [fpsDisplay, setFpsDisplay] = useState<number | null>(null)
+  // T6-9(진단용 임시, 2026-10-30) — 캔버스 그리기(fill/stroke/drawImage/clearRect)를
+  // 전부 무력화해도 실기기 렉이 그대로였음(콘솔로 직접 확인) — 다음으로 의심되는
+  // 건 그 주변 계산 로직(위치 계산·보이는 노트 추리기 등) 자체. 콘솔 명령으로
+  // 반복 확인시키는 게 번거롭다는 피드백(의뢰인)을 받아, 화면 버튼으로 그 계산
+  // 블록 전체를 켰다 껐다 할 수 있게 함 — 타이핑 실수 걱정 없이 탭만 하면 됨.
+  // ref는 loop()가 매 프레임 읽는 값(리렌더 유발 안 함), state는 버튼 표시용.
+  const skipLoopBodyRef = useRef(false)
+  const [skipLoopBodyLabel, setSkipLoopBodyLabel] = useState(false)
 
   useEffect(() => {
     // T6-1(성능, 2026-10-30, Q-33 재착수) — 예전엔 getMasterClock()을 loop()
@@ -1055,6 +1068,10 @@ export function PracticeCanvas({
         fpsWindowStartRef.current = fpsNow
       }
 
+      if (skipLoopBodyRef.current) {
+        rafIdRef.current = requestAnimationFrame(loop)
+        return
+      }
       const renderer = rendererRef.current
       const positionSeconds = clock.getPositionSeconds()
       // T2-8(Phase 2 게이트 피드백) — scorePlayer.ts가 노트 소리를
@@ -2393,6 +2410,30 @@ export function PracticeCanvas({
                     FPS: {fpsDisplay}
                   </div>
                 )}
+                {/* T6-9(진단용 임시, 원인 특정되면 제거) — FPS 표시 바로 아래, 탭 가능한
+                 * 진단용 버튼. pointerEvents는 이 버튼만 auto로 켜줌(부모 FPS
+                 * 표시는 none 유지). */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    skipLoopBodyRef.current = !skipLoopBodyRef.current
+                    setSkipLoopBodyLabel(skipLoopBodyRef.current)
+                  }}
+                  style={{
+                    position: 'absolute',
+                    top: 24,
+                    right: 4,
+                    padding: '2px 6px',
+                    background: skipLoopBodyLabel ? 'var(--danger)' : 'rgba(0,0,0,0.6)',
+                    color: 'var(--text)',
+                    fontSize: '0.7em',
+                    borderRadius: 4,
+                    border: 'none',
+                    pointerEvents: 'auto',
+                  }}
+                >
+                  {skipLoopBodyLabel ? '계산 꺼짐' : '계산 끄기'}
+                </button>
               </div>
               <div
                 style={{
