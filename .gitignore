@@ -49,6 +49,13 @@ work/T0-3-oemer-comparison/test_run.log
 work/T3-45-hihat-detection-experiment/*.wav
 work/T3-45-hihat-detection-experiment/beat_this_checkpoints/
 
+# 수동 실행 중 임시로 리다이렉트한 로그(정식 실행 로그는 data/logs/, T5-4) — 과거엔
+# app/server 바로 아래 떠다니다 커밋 안 된 채 쌓였었음, 재발 방지
+_server_stdout.log
+_server_stderr.log
+_worker_stdout.log
+_worker_stderr.log
+
 # OS
 .DS_Store
 Thumbs.db

@@ -39,21 +39,31 @@
 
 관리 콘솔 메뉴 이름·위치는 Tailscale이 가끔 UI를 바꾸므로, 위 링크에서 안 보이면 [tailscale.com/kb/1136/tailnet](https://tailscale.com/kb/1136/tailnet)(공식 문서)에서 최신 절차 확인.
 
-## 5. 접속 주소
+## 5. 접속 주소 (T5-4 완료로 확정됨)
 
-서버 PC가 Tailscale에 연결돼 있으면, 같은 tailnet의 어느 기기에서든 브라우저로:
+**⚠ 아래 주소는 §5-1을 먼저 한 번 해야 열립니다 — 그 전까지는 이 주소로 접속해도 안 됩니다**(기존에 Tailscale Serve가 가리키던 곳은 개발용 5173번 포트였고, §5-1이 그걸 운영용 8000번으로 바꿔주는 단계이기 때문). §5-1까지 끝낸 뒤, 서버 PC가 Tailscale에 연결돼 있으면 같은 tailnet의 어느 기기에서든 브라우저로:
 
 ```
-<프로토콜>://<서버PC-기기이름>.tail756a35.ts.net:<포트>
+https://desktop-2j6he5q.tail756a35.ts.net
 ```
 
-형태로 접속합니다(`<서버PC-기기이름>`은 §2에서 확인한 이름). `.tail756a35.ts.net`는 의뢰인의 tailnet 고유 주소로, `app/web/vite.config.ts`에 이미 허용 목록으로 등록돼 있어 호스트 이름 자체는 바로 접속됩니다.
+로 접속합니다. 포트 번호는 안 붙여도 됩니다(https 기본 포트 443으로 Tailscale이 자동 연결해줌).
 
-**⚠ `<프로토콜>`(http/https)과 `<포트>`는 아직 미확정입니다.** 지금 저장소엔 Vite 개발 서버가 그 호스트 이름의 요청을 받아들이도록 허용(`allowedHosts`)한 설정만 있고, HTTPS(TLS 인증서)를 켜는 설정은 어디에도 없습니다 — 즉 지금 상태로는 `http://`(평문)로만 접속될 가능성이 높고, `https://`로 적어두면 틀릴 수 있습니다. Tailscale 자체의 "Serve" 기능을 쓰면 Tailscale이 자동으로 HTTPS 인증서를 붙여주는 방식도 있지만, 이 프로젝트가 그 방식을 쓸지 아니면 Vite 서버에 직접 접속하게 둘지는 **T5-4(서버 실행 스크립트)에서 정해질 사항**입니다. T5-4 완료 후 이 섹션을 정확한 프로토콜·포트로 갱신하겠습니다.
+기기 이름(`desktop-2j6he5q`)이 나중에 바뀌면, 서버 PC 터미널에서 `tailscale status` 입력 — 맨 위에 본인 PC 줄이 나옵니다. `.tail756a35.ts.net`는 의뢰인의 tailnet 고유 주소(`app/web/vite.config.ts`의 `allowedHosts`에도 등록돼 있음).
 
-**⚠ 포트 번호는 T5-4(서버 실행 스크립트)에서 "서버를 어떻게 항상 켜둘지"가 정해진 뒤 확정됩니다.** 지금은 개발 서버(`npm run dev`, 기본 5173번 포트) 기준으로만 테스트된 상태입니다. T5-4 완료 후 이 문서의 접속 주소를 다시 확인해주세요.
+### 5-1. (서버 PC에서, 한 번만) Tailscale Serve 설정
 
-기기 이름을 까먹었다면 서버 PC에서 터미널에 `tailscale status` 입력 — 맨 위에 본인 PC 줄이 나옵니다.
+T5-4부터 서버(API)와 화면(프런트엔드)이 같은 포트(8000) 하나로 합쳐졌습니다(`scripts/start.py`로 띄움). Tailscale의 "Serve" 기능으로 그 포트를 tailnet 안에서 자동 HTTPS로 내보냅니다 — 인증서를 따로 관리할 필요가 없습니다(공식 기능, 출처: 서버 PC에 설치된 Tailscale의 `tailscale serve --help`).
+
+서버 PC 터미널에서 (서버가 떠 있는 상태로) 한 번만:
+
+```
+tailscale serve --bg 8000
+```
+
+확인: `tailscale serve status` — `https://desktop-2j6he5q.tail756a35.ts.net`가 `proxy http://127.0.0.1:8000`을 가리키면 성공.
+
+**참고**: 개발 중에는 이 설정이 Vite 개발 서버(5173번 포트)를 가리키고 있었습니다 — 위 명령을 실행하면 8000번(운영용 서버)으로 바뀝니다. 공개 인터넷에 노출되는 게 아니라 tailnet(의뢰인의 사설망) 안에서만 통하는 주소라 안전합니다(REQ-08 "비공개" 원칙 유지 — Funnel과 다름, §6 참고).
 
 ## 6. Funnel에 대해 (선택 사항 — 아직 채택 안 함)
 
@@ -65,5 +75,5 @@ Tailscale에는 "Funnel"이라는 기능도 있어, tailnet에 초대되지 않�
 ## 7. 문제가 안 풀릴 때
 
 - 접속이 안 될 때: 서버 PC와 접속하려는 기기 양쪽 다 Tailscale 앱이 켜져 있고(로그아웃 상태 아님) "Connected"로 표시되는지 확인.
-- 서버 PC가 잠자기 모드로 들어가면 당연히 접속 안 됨 — 집 PC의 절전 설정 확인(T5-4에서 "서버 자동 시작" 다룰 때 같이 점검 예정).
+- 서버 PC가 잠자기 모드로 들어가거나, 서버 자체가 안 떠 있으면 접속 안 됨 — `scripts/start.py`(또는 `scripts/windows/start.ps1`)가 떠 있는지 확인(T5-4, 아래 "서버가 다운되면" 참고). 집 PC의 절전 설정도 같이 확인.
 - 그 외 문제는 [tailscale.com/kb](https://tailscale.com/kb)(공식 문서)에서 검색하거나, 증상을 알려주시면 같이 확인하겠습니다.
