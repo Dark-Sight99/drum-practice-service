@@ -72,7 +72,22 @@
 - 실제 재기동: `start.ps1`(새 `_pid_alive` 포함) 정상 기동 → `/health` 200 확인 → `stop.ps1`(새 신원 확인 포함) 정상 종료, `Get-Process`로 두 PID 모두 사라짐 확인.
 - `is_our_python_process()` 단위 확인: 실제 PID 4(윈도우 "System" 프로세스, python 아님) → `False` 정상 반환, 존재하지 않는 PID → `False` 정상 반환 — PID 재사용 상황을 실제로 재현하진 못했지만(정상 종료라 재사용 PID 자체가 생기지 않음), "python이 아닌 프로세스는 건너뛴다"는 핵심 로직은 실측 확인.
 
-### 2차 — (진행 예정)
+### 2차 — REQUEST_CHANGES
+- **C-001(필수, 재지적)**: 1차 대응("이름이 python인지"만 확인)은 PID가 재사용되더라도 *다른* python 프로세스가 그 번호를 차지한 경우는 못 걸렀음 — 이름만으론 부족, 프로세스 식별 정보(생성 시각 등)까지 비교해야 한다고 재지적.
+- **C-002(권장)**: `start.py`의 `_already_running()`도 "그 PID에 아무 프로세스나 살아있으면" 실행 중으로 판단해 같은 PID 재사용 문제에 노출.
+- Codex가 직접 확인: tasklist CSV 파싱, `ps` 빈 출력=프로세스 없음 전제, `pythonw.exe` 매칭, `--force` 배선, Windows try/catch 범위, `DETACHED_PROCESS` 프로세스의 `terminate()` 가능 여부, `OSError`가 `Popen` 실패의 올바른 예외 타입인지, Tailscale 안내 문구 정합성 — 전부 문제없음 확인(추가 지적 없음).
+
+### 대응
+- **C-001/C-002**: `common.py`에 `process_start_signature(pid)` 추가 — 이미지 이름 + **프로세스 생성 시각**을 합친 서명. 윈도우는 `ctypes`로 Win32 `GetProcessTimes()` 직접 호출(표준 라이브러리만 사용, `PROCESS_QUERY_LIMITED_INFORMATION` 권한은 자기 소유 프로세스엔 관리자 권한 없이도 허용됨 — Microsoft Learn 근거), FILETIME을 정수로 비교(파싱 없음, 가장 정확). 맥/리눅스는 `ps -p <pid> -o lstart=`(고정 포맷 생성 시각 문자열)를 그대로 비교. `is_same_process(pid, 기록된_서명)`로 일치 여부 확인.
+- `start.py`가 각 프로세스를 띄운 직후 이 서명을 `data/run/pids.json`에 같이 기록(`api_signature`/`worker_signature`), `_already_running()`도 PID만이 아니라 서명까지 일치해야 "실행 중"으로 판단하도록 교체.
+- `stop.py`는 종료 직전 `is_same_process(pid, 기록된_서명)`로 재확인 — 서명이 다르면(PID 재사용 의심) 건너뛰고 경고만 남김.
+
+### 재검증
+- `ruff check` 전부 통과, `pytest` 238 passed(회귀 없음).
+- **새 ctypes 로직 직접 검증**: 현재 파이썬 프로세스 자신의 PID로 서명 생성 → 같은 PID+같은 서명 비교 시 `True`, 일부러 틀린 서명과 비교 시 `False` 확인. 존재하지 않는 PID(999999)·권한이 없는 PID(4, 윈도우 System 프로세스 — `OpenProcess`가 권한 부족으로 실패)는 둘 다 안전하게 `None`(미검증 취급, "일치 안 함"으로 처리) 확인.
+- 실제 재기동: `start.ps1` 정상 기동 → `data/run/pids.json`에 `api_signature`/`worker_signature` 둘 다 기록됨을 직접 확인 → 같은 상태에서 `start.ps1` 재실행 시 서명 비교로 "이미 실행 중" 정상 인식(중복 기동 안 됨) → `/health` 200 확인 → `stop.ps1`로 서명 검증 거쳐 정상 종료, 두 PID 모두 `Get-Process`에서 사라짐 확인.
+
+### 3차 — (진행 예정)
 
 ## 결론
 서버(API+워커+정적 프런트)를 한 번에 켜고 끄는 스크립트와 로그인 시 자동 시작 등록 스크립트를 윈도우·맥 양쪽에 마련했다. 윈도우는 실제 기동까지 실행해 확인했고, 맥은 실기기가 없어 코드 검토 수준에 머문다는 것과 자동 시작 등록 자체는 시스템 설정 변경이라 실행하지 않았다는 것을 솔직히 구분해 남긴다. 덕분에 T5-3이 미정으로 남겨뒀던 접속 주소·포트·프로토콜도 전부 확정했다.

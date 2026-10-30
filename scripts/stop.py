@@ -7,12 +7,13 @@ data/run/pids.json에 적힌 PID 두 개(API, 워커)에 종료 신호를 보내
 PID 파일이 없거나 이미 죽어있는 프로세스는 건너뛴다(에러로 치지 않음 — 이미 멈춰있는
 상태로 다시 stop을 실행해도 안전해야 자동화 스크립트에서 안심하고 쓸 수 있다).
 
-종료 직전 그 PID가 아직 python(.exe) 프로세스인지 재확인한다(common.is_our_python_process) —
-2026-10-30(T5-4) Codex 모드A 지적(C-001, 반영): PID는 프로세스가 죽은 뒤 OS가 완전히
-다른 프로그램에 재사용할 수 있어, 기록된 PID만 믿고 바로 종료 신호를 보내면 엉뚱한
-프로세스를 죽일 위험이 있었다. python 계열이 아니면(=PID가 재사용된 것으로 의심) 건너뛰고
-경고만 남긴다 — 완벽한 신원 증명은 아니지만(여러 python 프로세스가 동시에 있을 수 있음),
-추가 의존성(psutil 등) 없이 "명백히 다른 프로그램"인 경우는 확실히 걸러낸다.
+종료 직전 그 PID가 start.py가 그때 기록해둔 서명(이미지이름+생성시각)과 여전히 일치하는지
+재확인한다(common.is_same_process) — 2026-10-30(T5-4) Codex 모드A 지적(C-001, 2차 라운드
+반영): 처음엔 "이름이 python인지"만 봤는데, PID가 재사용돼 *다른* python 프로세스가 그
+번호를 차지한 경우까지는 못 걸렀다. 프로세스 생성시각까지 비교하면 같은 PID라도 다른
+시각에 생긴 프로세스(=재사용된 것)는 구분된다. 서명이 안 맞으면(=PID 재사용 의심) 건너뛰고
+경고만 남긴다 — OS가 보장하는 수준에서 가능한 한 정확한 신원 확인(추가 의존성인 psutil
+없이 표준 라이브러리/OS 기본 도구만 사용).
 """
 
 from __future__ import annotations
@@ -27,7 +28,7 @@ import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from common import PID_FILE, eprint, is_our_python_process
+from common import PID_FILE, eprint, is_same_process
 
 
 def _terminate(pid: int) -> None:
@@ -56,13 +57,16 @@ def main() -> int:
         print(f"PID 파일을 읽지 못했습니다({exc}) — 수동으로 작업 관리자에서 확인해주세요.")
         return 1
 
-    for name, key in (("API", "api_pid"), ("워커", "worker_pid")):
-        pid = data.get(key)
+    for name, pid_key, sig_key in (
+        ("API", "api_pid", "api_signature"),
+        ("워커", "worker_pid", "worker_signature"),
+    ):
+        pid = data.get(pid_key)
         if pid is None:
             continue
-        if not is_our_python_process(pid):
+        if not is_same_process(pid, data.get(sig_key)):
             eprint(
-                f"⚠ {name}(PID {pid})는 이미 없거나 python 프로세스가 아닙니다(PID 재사용 "
+                f"⚠ {name}(PID {pid})가 이미 없거나 기록된 프로세스와 다릅니다(PID 재사용 "
                 "가능성) — 안전하게 건너뜁니다. 작업 관리자에서 직접 확인해주세요."
             )
             continue

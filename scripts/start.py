@@ -39,27 +39,27 @@ from common import (
     WEB_DIST_DIR,
     ensure_run_dirs,
     eprint,
-    process_image_name,
+    is_same_process,
+    process_start_signature,
     server_venv_python,
 )
 
 
-def _pid_alive(pid: int) -> bool:
-    # 2026-10-30(T5-4) — Codex 모드A 지적(C-005, 반영). 예전엔 윈도우에서 tasklist 출력
-    # 전체를 "PID 문자열이 어딘가 들어있는지"로만 확인했는데, 메모리 사용량 등 다른 칸에
-    # 같은 숫자가 우연히 나타나도 "살아있음"으로 오판할 수 있었다 — common.py의
-    # process_image_name()이 CSV로 정확히 파싱해 "그 PID 자체가 있는지"만 본다.
-    return process_image_name(pid) is not None
-
-
 def _already_running() -> dict | None:
+    # 2026-10-30(T5-4) — Codex 모드A 지적(C-002, 2차 라운드, 반영). 예전엔 "그 PID에
+    # *아무* 프로세스나 살아있으면" 이미 실행 중으로 봤는데, PID가 재사용돼 무관한
+    # 프로세스가 그 번호를 차지한 경우에도 "실행 중"으로 오판해 새 서버 시작을 막을 수
+    # 있었다 — stop.py와 같은 서명(이미지이름+생성시각) 비교로, 우리가 그때 기록해둔
+    # 바로 그 프로세스인지까지 확인한다.
     if not PID_FILE.exists():
         return None
     try:
         data = json.loads(PID_FILE.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError):
         return None
-    if _pid_alive(data.get("api_pid", -1)) or _pid_alive(data.get("worker_pid", -1)):
+    api_ok = is_same_process(data.get("api_pid", -1), data.get("api_signature"))
+    worker_ok = is_same_process(data.get("worker_pid", -1), data.get("worker_signature"))
+    if api_ok or worker_ok:
         return data
     return None
 
@@ -152,11 +152,18 @@ def main() -> int:
             f"{LOG_DIR}의 로그를 확인하세요."
         )
 
+    # 2026-10-30(T5-4) — Codex 모드A 지적(C-001, 2차 라운드, 반영). PID만 적어두면
+    # stop.py가 나중에 "그 번호가 python인지"는 볼 수 있어도 "우리가 띄운 바로 그
+    # 프로세스인지"는 알 길이 없다(PID 재사용 시 다른 python 프로세스를 오인할 수 있음)
+    # — 지금 막 띄운 프로세스의 생성시각 서명을 같이 기록해, stop.py가 종료 직전 그
+    # 서명이 그대로인지 재확인할 수 있게 한다.
     PID_FILE.write_text(
         json.dumps(
             {
                 "api_pid": api_proc.pid,
+                "api_signature": process_start_signature(api_proc.pid),
                 "worker_pid": worker_proc.pid,
+                "worker_signature": process_start_signature(worker_proc.pid),
                 "host": args.host,
                 "port": args.port,
                 "started_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
