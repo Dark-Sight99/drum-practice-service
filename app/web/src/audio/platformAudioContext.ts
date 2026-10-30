@@ -41,6 +41,12 @@ export function ensureIOSAudioContextSampleRate(): void {
     const context = new AudioContext({ sampleRate: 44100 })
     Tone.setContext(context)
     configured = true
+    // T6-11(진단용 임시, 2026-10-30) — AudioBufferSourceNode를 Tone 공유 컨텍스트에
+    // 얹었을 때도 T6-6 때 발견한 "공유 컨텍스트 자체가 느려지는" 문제가 재현되는지
+    // 사전검증하기 위해 임시 노출. 확인 끝나면 제거.
+    // @ts-expect-error 진단용 임시 전역
+    window.__t6_11_tone_context = context
+
   } catch {
     /* 폴백: Tone이 알아서 기본 컨텍스트를 만들게 둔다. configured는 false로 남겨 재시도
      * 가능성을 열어둠(Codex C-002). */
