@@ -149,6 +149,12 @@ class Song(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, server_default=func.now(), onupdate=func.now()
     )
+    # 2026-10-31(REQ-07, 의뢰인 요청 — "최근 사용한 카드가 라이브러리에 최상단에
+    # 오도록"). 연습 화면(열기)·편집 화면(편집) 둘 다 GET /songs/{id}/drumscore를
+    # 거치므로(api/songs.py get_song_drumscore) 그 한 지점에서만 갱신하면 됨.
+    # updated_at(행 자체의 수정 시각 — 이름변경 등)과는 의미가 달라 별도 컬럼으로
+    # 분리: 재생/편집을 위해 "연 것"과 "데이터를 고친 것"을 섞으면 안 됨.
+    last_opened_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     user: Mapped["User"] = relationship(back_populates="songs")
     assets: Mapped[list["Asset"]] = relationship(

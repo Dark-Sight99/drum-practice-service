@@ -112,6 +112,37 @@ def test_upload_then_list_and_fetch_drumscore(client: TestClient, db_session) ->
     assert score_resp.json() == _valid_drumscore()
 
 
+def test_list_songs_sorts_most_recently_opened_first(client: TestClient, db_session) -> None:
+    """REQ-07(2026-10-31, 의뢰인 요청) — "최근 사용한 카드가 라이브러리 최상단".
+    업로드 순서(A, B)와 무관하게 나중에 "연" 곡(A)이 위로 와야 한다.
+
+    SQLite의 CURRENT_TIMESTAMP(= Song.created_at의 server_default)는 초 단위
+    해상도라(실제 실행으로 확인 — 같은 테스트 안에서 연속 업로드하면 종종
+    같은 초에 찍힘), "업로드만 하고 연 적 없는" 상태의 순서를 테스트하려면
+    여기서처럼 created_at을 직접 벌려줘야 결정적이다. last_opened_at은
+    Python 쪽 utcnow_naive()로 찍어(마이크로초 해상도) 이 문제가 없다."""
+    from db.models import Song
+
+    _make_user(db_session, "u1")
+    _login(client, "u1")
+
+    id_a = _upload(client, title="A").json()["id"]
+    id_b = _upload(client, title="B").json()["id"]
+    song_a = db_session.get(Song, id_a)
+    song_a.created_at = song_a.created_at.replace(year=song_a.created_at.year - 1)
+    db_session.commit()
+
+    # 업로드만 한 상태(둘 다 한 번도 안 열림) — 아직 안 연 곡은 업로드 시각
+    # 기준으로 정렬돼, 더 최근에 올린 B가 위에 온다.
+    listed = client.get("/songs").json()
+    assert [s["id"] for s in listed] == [id_b, id_a]
+
+    # A를 나중에 열면(연습 화면 진입과 동일한 호출) A가 최상단으로 올라온다.
+    assert client.get(f"/songs/{id_a}/drumscore").status_code == 200
+    listed = client.get("/songs").json()
+    assert [s["id"] for s in listed] == [id_a, id_b]
+
+
 def test_other_user_cannot_access_song(client: TestClient, db_session) -> None:
     _make_user(db_session, "owner")
     _make_user(db_session, "other")

@@ -29,11 +29,13 @@ from fastapi import (
 )
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field, ValidationError
+from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from api.deps import get_current_user, get_db
 from api.schemas import DrumScoreIn, PracticeSettingIn, PracticeSettingOut
+from auth.security import utcnow_naive
 from db.models import (
     AUDIO_ASSET_KINDS,
     Asset,
@@ -131,7 +133,16 @@ def get_owned_song(
 
 @router.get("", response_model=list[SongOut])
 def list_songs(db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> list[Song]:
-    return db.query(Song).filter(Song.user_id == user.id).all()
+    """2026-10-31(REQ-07, 의뢰인 요청) — 최근에 연(재생/편집) 곡이 맨 위. 아직
+    한 번도 안 연 곡은 last_opened_at이 NULL이라 업로드 시각(created_at)으로
+    대체해 정렬 — 새로 올린 곡이 목록 맨 아래로 묻히지 않는다."""
+    order_key = func.coalesce(Song.last_opened_at, Song.created_at)
+    return (
+        db.query(Song)
+        .filter(Song.user_id == user.id)
+        .order_by(order_key.desc())
+        .all()
+    )
 
 
 @router.get("/{song_id}", response_model=SongOut)
@@ -406,7 +417,9 @@ def delete_song(song: Song = Depends(get_owned_song), db: Session = Depends(get_
 
 
 @router.get("/{song_id}/drumscore")
-def get_song_drumscore(song: Song = Depends(get_owned_song)) -> Response:
+def get_song_drumscore(
+    song: Song = Depends(get_owned_song), db: Session = Depends(get_db)
+) -> Response:
     asset = None
     for kind in (AssetKind.DRUMSCORE_EDITED, AssetKind.DRUMSCORE_RAW):
         asset = next((a for a in song.assets if a.kind == kind), None)
@@ -418,6 +431,14 @@ def get_song_drumscore(song: Song = Depends(get_owned_song)) -> Response:
     path = resolve_asset_path(asset.file_path)
     if path is None or not path.exists():
         raise HTTPException(status.HTTP_404_NOT_FOUND, "DrumScore를 찾을 수 없습니다")
+
+    # 2026-10-31(REQ-07, 의뢰인 요청) — 연습 화면(열기)·편집 화면(편집) 둘 다
+    # 이 엔드포인트를 거치므로(App.tsx handleOpen/handleEdit → fetchSongDrumScore)
+    # 여기 한 곳에서만 "사용한 시각"을 찍으면 라이브러리 정렬(list_songs)에
+    # 반영된다.
+    song.last_opened_at = utcnow_naive()
+    db.commit()
+
     return Response(content=path.read_bytes(), media_type="application/json")
 
 
