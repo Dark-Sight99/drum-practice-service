@@ -30,6 +30,22 @@ class TempoStretchError(Exception):
 PERMILLE_MIN = 490
 PERMILLE_MAX = 1510
 
+# Codex 검수 C-002(2026-10-31, main 병합 전 게이트 검수) 지적·재현 확인 —
+# 위 PERMILLE_MIN(490)은 "요청값으로 받아주는" 여유일 뿐인데, 원곡 BPM이
+# 정수가 아닌 곡(자동 채보라 흔함, 예: 92.3)에서는 프론트가 계산하는 최저
+# 속도 permille이 실제로 496~499대로 자주 떨어진다(7개 샘플 BPM으로 직접
+# 시뮬레이션 — 거의 절반이 이 구간에 걸림). 이 값을 그대로 atempo에 넘기면
+# ffmpeg가 "Value 0.498 for parameter 'tempo' out of range [0.5 - 100]"로
+# 하드 실패해(직접 재현 확인) 최저 속도 연습이 500 에러로 깨졌다 — REQ-04
+# 핵심 기능이 상당수 곡에서 실제로 망가지는 버그였음. 요청 허용 범위
+# (PERMILLE_MIN/MAX)는 그대로 두고(프론트의 반올림 여유가 여전히 필요),
+# ffmpeg에 실제로 넘기는 rate만 이 범위로 clamp한다 — 경계에서 최대
+# 0.4%(0.498→0.5)의 미세한 배속 오차가 생기지만, 이 프로젝트가 이미
+# 감수하는 atempo 자체 시작 오프셋 수준(수~수십ms)보다 작아 체감 영향이
+# 없다고 판단(별도 프론트 보정 없이 서버만 수정).
+ATEMPO_FILTER_MIN = 0.5
+ATEMPO_FILTER_MAX = 100.0
+
 # work/T6-11/plan.md "동시성"(Codex 모드C 1차 C-006 반영) — 동기 `def` 라우트가
 # 스레드풀에서 돌아 이벤트 루프는 안 막지만, 그게 "무제한 동시 변환"을 의미하진
 # 않음 — 의뢰인 1인(+지인 소수) 사용 규모라 세마포어 2(드럼+음악 1곡 분량이
@@ -74,6 +90,10 @@ def time_stretch_mp3(input_path: Path, permille: int) -> bytes:
     아니라 **요청값 자체가 "적용 비율"의 정의**(Codex 모드C 1차 C-003,
     work/T6-11/plan.md "API 계약" — 프론트의 잔차 playbackRate 보정이 이 정의를
     전제로 계산되므로, 실측 길이로 바꿔치기하면 두 종류의 오차가 뒤섞인다).
+    단, PERMILLE_MIN/MAX 경계 근처(예: 498)는 ffmpeg 자체의 유효 범위
+    [0.5, 100]을 벗어날 수 있어 그 구간에서만 ATEMPO_FILTER_MIN/MAX로 clamp한다
+    (Codex 검수 C-002 — 위 PERMILLE_MIN/MAX 주석 참고). 최대 0.4% 수준의
+    오차라 잔차 보정 없이 서버 쪽만으로 흡수.
 
     실측으로 발견된 주의점(plan.md): atempo 결과물은 배속별로 일정한(누적 안
     되는) 시작 오프셋이 있음(예: 0.5배속 약 −24ms) — 이 함수는 그 오프셋을
@@ -82,7 +102,7 @@ def time_stretch_mp3(input_path: Path, permille: int) -> bytes:
     if not PERMILLE_MIN <= permille <= PERMILLE_MAX:
         raise ValueError(f"permille 범위를 벗어남({PERMILLE_MIN}~{PERMILLE_MAX}): {permille}")
 
-    rate = permille / 1000
+    rate = max(ATEMPO_FILTER_MIN, min(ATEMPO_FILTER_MAX, permille / 1000))
     ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
     fd, tmp_path_str = tempfile.mkstemp(suffix=".mp3")
     tmp_path = Path(tmp_path_str)

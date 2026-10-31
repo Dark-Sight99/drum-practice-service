@@ -76,6 +76,29 @@ def test_time_stretch_mp3_rejects_out_of_range_permille(tmp_path: Path) -> None:
         time_stretch_mp3(wav_path, PERMILLE_MAX + 1)
 
 
+def test_time_stretch_mp3_clamps_below_ffmpeg_atempo_floor(tmp_path: Path) -> None:
+    """Codex 검수 C-002(2026-10-31) — 원곡 BPM이 정수가 아닌 곡에서는 프론트가
+    계산하는 최저 속도 permille이 496~499대로 자주 떨어지는데(직접 시뮬레이션
+    확인), 이 값을 그대로 ffmpeg atempo에 넘기면 ffmpeg 자체 유효 범위
+    [0.5, 100] 미만이라 하드 실패했다(실측 재현: "Value 0.498 ... out of range
+    [0.5 - 100]"). PERMILLE_MIN(490)은 그대로 통과시키되 실제 atempo rate는
+    0.5로 clamp해 더 이상 터지지 않아야 한다."""
+    wav_path = tmp_path / "tone.wav"
+    _write_tone(wav_path, duration_s=1.0)
+
+    # permille=498은 PERMILLE_MIN(490)~PERMILLE_MAX 범위 안이라 ValueError는
+    # 안 나야 하고, 예전처럼 TempoStretchError(ffmpeg 실패)도 안 나야 한다.
+    result = time_stretch_mp3(wav_path, 498)
+    assert len(result) > 0
+
+    # clamp된 rate(0.5)로 실제 변환됐는지 길이로 교차 검증 — permille=500과
+    # 거의 같은 길이가 나와야 한다(498 그대로 적용됐다면 미세하게 더 길어짐).
+    clamped = _mp3_duration_seconds(result, tmp_path, "clamped_498.mp3")
+    floor = time_stretch_mp3(wav_path, 500)
+    floor_duration = _mp3_duration_seconds(floor, tmp_path, "floor_500.mp3")
+    assert clamped == pytest.approx(floor_duration, abs=0.05)
+
+
 def test_time_stretch_mp3_raises_on_ffmpeg_failure(tmp_path: Path) -> None:
     missing_path = tmp_path / "does-not-exist.wav"
 
