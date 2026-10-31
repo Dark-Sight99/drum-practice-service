@@ -1526,10 +1526,18 @@ export function EditorScreen({
         >
           <Redo2 size={16} aria-hidden="true" />
         </button>
+        {/* 2026-10-31(의뢰인 요청 — "편집했을 때 활성화되는 저장버튼도 적용
+         * 버튼처럼 눈에 잘 띄게") — 위 BPM "적용" 버튼과 같은 패턴(저장할
+         * 내용이 있을 때만 --warning 색으로 강조, 없으면 평소 회색 비활성). */}
         <button
           onClick={() => void handleSave().then((ok) => ok && onSaved())}
           disabled={isSaving || !isDirty}
           title={!isDirty && !isSaving ? '변경한 내용이 없습니다' : undefined}
+          style={
+            isDirty && !isSaving
+              ? { color: 'var(--warning)', borderColor: 'var(--warning)', fontWeight: 600 }
+              : undefined
+          }
         >
           {isSaving ? '저장 중…' : '저장'}
         </button>
