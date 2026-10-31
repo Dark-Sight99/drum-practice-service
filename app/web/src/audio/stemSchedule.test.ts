@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { planStemStart, stemBufferOffsetSeconds, stemNodePlaybackRate, type StemSessionTiming } from './stemSchedule'
+import {
+  appliedBufferTempoRatio,
+  planStemStart,
+  stemBufferOffsetSeconds,
+  stemNodePlaybackRate,
+  type StemSessionTiming,
+} from './stemSchedule'
 
 function timing(overrides: Partial<StemSessionTiming> = {}): StemSessionTiming {
   return {
@@ -47,6 +53,37 @@ describe('stemNodePlaybackRate', () => {
     const exact = 0.853
     const quantized = 853 / 1000
     expect(stemNodePlaybackRate(timing({ playbackRate: exact }), quantized)).toBeCloseTo(exact / quantized, 10)
+  })
+})
+
+describe('appliedBufferTempoRatio', () => {
+  it('ffmpeg atempo 유효 범위(0.5~100) 안이면 요청값 그대로(permille/1000)', () => {
+    expect(appliedBufferTempoRatio(1000)).toBeCloseTo(1, 10)
+    expect(appliedBufferTempoRatio(500)).toBeCloseTo(0.5, 10)
+    expect(appliedBufferTempoRatio(1500)).toBeCloseTo(1.5, 10)
+  })
+
+  it('Codex 검수 C-004(2026-10-31, 재검수에서 발견) — 경계 밖(490~499)은 서버가 0.5로 clamp해 변환하므로, 요청값이 아니라 0.5를 돌려줘야 한다', () => {
+    expect(appliedBufferTempoRatio(498)).toBeCloseTo(0.5, 10)
+    expect(appliedBufferTempoRatio(490)).toBeCloseTo(0.5, 10)
+  })
+
+  it('이 값을 stemNodePlaybackRate()에 넘기면 경계 permille에서도 스템이 synth 노트와 같은 속도로 재생된다(C-004 재현 시나리오)', () => {
+    // 원곡 92.3bpm, iOS 아닌 50% 하한 → minBpm=46, exactRate=46/92.3≈0.49837
+    // → permille=round(498.37)=498 (실제로 PracticeCanvas.tsx/EditorScreen.tsx가
+    // 계산하는 값과 동일한 시나리오).
+    const exactRate = 46 / 92.3
+    const permille = Math.round(exactRate * 1000) // 498
+    const ratio = appliedBufferTempoRatio(permille)
+    // 수정 전엔 ratio가 permille/1000(0.498) 그대로였고 timing.playbackRate도
+    // 0.498에 가까워 stemNodePlaybackRate가 1에 가까워(보정 없음) 버퍼가
+    // 실제론 0.5로 변환됐는데도 네이티브 rate가 전혀 안 걸려 0.4% 빠르게
+    // 재생됐다. 수정 후엔 ratio=0.5로 실제 적용값을 정확히 반영해, 잔차
+    // 보정이 그 차이(exactRate/0.5)만큼 제대로 걸린다.
+    const rate = stemNodePlaybackRate(timing({ playbackRate: exactRate }), ratio)
+    expect(rate).toBeCloseTo(exactRate / 0.5, 10)
+    // 수정 전처럼 "보정 없음"(rate===1)이면 안 됨 — 실제 차이는 약 0.33%.
+    expect(rate).not.toBeCloseTo(1, 4)
   })
 })
 

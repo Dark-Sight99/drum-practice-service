@@ -47,6 +47,7 @@ export {
   STEM_POOL_RELOAD_DELAY_MS,
 } from './stemPlayer'
 export type { StemBufferPool, StemPlayer, StemSource } from './stemPlayer'
+export { appliedBufferTempoRatio } from './stemSchedule'
 export type { StemSessionTiming } from './stemSchedule'
 export {
   audioTrackPositionSeconds,

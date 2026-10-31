@@ -17,6 +17,30 @@
 // 없어져 resync()가 통째로 불필요해진다.
 import { audioTrackPositionSeconds } from './timing'
 
+/** `app/server/modules/tempo/atempo.py`의 `ATEMPO_FILTER_MIN`/`MAX`와 반드시
+ * 같은 값으로 유지해야 한다(Codex 검수 C-004, 2026-10-31 — 재검수에서 발견).
+ * 서버는 요청 permille(부동소수점 반올림 여유를 둬 490~1510까지 받음)을
+ * ffmpeg atempo 필터 자체의 유효 범위로 clamp한 rate로 실제 변환하지만,
+ * 캐시 파일명·`X-Tempo-Permille` 응답 헤더는 요청값을 그대로 돌려준다(API
+ * 계약 — Codex 모드C 1차 C-003) — "이 버퍼가 실제로 몇 배속으로 렌더됐는지"는
+ * 요청 permille만으로는 알 수 없고, 아래 `appliedBufferTempoRatio()`로 서버와
+ * 같은 clamp를 프론트에서도 재현해야 한다. 안 그러면(실제 재현된 버그) 경계
+ * permille(예: 498)에서 `bufferTempoRatio`가 "요청값 그대로"라고 잘못
+ * 믿어버려 `stemNodePlaybackRate()`의 잔차 보정이 "불필요"로 판단되고, 그
+ * 결과 스템 오디오가 신스 노트보다 0.4%(0.5/0.498−1) 빠르게 재생돼 곡
+ * 길이 내내 어긋남이 누적된다(5분 곡 기준 끝에 약 1.2초). */
+export const ATEMPO_FILTER_MIN = 0.5
+export const ATEMPO_FILTER_MAX = 100
+
+/** 요청 `permille`로부터 "서버가 실제로 적용했을" `bufferTempoRatio`를
+ * 계산한다 — 위 상수로 서버의 clamp를 그대로 재현. `permille===1000`(배속
+ * 변경 없음)은 애초에 atempo 자체를 안 거치므로(`stemTempoAudioUrl()`의
+ * 원본 URL 폴백) 이 함수를 거칠 필요가 없지만, 호출해도 결과가 그대로 1이라
+ * 안전(1000/1000=1, 범위 안이라 clamp 영향 없음). */
+export function appliedBufferTempoRatio(permille: number): number {
+  return Math.max(ATEMPO_FILTER_MIN, Math.min(ATEMPO_FILTER_MAX, permille / 1000))
+}
+
 /** 한 재생 세션의 스템 타이밍 상수. `scorePlayer.ts`가 `computePlaybackSchedule()`
  * 결과로 채워서 `StemPlayer.attach()`에 넘긴다. */
 export interface StemSessionTiming {
@@ -41,7 +65,10 @@ export interface StemSessionTiming {
  * 원본 스템 그대로면 1, 서버가 사전 변환한 배속 파일이면 그 배속의 실제
  * 적용값(T6-11 API 계약상 `permille / 1000`, 요청값 자체가 정의 — 백엔드
  * 실측 길이가 아니라 요청값을 기준으로 삼는다, work/T6-11/plan.md "API 계약"
- * §Codex C-003 반영 참고).
+ * §Codex C-003 반영 참고). **단, 경계 permille(위 ATEMPO_FILTER_MIN/MAX
+ * 범위 밖)는 예외 — 서버가 실제로는 clamp된 rate로 변환하므로, 호출자는
+ * "요청값"이 아니라 `appliedBufferTempoRatio()`가 돌려주는 값을 넘겨야
+ * 한다(Codex 검수 C-004 재발견, 위 상수 코멘트 참고).**
  *
  * 유도: 원곡(1배속) 기준 위치 p = audioTrackPositionSeconds(...)(기존
  * 함수·기존 증명 그대로 재사용). b배속으로 늘이거나 줄인 파일에서 "원곡의

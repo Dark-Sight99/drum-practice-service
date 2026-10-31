@@ -33,7 +33,10 @@ interface StemTrack {
 export interface StemBufferPool {
   readonly kinds: readonly string[]
   /** 이 풀의 버퍼가 렌더된 배속(서버 변환본이면 그 배속의 permille/1000,
-   * 원본 그대로면 1 — stemSchedule.ts의 `bufferTempoRatio`와 같은 의미). */
+   * 원본 그대로면 1 — stemSchedule.ts의 `bufferTempoRatio`와 같은 의미).
+   * 호출자는 이 값을 `appliedBufferTempoRatio()`로 계산해 넘겨야 한다
+   * (경계 permille에서 서버가 실제로 clamp하므로 요청값 그대로면 틀림 —
+   * Codex 검수 C-004, stemSchedule.ts 상단 주석 참고). */
   readonly bufferTempoRatio: number
   readonly destroyed: boolean
   destroy(): void

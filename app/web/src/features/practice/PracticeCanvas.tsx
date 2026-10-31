@@ -18,6 +18,7 @@ import {
   type LucideIcon,
 } from 'lucide-react'
 import {
+  appliedBufferTempoRatio,
   barDurationSeconds,
   barIndexForSeconds,
   barIndexForTick,
@@ -645,7 +646,10 @@ export function PracticeCanvas({
           kind,
           url: stemTempoAudioUrl(songId, kind, stemTempoPermille),
         })),
-        { bufferTempoRatio: stemTempoPermille / 1000 },
+        // Codex 검수 C-004(2026-10-31, 재검수에서 발견) — 경계 permille에서
+        // 서버가 실제로 clamp해 변환하므로 요청값 그대로 쓰면 안 됨
+        // (stemSchedule.ts의 appliedBufferTempoRatio() 코멘트 참고).
+        { bufferTempoRatio: appliedBufferTempoRatio(stemTempoPermille) },
       )
         .then((pool) => {
           if (cancelled) {
