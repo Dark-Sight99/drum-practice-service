@@ -2,9 +2,8 @@ import * as Tone from 'tone'
 import type { DrumScore } from '../score/types'
 import { stopAllRinging, type DrumVoiceMap } from './drumVoices'
 import { createClickVoice } from './metronome'
-import type { TrackPlayer } from './trackPlayer'
+import type { StemPlayer } from './stemPlayer'
 import {
-  audioTrackPositionSeconds,
   computePlaybackSchedule,
   metronomeBeatTimes,
   ticksToSeconds,
@@ -29,10 +28,10 @@ export interface PlayDrumScoreOptions {
   /** A-B 구간 반복(REQ-04). 지정 시 그 구간만 반복 재생 — 끊김·중복 클릭 없이
    * 루프되는 근거는 work/T2-4/plan.md §설계 "Tone.js 루프 동작 근거" 참고. */
   loop?: LoopBars
-  /** T3-3(REQ-04) — 분리된 오디오 트랙(이미 `prime()`까지 끝난 상태). 없으면
-   * 기존과 동일하게 MIDI만 재생(분리 안 된 곡·`audioOffsetMs≠0` 가드가 켜진
-   * 경우 — work/T3-3/plan.md §범위경계, 호출자 `PracticeCanvas`가 결정). */
-  tracks?: TrackPlayer
+  /** T3-3(REQ-04) → T6-11(REQ-06, Q-33)에서 `TrackPlayer`(`<audio>` 기반)를
+   * `StemPlayer`(Tone.Player 기반)로 교체 — `resync()` 자체가 필요 없어짐
+   * (work/T6-11/plan.md). 없으면 기존과 동일하게 MIDI만 재생. */
+  tracks?: StemPlayer
   /** 2026-10-27(의뢰인 요청) — 카운트인 클릭 음량(dB). 기존엔 믹서의 "메트로놈"
    * 채널 설정과 무관하게 항상 Tone.js 기본 음량(0dB, 꽤 큼)으로 울려서 "음악
    * 소리는 작은데 그 소리만 너무 크다"는 불편의 원인이었다 — 호출자
@@ -188,33 +187,25 @@ export function playDrumScore(
     transport.loop = true
   }
 
-  // T3-3(REQ-04, work/T3-3/plan.md §4) — audioStartSeconds는 "최초 진입"과
-  // "매 루프 재진입" 둘 다를 가리킨다(루프가 없으면 songStartSeconds 한 번만,
-  // 있으면 Tone 네이티브 루프가 이 schedule() 콜백을 경계마다 재발화함 — 위
-  // 주석과 같은 근거). 같은 일반식(audioTrackPositionSeconds)을 그대로 써서
-  // 루프 시작 지점이 0마디가 아니어도 오디오가 올바른 위치로 이동한다(모드C
-  // 1라운드에서 "항상 0으로 틀던" 설계 오류를 고친 자리).
+  // T6-11(REQ-04/06, Q-33) — 예전엔 여기서 transport.schedule()로 "최초
+  // 진입 + 매 루프 재진입" 시각에 맞춰 tracks.playFrom()을 수동으로 재호출
+  // 했다(네이티브 루프가 schedule() 콜백을 경계마다 재발화한다는 성질에
+  // 의존, T3-3). StemPlayer는 그 대신 Transport의 네이티브 `start`/`loopStart`
+  // 이벤트를 직접 구독해 스스로 따라가므로(resync() 없이 — work/T6-11/
+  // plan.md), 여기선 재생 시작 전에 세션 타이밍만 넘겨 attach()하면 된다.
+  // audioStartSeconds(카운트인 동안 무음 게이트 기준)는 StemSessionTiming
+  // 안에서 stemSchedule.ts가 자체적으로 계산(loopStart ?? songStart와 동일한
+  // 공식).
   const tracks = options.tracks
   if (tracks) {
-    const audioStartSeconds = schedule.loopStartSeconds ?? schedule.songStartSeconds
-    scheduledIds.push(
-      transport.schedule(() => {
-        // 재생 위치(파일 안 어디서부터 틀지)는 항상 "진짜" audioStartSeconds
-        // 기준 — 트리거만 당겨지고 내용 자체는 안 당겨져야 연속 재생이 맞다
-        // (위 audioLatencyCompensationMs 옵션 설명 참고).
-        // T3-72(REQ-02, Q-43) — 4번째 인자(오프셋)로 다운비트가 원곡 파일
-        // 에서 몇 초 지점인지 전달 — 더 이상 "틱0=파일 위치0"이 아니므로
-        // 빠뜨리면 음원 트랙만 다운비트 위치에서 어긋난다(work/T3-72/
-        // plan.md §4). 항상 0 이상이라 별도 클램프 불필요(§5 증명).
-        const positionSeconds = audioTrackPositionSeconds(
-          audioStartSeconds,
-          schedule.songStartSeconds,
-          playbackRate,
-          score.audioOffsetMs / 1000,
-        )
-        tracks.playFrom(positionSeconds, playbackRate)
-      }, compensatedTriggerTime(audioStartSeconds)),
-    )
+    tracks.attach({
+      songStartSeconds: schedule.songStartSeconds,
+      audioStartSeconds: schedule.loopStartSeconds ?? schedule.songStartSeconds,
+      // T3-72(REQ-02, Q-43) — 다운비트가 원곡 파일에서 몇 초 지점인지.
+      audioOffsetSeconds: score.audioOffsetMs / 1000,
+      playbackRate,
+      latencyCompensationSeconds,
+    })
   }
 
   transport.start(undefined, schedule.playbackStartSeconds)
@@ -225,17 +216,20 @@ export function playDrumScore(
       transport.loop = false
       transport.stop()
       countInClick.dispose()
-      tracks?.stop()
+      tracks?.detach()
     },
     pause() {
       transport.pause()
       stopAllRinging(voices)
       countInClick.stopRinging()
-      tracks?.pause()
+      // T6-11 — tracks.pause() 호출 불필요: transport.pause()가 Transport의
+      // 네이티브 'pause' 이벤트를 발화하고, StemPlayer가 그 이벤트를 직접
+      // 구독해 스스로 정지한다(attach() 참고).
     },
     resume() {
       transport.start()
-      tracks?.resume()
+      // T6-11 — 같은 이유로 tracks.resume() 호출 불필요: transport.start()의
+      // 네이티브 'start' 이벤트를 StemPlayer가 직접 구독한다.
     },
   }
 }

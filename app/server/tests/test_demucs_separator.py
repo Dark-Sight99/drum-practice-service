@@ -530,6 +530,30 @@ def test_mix_stems_raises_on_empty_input(tmp_path):
         mix_stems([])
 
 
+def test_mix_stems_downmixes_stereo_input_to_mono_output(tmp_path):
+    """2026-10-31(REQ-04, Q-47 조사 중 발견 — qa-evidence/T6-11-memory-diag/
+    client-debug.jsonl, demucs_separator.py `_mix_wavs_to_tempfile()` 코멘트
+    참고) — 입력이 스테레오(채널 2개)여도 출력은 항상 모노(채널 1개)여야
+    한다(디코딩된 PCM 버퍼 크기를 절반으로 줄여 iOS 메모리 부족 완화).
+    왼쪽·오른쪽 채널에 서로 다른 내용을 넣어(한쪽만 무음이 아닌 실제 신호)
+    "그냥 한쪽 채널만 버린 게 아니라 실제로 섞였는지"까지 확인한다."""
+    sr = 44100
+    t = np.linspace(0, 1.0, sr, endpoint=False)
+    left = 0.3 * np.sin(2 * np.pi * 440 * t)
+    right = 0.3 * np.sin(2 * np.pi * 880 * t)
+    stereo = np.stack([left, right], axis=1)
+    path_a = tmp_path / "stereo.wav"
+    sf.write(str(path_a), stereo.astype(np.float32), sr)
+
+    result = mix_stems([path_a])
+
+    mp3_path = tmp_path / "out.mp3"
+    mp3_path.write_bytes(result)
+    y, _ = librosa.load(str(mp3_path), sr=None, mono=False)
+    assert y.ndim == 1  # 모노면 1차원 배열(스테레오였다면 (2, 샘플수) 2차원)
+    assert np.max(np.abs(y)) > 0  # 신호 자체는 살아있음(완전 무음 아님)
+
+
 def test_mix_stems_handles_single_input(tmp_path):
     """amix는 입력이 1개면 그대로 통과한다(ffmpeg 공식 동작) — 스템이 1개뿐인
     (예: 보컬이 감지 안 된) 드문 곡에서도 안전해야 한다."""

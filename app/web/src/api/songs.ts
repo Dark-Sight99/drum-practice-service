@@ -23,6 +23,18 @@ export function songAudioUrl(songId: number, kind: string): string {
   return `/api/songs/${songId}/audio/${kind}`
 }
 
+/** T6-11 Step 3(REQ-04, Q-33) — 음정 유지 배속 변환본 URL(work/T6-11/plan.md
+ * "API 계약"). `permille`은 `Math.round(exactRate * 1000)`(exactRate =
+ * playbackBpm/원곡BPM). 1000(배속 변경 없음)이면 백엔드가 atempo조차 안 거치고
+ * 원본을 그대로 돌려주므로, 여기서도 그 경우엔 기존 `songAudioUrl()`과 완전히
+ * 같은 URL을 써서 불필요한 추가 경로 분기를 만들지 않는다(두 URL이 최종적으로
+ * 같은 파일을 가리킴 — 캐시 적중률도 그대로 유지). */
+export function stemTempoAudioUrl(songId: number, kind: string, permille: number): string {
+  return permille === 1000
+    ? songAudioUrl(songId, kind)
+    : `/api/songs/${songId}/audio/${kind}/tempo/${permille}`
+}
+
 export async function listSongs(): Promise<SongSummary[]> {
   return apiFetchJson<SongSummary[]>('/songs')
 }

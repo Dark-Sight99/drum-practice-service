@@ -1,4 +1,5 @@
 import * as Tone from 'tone'
+import { getMasterLimiter } from './masterLimiter'
 import type { TimeSignature } from './timing'
 
 export interface MetronomeOptions {
@@ -40,7 +41,11 @@ export interface ClickVoice {
  * 재생 중 메트로놈(createMetronome)과 카운트인(scorePlayer.ts)이 같은
  * 소리·같은 음량 기준을 쓰도록 공유하는 팩토리. */
 export function createClickVoice(volumeDb = -6): ClickVoice {
-  const output = new Tone.Volume(volumeDb).toDestination()
+  // Codex 검수 C-001(2026-10-31) — 이전엔 리미터 없이 바로 destination에
+  // 연결돼 있어, 스템·신스 드럼과 동시에 울릴 때 전체 합산이 0dBFS를 넘는
+  // 클리핑 위험에 전혀 대비가 안 돼 있었다(masterLimiter.ts 상단 주석
+  // 참고) — 앱 전역 공유 Limiter를 거치도록 한다.
+  const output = new Tone.Volume(volumeDb).connect(getMasterLimiter())
   const accentSynth = new Tone.Synth({
     oscillator: { type: 'sine' },
     envelope: { attack: 0.001, decay: 0.05, sustain: 0, release: 0.02 },

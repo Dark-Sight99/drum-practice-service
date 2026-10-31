@@ -171,3 +171,38 @@ export const METRONOME_BOOST_DB = 6
 export function metronomeGainToDb(linear: number): number {
   return linearGainToDb(linear) + METRONOME_BOOST_DB
 }
+
+/** 2026-10-30(의뢰인 요청) — "드럼원본소리를 전반적으로 더 키워줄 수 있나?
+ * 100%도 좀 작게들려서." METRONOME_BOOST_DB와 같은 이유·같은 패턴(T3-39) —
+ * Claude가 소리를 직접 들을 수 없어 몇 dB가 "딱 맞는지" 판단 불가(CLAUDE.md
+ * §1), 메트로놈 때 쓴 것과 같은 +6dB(체감 음량 약 2배)를 1차 추정치로 적용.
+ * 모자라거나 과하면 의뢰인이 직접 듣고 조정. 연습 화면(`stemPlayer.ts`,
+ * Tone.Player 기반)에만 적용 — 편집 화면은 아직 구 `<audio>` 엘리먼트 경로라
+ * `element.volume`이 네이티브로 1을 못 넘어서(브라우저 스펙 제약) 같은 방식의
+ * 부스트가 안 먹는다. 그쪽은 Step 4(StemPlayer 전환) 때 같이 적용 예정.
+ * 2026-10-30 추가(의뢰인 — "6 더 올릴 수 있어? 음질 깨질 걱정은?") — +12dB로
+ * 상향. 클리핑(찢어지는 소리) 걱정에 대응해 `stemPlayer.ts`의
+ * `loadStemBufferPool()`에 공유 Limiter(-1dB, synth_drums의 T3-7과 같은
+ * 설정)를 새로 달아 destination 직전 합산 레벨을 묶어뒀다 — 그 작업과 같이
+ * 올림(순서상 리미터 없이 올리면 안 됨). 그래도 "몇 dB가 듣기 좋은지"는
+ * 여전히 의뢰인이 직접 들어야 아는 영역이라 12도 추정치. */
+export const STEM_DRUMS_BOOST_DB = 12
+
+/** `setChannelGain()`은 선형(0~1) 게인을 받으므로, dB 부스트를 선형 배율로
+ * 환산해 곱한다(20*log10 공식의 역함수 — linearGainToDb()와 쌍을 이룸). */
+export function stemDrumsBoostedGain(linear: number): number {
+  return linear * 10 ** (STEM_DRUMS_BOOST_DB / 20)
+}
+
+/** 2026-10-31(의뢰인 요청 — "신스드럼의 볼륨도 +12db올려줬으면 좋겠다", 원곡
+ * 드럼 부스트가 좋다는 확인 뒤) — STEM_DRUMS_BOOST_DB와 같은 이유·같은 크기로
+ * 신스 드럼(synth_drums) 채널에도 적용. 신스 드럼은 이미 전용 Limiter(-1dB,
+ * T3-7)를 거치는 체인에 물려 있어 stem_drums 부스트 때처럼 클리핑 걱정 없이
+ * 그대로 올릴 수 있다(stemPlayer.ts의 공유 Limiter와 별개 체인). */
+export const SYNTH_DRUMS_BOOST_DB = 12
+
+/** stemDrumsBoostedGain()과 쌍을 이루는 synth_drums 전용 버전 — 같은 공식,
+ * 다른 상수(향후 둘을 독립적으로 조정해야 할 수 있어 분리해둠). */
+export function synthDrumsBoostedGain(linear: number): number {
+  return linear * 10 ** (SYNTH_DRUMS_BOOST_DB / 20)
+}

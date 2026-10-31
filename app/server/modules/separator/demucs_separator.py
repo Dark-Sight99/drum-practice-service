@@ -156,7 +156,20 @@ def _mix_wavs_to_tempfile(wav_paths: list[Path]) -> Path:
     그냥 더해지는" 지금의 체감 음량과 달라진다 — `normalize=0`이라야 순수
     합산이 돼 기존 동시재생과 수학적으로 같은 결과가 됨, work/T6-3/plan.md
     "Codex C-002 반영" 참고). 입력 길이가 다르면 `duration=longest`로 가장
-    긴 입력 길이에 맞춘다(짧은 입력은 무음으로 채워짐 — ffmpeg 공식 동작)."""
+    긴 입력 길이에 맞춘다(짧은 입력은 무음으로 채워짐 — ffmpeg 공식 동작).
+
+    2026-10-31(REQ-04, Q-47 조사 중 발견한 메모리 문제 — qa-evidence/
+    T6-11-memory-diag/client-debug.jsonl) — 출력을 모노(`-ac 1`)로 내린다.
+    연습↔편집 화면을 오가며 배속을 반복해서 바꾸면, 디코딩된 PCM 버퍼(압축
+    전 원시 데이터, 스테레오 기준 곡 하나에 100MB대)가 반복 재로딩되면서
+    iOS Safari가 메모리 부족으로 탭을 강제 종료하는 걸 실기기로 확인 — 채널을
+    절반(2→1)으로 줄이면 이 함수가 만드는 "음악"(베이스+보컬+그 외) 트랙의
+    디코딩 버퍼 크기도 그만큼 줄어든다. 드럼(`stem_drums`)은 심벌·오버헤드처럼
+    좌우로 나뉜 공간감이 음질에 더 크게 영향을 줄 수 있어 모노화 대상에서
+    제외(의뢰인 결정) — 베이스·보컬은 대부분 믹스에서 이미 중앙(모노에
+    가까움)에 배치되는 게 관행이라 상대적으로 영향이 적을 것으로 판단.
+    ffmpeg의 `-ac 1`은 단순 채널 버리기가 아니라 입력 채널을 적절히 혼합해
+    모노로 내리는 표준 동작(ffmpeg 공식 문서 확인)."""
     import imageio_ffmpeg
 
     if not wav_paths:
@@ -175,7 +188,7 @@ def _mix_wavs_to_tempfile(wav_paths: list[Path]) -> Path:
         filter_chain = (
             f"{inputs_labels}amix=inputs={len(wav_paths)}:duration=longest:normalize=0"
         )
-        cmd += ["-filter_complex", filter_chain, str(tmp_path)]
+        cmd += ["-filter_complex", filter_chain, "-ac", "1", str(tmp_path)]
         proc = subprocess.run(
             cmd, capture_output=True, text=True, encoding="utf-8", errors="replace"
         )

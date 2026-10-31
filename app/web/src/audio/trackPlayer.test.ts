@@ -44,6 +44,21 @@ vi.mock('tone', () => ({
   }),
 }))
 
+// T6-6 — trackPlayer.ts가 Tone 컨텍스트 대신(또는 실패 시 폴백으로) iOS 전용 스템
+// 컨텍스트를 쓰므로, 그 선택 분기를 검증하려면 getIOSStemAudioContext()를 통제할 수
+// 있어야 한다. isIOS()는 실제 구현 그대로 둬서(vi.importActual) 기존 테스트들의
+// stubIOSUserAgent() 패턴이 그대로 동작하게 한다 — getIOSStemAudioContext()만 교체.
+// 기본값 null — jsdom엔 실제 AudioContext가 없어 실제 구현도 항상 null을 반환하는
+// 것과 동일한 상태라, 기존(T6-6 이전) 테스트들의 "Tone 컨텍스트로 폴백" 동작을 그대로
+// 보존한다. 새 테스트만 .mockReturnValue()로 override.
+const { getIOSStemAudioContextMock } = vi.hoisted(() => ({
+  getIOSStemAudioContextMock: vi.fn(() => null as unknown),
+}))
+vi.mock('./platformAudioContext', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./platformAudioContext')>()
+  return { ...actual, getIOSStemAudioContext: getIOSStemAudioContextMock }
+})
+
 const { createAudioTrackPool, createTrackPlayer, selectStemKinds } = await import('./trackPlayer')
 type TrackSource = { kind: string; url: string }
 
@@ -127,6 +142,8 @@ describe('createTrackPlayer', () => {
       sourceNodes.push(node)
       return node
     })
+    // T6-6 — 기본값으로 리셋(Tone 컨텍스트 폴백 경로) — 개별 테스트만 override.
+    getIOSStemAudioContextMock.mockReset().mockReturnValue(null)
   })
 
   afterEach(() => {
@@ -176,6 +193,62 @@ describe('createTrackPlayer', () => {
 
     expect(createMediaElementSourceMock).not.toHaveBeenCalled()
     expect(createGainMock).not.toHaveBeenCalled()
+  })
+
+  describe('T6-6 — iOS 전용 스템 AudioContext 분리', () => {
+    it('iOS에서 getIOSStemAudioContext()가 컨텍스트를 주면 Tone 컨텍스트가 아니라 그걸로 노드를 연결한다', async () => {
+      stubIOSUserAgent()
+      const stemCreateGain = vi.fn(() => ({ gain: { value: 1 }, connect: vi.fn(), disconnect: vi.fn() }))
+      const stemCreateMediaElementSource = vi.fn(() => ({ connect: vi.fn(), disconnect: vi.fn() }))
+      const STEM_DESTINATION = { marker: 'stem-destination' }
+      getIOSStemAudioContextMock.mockReturnValue({
+        createGain: stemCreateGain,
+        createMediaElementSource: stemCreateMediaElementSource,
+        destination: STEM_DESTINATION,
+        resume: vi.fn(),
+      })
+
+      await createPlayer([{ kind: 'stem_drums', url: 'http://x/drums.wav' }])
+
+      expect(stemCreateMediaElementSource).toHaveBeenCalledTimes(1)
+      expect(stemCreateGain).toHaveBeenCalledTimes(1)
+      // Tone 쪽(기존 모킹된 컨텍스트)은 전혀 안 건드려야 함.
+      expect(createMediaElementSourceMock).not.toHaveBeenCalled()
+      expect(createGainMock).not.toHaveBeenCalled()
+    })
+
+    it('iOS인데 getIOSStemAudioContext()가 null이면(생성 실패) Tone 컨텍스트로 폴백한다', async () => {
+      stubIOSUserAgent()
+      getIOSStemAudioContextMock.mockReturnValue(null)
+
+      await createPlayer([{ kind: 'stem_drums', url: 'http://x/drums.wav' }])
+
+      expect(createMediaElementSourceMock).toHaveBeenCalledTimes(1)
+      expect(createGainMock).toHaveBeenCalledTimes(1)
+    })
+
+    it('prime()이 전용 스템 컨텍스트의 resume()을 호출한다', async () => {
+      stubIOSUserAgent()
+      const resumeMock = vi.fn()
+      getIOSStemAudioContextMock.mockReturnValue({
+        createGain: () => ({ gain: { value: 1 }, connect: vi.fn(), disconnect: vi.fn() }),
+        createMediaElementSource: () => ({ connect: vi.fn(), disconnect: vi.fn() }),
+        destination: {},
+        resume: resumeMock,
+      })
+
+      const player = await createPlayer([{ kind: 'stem_drums', url: 'http://x/drums.wav' }])
+      await player.prime()
+
+      expect(resumeMock).toHaveBeenCalled()
+    })
+
+    it('스템 컨텍스트가 없으면(데스크톱) prime()이 resume()을 호출할 대상 자체가 없어 에러 없이 통과한다', async () => {
+      // jsdom 기본 User-Agent(iOS 아님) — getIOSStemAudioContextMock은 기본값 null,
+      // isIOS()도 false라 Tone 폴백조차 없음(stemContext가 애초에 null).
+      const player = await createPlayer([{ kind: 'stem_drums', url: 'http://x/drums.wav' }])
+      await expect(player.prime()).resolves.toBeDefined()
+    })
   })
 
   describe('T3-16-feedback-7 — createAudioTrackPool(): 재생 전 fetch()로 전체를 받아 blob URL로 변환', () => {

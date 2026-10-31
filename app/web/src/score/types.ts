@@ -24,7 +24,12 @@ export interface DrumNote {
   piece: DrumPiece
   velocity: number
   hand: Hand
-  handSource?: HandSource
+  // 2026-10-31(REQ-02·Q-47) — 백엔드 `api/schemas.py`의 `handSource: HandSource
+  // | None = None`과 맞춤. 서버가 `None`(JSON `null`)을 기본값으로 내려주므로
+  // (자동 채보 곡은 전부 이 값), 프런트도 `null`을 "손 배정 안 함"(undefined와
+  // 동등)으로 받아들여야 한다 — `null`을 거부하면 자동 채보 곡은 수정 한 번
+  // 못 하고 저장이 항상 막힌다(실기기 재현으로 확인된 버그).
+  handSource?: HandSource | null
 }
 
 export interface DrumScoreMeta {

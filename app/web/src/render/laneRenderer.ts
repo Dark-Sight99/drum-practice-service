@@ -124,19 +124,65 @@ function shapeBottomExtent(shape: NoteShape, size: number): number {
  * 나옴)에 동일하게 적용됨. */
 const NOTE_HALO_PADDING = 2
 
-function drawNoteShapePass(
+/** T6-7(성능, Q-33) — 실기기 Safari 프로파일러로 직접 확인(메인 스레드의
+ * 86.9%가 "페인트"): `drawNoteShapePass()`를 halo용·본체용 두 번 **완전히
+ * 따로** 호출하던 예전 방식은 노트 1개당 경로(path) 구성을 두 번(halo
+ * 크기로 한 번, 본체 크기로 한 번) 새로 하고 있었다 — 화면에 동시에 보이는
+ * 노트가 많을 때(수백 개) 캔버스 명령이 그만큼 배로 불어나 페인트 비용이
+ * 커짐(재생 버튼을 누르기도 전, 화면에 노트가 처음 그려지는 순간부터 CPU가
+ * 치솟는 걸 실기기로 확인 — 오디오와 무관).
+ *
+ * 경로는 **한 번만** 구성하고, 그 위에 "테두리색으로 굵게 칠하기(halo
+ * 크기 자체는 더 안 만듦) → 그 위에 본체색으로 칠하기"만 추가해 같은 시각
+ * 효과(테두리가 비어져 나오는 halo)를 낸다 — 스트로크는 경로를 중심으로
+ * 안팎에 걸쳐 그려지므로(스펙 동작), 바깥쪽 절반만 테두리처럼 남고 안쪽
+ * 절반은 이어지는 채우기가 덮는다. 선으로만 이뤄진 'x' 계열은 채우기가
+ * 없으므로 같은 경로를 굵은 선(halo색) → 가는 선(본체색) 순서로 두 번
+ * 긋는다(경로 재구성은 한 번뿐). 'bar' 계열은 원래도 `fillRect()`(경로
+ * 없는 최소 비용 호출)였으므로 그대로 유지 — 경로 기반으로 바꾸면 오히려
+ * 손해.
+ *
+ * 'x-ring'/'rect-ring'/'bar-ring'의 추가 원(halo 표시용)도 같은 원리로
+ * 경로를 한 번만 만들고 굵은 선→가는 선 순서로 두 번 긋는다.
+ *
+ * 시각적으로 완전히 동일하진 않다(기존 방식은 halo가 본체보다 순수하게
+ * "더 큰 도형"이었는데, 이 방식은 "경로 중심 스트로크"라 테두리 두께가
+ * 약간 다르게 보일 수 있음) — 구현 후 데스크톱 스크린샷으로 비교 확인
+ * 필요(아래 테스트 계획). */
+function drawNoteShapeToContext(
   ctx: CanvasRenderingContext2D,
   shape: NoteShape,
   x: number,
   y: number,
   size: number,
   color: string,
-  lineWidth: number,
+  haloColor: string,
 ): void {
-  ctx.fillStyle = color
-  ctx.strokeStyle = color
-  ctx.lineWidth = lineWidth
   const half = size / 2
+  const haloWidth = NOTE_HALO_PADDING * 2
+
+  function strokeHaloThenMain(mainLineWidth: number): void {
+    ctx.strokeStyle = haloColor
+    ctx.lineWidth = mainLineWidth + haloWidth
+    ctx.stroke()
+    ctx.strokeStyle = color
+    ctx.lineWidth = mainLineWidth
+    ctx.stroke()
+  }
+
+  function strokeHaloThenFill(): void {
+    ctx.strokeStyle = haloColor
+    ctx.lineWidth = haloWidth
+    ctx.stroke()
+    ctx.fillStyle = color
+    ctx.fill()
+  }
+
+  function ringHalo(): void {
+    ctx.beginPath()
+    ctx.arc(x, y, half * 1.5, 0, Math.PI * 2)
+    strokeHaloThenMain(2)
+  }
 
   switch (shape) {
     case 'x':
@@ -148,12 +194,8 @@ function drawNoteShapePass(
       ctx.lineTo(x + s, y + s)
       ctx.moveTo(x + s, y - s)
       ctx.lineTo(x - s, y + s)
-      ctx.stroke()
-      if (shape === 'x-ring') {
-        ctx.beginPath()
-        ctx.arc(x, y, half * 1.5, 0, Math.PI * 2)
-        ctx.stroke()
-      }
+      strokeHaloThenMain(2)
+      if (shape === 'x-ring') ringHalo()
       break
     }
     case 'diamond': {
@@ -163,22 +205,17 @@ function drawNoteShapePass(
       ctx.lineTo(x, y + half)
       ctx.lineTo(x - half, y)
       ctx.closePath()
-      ctx.fill()
+      strokeHaloThenFill()
       break
     }
     case 'rounded-rect':
     case 'rect-ring': {
       const w = size
       const h = size * 0.7
-      const r = 4
       ctx.beginPath()
-      ctx.roundRect(x - w / 2, y - h / 2, w, h, r)
-      ctx.fill()
-      if (shape === 'rect-ring') {
-        ctx.beginPath()
-        ctx.arc(x, y, half * 1.5, 0, Math.PI * 2)
-        ctx.stroke()
-      }
+      ctx.roundRect(x - w / 2, y - h / 2, w, h, 4)
+      strokeHaloThenFill()
+      if (shape === 'rect-ring') ringHalo()
       break
     }
     case 'circle':
@@ -186,22 +223,58 @@ function drawNoteShapePass(
       const r = shape === 'circle-large' ? half * 1.2 : half
       ctx.beginPath()
       ctx.arc(x, y, r, 0, Math.PI * 2)
-      ctx.fill()
+      strokeHaloThenFill()
       break
     }
     case 'bar':
     case 'bar-ring': {
       const w = size * 1.8
       const h = size * 0.4
+      ctx.fillStyle = haloColor
+      ctx.fillRect(x - w / 2 - NOTE_HALO_PADDING, y - h / 2 - NOTE_HALO_PADDING, w + haloWidth, h + haloWidth)
+      ctx.fillStyle = color
       ctx.fillRect(x - w / 2, y - h / 2, w, h)
-      if (shape === 'bar-ring') {
-        ctx.beginPath()
-        ctx.arc(x, y, half * 1.5, 0, Math.PI * 2)
-        ctx.stroke()
-      }
+      if (shape === 'bar-ring') ringHalo()
       break
     }
   }
+}
+
+// T6-8(성능, Q-33) — T6-7(halo 경로 1회화)로도 실기기 페인트 비중이 여전히
+// 압도적(77~87%)이었음 — 벡터 경로를 매 프레임 수백 개씩 다시 rasterize하는
+// 비용 자체가 문제였다는 뜻. 웹 기반 "작은 도형 다수를 매 프레임 그리는"
+// 상황의 표준 해법(스프라이트 캐싱) 적용: 모양·색(둘 다 유한한 조합 —
+// `NoteShape` 10종 × `pieceColor()`가 돌려주는 피스별 색 9종 안팎)별로
+// 오프스크린 캔버스에 **딱 한 번만** 벡터로 그려두고, 매 프레임은 그 결과
+// 이미지를 `drawImage()`로 복사해 붙이기만 한다 — 벡터 rasterize가 아니라
+// 이미지 블릿이라 WebKit 캔버스에서 훨씬 쌈(업계 표준 기법, 특히 iOS
+// Safari처럼 캔버스 rasterize 비용이 큰 엔진에서 효과가 큼). 모든 도형·링
+// 변형을 포함해도 안전하게 담을 수 있는 정사각형 한 칸에 중앙 정렬해 그린다
+// (바 모양 가로폭 size*1.8이 가장 넓은 경우라 size*2+여유로 전부 커버).
+// 모듈 스코프 캐시 — 모양·색 조합은 곡과 무관하게 앱 전체에서 유한하므로
+// `readPieceColor()`의 `pieceColorCache`와 같은 수명(계속 유지, 메모리 부담
+// 무시할 수준 — 최대 수십 개의 작은 비트맵).
+const noteSpriteCache = new Map<string, HTMLCanvasElement>()
+
+function getNoteSprite(
+  shape: NoteShape,
+  size: number,
+  color: string,
+  haloColor: string,
+): HTMLCanvasElement {
+  const key = `${shape}|${size}|${color}|${haloColor}`
+  const cached = noteSpriteCache.get(key)
+  if (cached) return cached
+  const side = Math.ceil(size * 2 + NOTE_HALO_PADDING * 2 + 4)
+  const sprite = document.createElement('canvas')
+  sprite.width = side
+  sprite.height = side
+  const sctx = sprite.getContext('2d')
+  if (sctx) {
+    drawNoteShapeToContext(sctx, shape, side / 2, side / 2, size, color, haloColor)
+  }
+  noteSpriteCache.set(key, sprite)
+  return sprite
 }
 
 /** 정렬된 배열에서 `keyOf(item) >= target`인 첫 인덱스를 이진탐색으로 찾는다
@@ -219,19 +292,6 @@ function lowerBoundIndex<T>(sorted: readonly T[], target: number, keyOf: (item: 
     else hi = mid
   }
   return lo
-}
-
-function drawNoteShape(
-  ctx: CanvasRenderingContext2D,
-  shape: NoteShape,
-  x: number,
-  y: number,
-  size: number,
-  color: string,
-  haloColor: string,
-): void {
-  drawNoteShapePass(ctx, shape, x, y, size + NOTE_HALO_PADDING * 2, haloColor, 2 + NOTE_HALO_PADDING)
-  drawNoteShapePass(ctx, shape, x, y, size, color, 2)
 }
 
 /** 레인 렌더러를 만든다. `render()`를 매 프레임(requestAnimationFrame) 호출하면
@@ -366,7 +426,12 @@ export function createLaneRenderer(
       // 노트 단위로 "도형→글자"를 번갈아 그리던 기존 방식은 간격이 글자 높이보다
       // 좁으면 다음 노트의 도형이 직전 노트의 글자를 그대로 덮어 지워버렸다.
       // 글자를 항상 모든 도형보다 나중(위 레이어)에 그리면 이 문제가 없다.
-      const noteSize = Math.min(laneWidth * 0.5, 28)
+      // T6-8 — 정수로 반올림(스프라이트 캐시 키에 쓰임, 아래 getNoteSprite 참고).
+      // `canvas.clientWidth` 기반 계산이라 프레임마다 소수점 단위로 미세하게
+      // 흔들릴 수 있는데, 반올림 없이 그대로 캐시 키에 쓰면 거의 매 프레임
+      // 캐시가 깨져(사실상 항상 miss) 캔버스를 계속 새로 만드는 역효과가 남
+      // (실기기 이전에 데스크톱에서 먼저 실측 확인됨 — 실측 없이 넘어가지 않음).
+      const noteSize = Math.round(Math.min(laneWidth * 0.5, 28))
       visibleNoteCount = 0
       // T3-15(성능) — 원래 `activePieces()`/`activeHandByPiece()`(layout.ts)를
       // 따로 호출해 `score.notes` 전체(이 레인 루프와 별개로, 그리기 가시창
@@ -448,15 +513,8 @@ export function createLaneRenderer(
       // 우선권을 갖는 통념과도 일치.
       for (let i = visibleNoteCount - 1; i >= 0; i--) {
         const v = visibleNotePool[i]
-        drawNoteShape(
-          ctx,
-          v.shape,
-          v.laneCenterX,
-          v.shapeY,
-          noteSize,
-          v.color,
-          options.stickingTextColor,
-        )
+        const sprite = getNoteSprite(v.shape, noteSize, v.color, options.stickingTextColor)
+        ctx.drawImage(sprite, v.laneCenterX - sprite.width / 2, v.shapeY - sprite.height / 2)
       }
       // REQ-12 — 노트 위 R/L(/RF/LF) 글자. 자동 추천 값은 반투명
       // (intent/08-design.md §3 "자동 추천 값은 50% 투명도"), 사용자 지정은 불투명.
