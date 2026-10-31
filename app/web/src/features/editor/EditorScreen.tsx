@@ -18,6 +18,7 @@ import {
   disposeDrumVoices,
   effectiveGain,
   getMasterClock,
+  getMasterLimiter,
   loadStemBufferPool,
   metronomeGainToDb,
   MUSIC_STEM_KEYS,
@@ -829,10 +830,12 @@ export function EditorScreen({
     // Codex 모드A 2차 지적(권장, 반영) — Limiter/Gain 생성·connect 자체가
     // 던질 가능성까지 같은 catch가 잡도록 try 블록 안으로 옮긴다(원래는
     // try 밖이라 여기서 던지면 아무도 안 잡는 처리되지 않은 예외가 됐음).
-    let limiter: Tone.Limiter | undefined
     let synthGain: Tone.Gain | undefined
     try {
-      limiter = new Tone.Limiter(-1).connect(Tone.getDestination())
+      // Codex 검수 C-001(2026-10-31) — 이 전용 Limiter만으로는 스템·
+      // 메트로놈과 합산되는 "진짜 최종" 레벨을 못 묶는다(masterLimiter.ts
+      // 상단 주석 참고) — 앱 전역 공유 Limiter를 쓴다.
+      const limiter = getMasterLimiter()
       // Codex 모드A 지적(필수, 반영) — 드럼원곡 오버레이(위 drumOverrideEngaged)가
       // 이미 켜져 있는 상태에서 처음 재생을 누르면, 아래 믹서-재생 동기화
       // effect는 voicesSessionRef(ref라 effect 재실행을 안 유발)가 막 채워진
@@ -846,9 +849,9 @@ export function EditorScreen({
       const voices = await createDrumVoices(synthGain)
       if (!isMountedRef.current) {
         // 로딩이 끝나기 전에 화면을 떠남 — 방금 만든 리소스를 그대로 정리.
+        // limiter는 앱 전역 공유 싱글턴이라 여기서 dispose하지 않는다(위 참고).
         disposeDrumVoices(voices)
         synthGain.dispose()
-        limiter.dispose()
         return null
       }
       const session = { voices, synthGain, limiter }
@@ -858,7 +861,6 @@ export function EditorScreen({
       // eslint-disable-next-line no-console
       console.error('신스 드럼 음색 로딩 실패', err)
       synthGain?.dispose()
-      limiter?.dispose()
       if (isMountedRef.current) setPlaybackError('재생 음색을 불러오지 못했습니다')
       return null
     } finally {
@@ -994,7 +996,8 @@ export function EditorScreen({
       if (voicesSessionRef.current) {
         disposeDrumVoices(voicesSessionRef.current.voices)
         voicesSessionRef.current.synthGain.dispose()
-        voicesSessionRef.current.limiter.dispose()
+        // limiter는 앱 전역 공유 싱글턴이라 여기서 dispose하지 않는다
+        // (ensureVoicesSession() 위 코멘트 참고, Codex 검수 C-001).
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps

@@ -5,6 +5,7 @@
 // 단위 테스트만 통과하면 됨). 연결은 Step 2에서.
 import * as Tone from 'tone'
 import { linearGainToDb } from './mixer'
+import { getMasterLimiter } from './masterLimiter'
 import { planStemStart, stemNodePlaybackRate, type StemSessionTiming } from './stemSchedule'
 
 /** 2026-10-31(REQ-04, 의뢰인 실기기 보고 — qa-evidence/T6-11-memory-diag/
@@ -150,14 +151,10 @@ export async function loadStemBufferPool(
 
   // 2026-10-30(의뢰인 질문 — "부스트 더 올려도 음질 안 깨지나?") — 지금까지는
   // 각 스템 Player가 `toDestination()`으로 바로 연결돼 있었음(리미터 없음).
-  // synth_drums 쪽은 T3-7부터 전용 Limiter(-1dB)를 거치지만, 그건 그 체인
-  // 안에서만 보호할 뿐 — Web Audio Destination은 거기 연결된 모든 소스(스템·
-  // 신스·메트로놈)를 그냥 다 더하므로, 스템 쪽엔 그 보호가 전혀 없었다. 부스트
-  // (stemDrumsBoostedGain())를 올릴수록 이 풀(드럼+음악 스템)만으로도 0dBFS를
-  // 넘겨 디지털 클리핑(찢어지는 소리)이 날 위험이 실제로 생기므로, synth_drums
-  // 와 같은 방식(T3-7)으로 이 풀의 모든 스템이 공유하는 리미터를 하나 둬서
-  // destination 직전에서 최종 합산 레벨을 묶어준다 — threshold -1dB로 동일.
-  const limiter = new Tone.Limiter(-1).toDestination()
+  // Codex 검수 C-001(2026-10-31)로 확인됨 — 이 풀 전용 Limiter만으로는
+  // 신스 드럼·메트로놈과 합산되는 "진짜 최종" 레벨을 못 묶는다
+  // (masterLimiter.ts 상단 주석 참고) — 앱 전역 공유 Limiter를 쓴다.
+  const limiter = getMasterLimiter()
 
   const tracks: StemTrack[] = []
   try {
@@ -173,7 +170,7 @@ export async function loadStemBufferPool(
     }
   } catch (err) {
     for (const track of tracks) destroyTrack(track)
-    limiter.dispose()
+    // masterLimiter.ts — 앱 전역 공유 싱글턴이라 이 풀이 dispose하지 않는다.
     throw err
   }
 
@@ -188,7 +185,7 @@ export async function loadStemBufferPool(
     destroy() {
       destroyed = true
       for (const track of tracks) destroyTrack(track)
-      limiter.dispose()
+      // masterLimiter.ts — 앱 전역 공유 싱글턴이라 이 풀이 dispose하지 않는다.
     },
   }
 }

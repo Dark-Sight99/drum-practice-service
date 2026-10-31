@@ -4,6 +4,7 @@ export { createDrumVoices, disposeDrumVoices } from './drumVoices'
 export type { DrumVoice, DrumVoiceMap } from './drumVoices'
 export { createMetronome } from './metronome'
 export type { Metronome, MetronomeOptions } from './metronome'
+export { getMasterLimiter } from './masterLimiter'
 export {
   CHANNEL_KEYS,
   defaultMixerState,

@@ -29,6 +29,7 @@ import {
   disposeDrumVoices,
   effectiveGain,
   getMasterClock,
+  getMasterLimiter,
   isMusicMuted,
   loadStemBufferPool,
   metronomeGainToDb,
@@ -1304,9 +1305,9 @@ export function PracticeCanvas({
     // Gain부터 지워 끊기는" 경우가 없다. Player.dispose()는 이 Gain 자체를
     // 안 지우므로 명시적으로 여기서 지워야 함(안 하면 재생할 때마다 누적 leak).
     playbackRef.current.synthGain.dispose()
-    // T3-7 — 리미터는 synthGain보다 더 다운스트림이라 같은 이유로 그 다음에
-    // 지운다(이미 끊긴 뒤라 안전).
-    playbackRef.current.limiter.dispose()
+    // T3-7 — 리미터는 2026-10-31부터 앱 전역 공유 싱글턴이라(masterLimiter.ts,
+    // Codex 검수 C-001) 여기서 dispose하지 않는다 — 편집 화면 등 다른 세션이
+    // 계속 쓰는 중일 수 있음.
     playbackRef.current.metronome.dispose()
     // T3-16-feedback-6 → T6-11 — 풀(StemBufferPool)이 화면 수명 동안 버퍼·
     // Tone.Player를 들고 있으므로, 여기선 이번 세션의 Transport 이벤트 구독만
@@ -1437,7 +1438,7 @@ export function PracticeCanvas({
     function cleanupAbortedSetup(): void {
       tracks?.detach()
       synthGain?.dispose()
-      limiter?.dispose()
+      // limiter는 앱 전역 공유 싱글턴이라 여기서 dispose하지 않는다(위 참고).
       if (voices) disposeDrumVoices(voices)
       metronome?.dispose()
       // T3-13 모드A 지적 — 이 함수는 취소/실패로 끝나는 모든 경로(세션 id
@@ -1483,7 +1484,10 @@ export function PracticeCanvas({
       // result.md에 근거 기록). 참고로 단일 타격 대부분(피크 -3dB 이하)은
       // 거의 안 건드리고, 스네어(-0.2dB)만 솔로여도 아주 미세하게(0.2dB
       // 수준, 체감 불가) 반응 — "전혀 안 건드림"은 아님.
-      limiter = new Tone.Limiter(-1).connect(Tone.getDestination())
+      // Codex 검수 C-001(2026-10-31) — 이 전용 Limiter만으로는 스템·
+      // 메트로놈과 합산되는 "진짜 최종" 레벨을 못 묶는다(masterLimiter.ts
+      // 상단 주석 참고) — 앱 전역 공유 Limiter를 쓴다.
+      limiter = getMasterLimiter()
       synthGain = new Tone.Gain(1).connect(limiter)
       voices = await createDrumVoices(synthGain)
       if (playSessionIdRef.current !== mySessionId) {

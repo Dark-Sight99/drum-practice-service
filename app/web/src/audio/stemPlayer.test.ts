@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { __resetMasterLimiterForTests } from './masterLimiter'
 import type { StemSessionTiming } from './stemSchedule'
 
 // T6-11 — stemPlayer.ts는 Tone.Player/Tone.Transport에 직접 의존하므로
@@ -131,6 +132,10 @@ describe('loadStemBufferPool', () => {
   beforeEach(() => {
     playerInstances.length = 0
     limiterInstances.length = 0
+    // masterLimiter.ts는 앱 전역 싱글턴이라(2026-10-31, Codex 검수 C-001) 매
+    // 테스트가 "Limiter가 몇 번 만들어졌는지"를 독립적으로 기대할 수 있게
+    // 리셋 — 프로덕션에서는 절대 안 부름(masterLimiter.ts 상단 주석 참고).
+    __resetMasterLimiterForTests()
     decodeAudioDataMock.mockClear()
     decodeAudioDataMock.mockImplementation(async (bytes: ArrayBuffer) => ({
       duration: 600,
@@ -262,14 +267,26 @@ describe('loadStemBufferPool', () => {
     expect(limiterInstances).toHaveLength(1) // 풀 전체가 리미터 하나를 공유
   })
 
-  it('destroy()는 공유 Limiter도 dispose()한다(누수 방지)', async () => {
+  it('destroy()는 앱 전역 공유 Limiter를 dispose()하지 않는다(2026-10-31, Codex 검수 C-001 — 다른 화면·재생 세션이 같은 Limiter를 계속 쓸 수 있어야 함)', async () => {
     const pool = await loadStemBufferPool([{ kind: 'stem_drums', url: 'http://x/drums.mp3' }], {
       bufferTempoRatio: 1,
     })
 
     pool.destroy()
 
-    expect(limiterInstances[0].disposed).toBe(true)
+    expect(limiterInstances[0].disposed).toBe(false)
+  })
+
+  it('풀을 두 번 로드해도 Limiter는 한 번만 만들어진다(앱 전역 싱글턴)', async () => {
+    const first = await loadStemBufferPool([{ kind: 'stem_drums', url: 'http://x/drums.mp3' }], {
+      bufferTempoRatio: 1,
+    })
+    first.destroy()
+    await loadStemBufferPool([{ kind: 'stem_drums', url: 'http://x/drums.mp3' }], {
+      bufferTempoRatio: 1,
+    })
+
+    expect(limiterInstances).toHaveLength(1)
   })
 })
 
@@ -279,6 +296,7 @@ describe('createStemPlayer', () => {
   beforeEach(() => {
     playerInstances.length = 0
     limiterInstances.length = 0
+    __resetMasterLimiterForTests()
     decodeAudioDataMock.mockClear()
     decodeAudioDataMock.mockImplementation(async () => ({ duration: 600, byteLength: 0 }))
     transportMock.on.mockClear()
