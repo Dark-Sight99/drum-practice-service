@@ -3,7 +3,7 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
-from api import admin, auth, debug_log, jobs, songs
+from api import admin, auth, jobs, songs
 
 app = FastAPI(title="드럼 연습 서비스 API")
 
@@ -18,9 +18,6 @@ for prefix in ("", "/api"):
     app.include_router(admin.router, prefix=prefix)
     app.include_router(songs.router, prefix=prefix)
     app.include_router(jobs.router, prefix=prefix)
-    # T6-11 임시 진단(2026-10-31, debug_log.py 상단 주석 참고) — 조사 끝나면
-    # 이 줄도 같이 삭제.
-    app.include_router(debug_log.router, prefix=prefix)
 
 
 @app.get("/health")

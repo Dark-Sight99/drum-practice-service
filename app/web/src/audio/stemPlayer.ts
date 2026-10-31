@@ -5,9 +5,6 @@
 // 단위 테스트만 통과하면 됨). 연결은 Step 2에서.
 import * as Tone from 'tone'
 import { linearGainToDb } from './mixer'
-// T6-11 임시 진단(2026-10-31, memoryDiag.ts 상단 주석 참고) — 조사 끝나면
-// 이 import와 아래 reportPoolCreated/reportPoolDestroyed 호출부 삭제.
-import { reportPoolCreated, reportPoolDestroyed } from './memoryDiag'
 import { planStemStart, stemNodePlaybackRate, type StemSessionTiming } from './stemSchedule'
 
 /** 2026-10-31(REQ-04, 의뢰인 실기기 보고 — qa-evidence/T6-11-memory-diag/
@@ -163,16 +160,12 @@ export async function loadStemBufferPool(
   const limiter = new Tone.Limiter(-1).toDestination()
 
   const tracks: StemTrack[] = []
-  // T6-11 임시 진단 — 디코딩된 PCM(압축 전, 실제로 메모리에 남는 양) 총
-  // 바이트. Float32 1개당 4바이트 * 채널 수(memoryDiag.ts 상단 주석 참고).
-  let decodedBytes = 0
   try {
     for (const result of fetched as PromiseFulfilledResult<{ kind: string; bytes: ArrayBuffer }>[]) {
       if (options.signal?.aborted) {
         throw new DOMException('스템 로딩이 취소됨', 'AbortError')
       }
       const audioBuffer = await context.decodeAudioData(result.value.bytes)
-      decodedBytes += audioBuffer.length * audioBuffer.numberOfChannels * 4
       const player = new Tone.Player(audioBuffer).connect(limiter)
       player.fadeIn = STEM_FADE_SECONDS
       player.fadeOut = STEM_FADE_SECONDS
@@ -183,11 +176,6 @@ export async function loadStemBufferPool(
     limiter.dispose()
     throw err
   }
-
-  reportPoolCreated(decodedBytes, {
-    kinds: tracks.map((t) => t.kind),
-    bufferTempoRatio: options.bufferTempoRatio,
-  })
 
   let destroyed = false
   return {
@@ -201,10 +189,6 @@ export async function loadStemBufferPool(
       destroyed = true
       for (const track of tracks) destroyTrack(track)
       limiter.dispose()
-      reportPoolDestroyed(decodedBytes, {
-        kinds: tracks.map((t) => t.kind),
-        bufferTempoRatio: options.bufferTempoRatio,
-      })
     },
   }
 }
