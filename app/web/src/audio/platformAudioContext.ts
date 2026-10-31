@@ -53,6 +53,30 @@ export function ensureIOSAudioContextSampleRate(): void {
   }
 }
 
+/** 2026-10-31(REQ-04, 의뢰인 실기기 보고 — qa-evidence/T6-11-memory-diag/
+ * client-debug.jsonl로 확인) — 연습 속도를 느리게(배속<1) 할수록 디코딩된
+ * PCM 버퍼가 그만큼 더 커진다(실측: 원곡 그대로 236MB → 65.2%로 늦췄을 때
+ * 363MB). iOS는 WebKit 탭 메모리 상한이 빡빡해 이 반복(연습↔편집을 오가며
+ * 배속을 계속 낮춤)이 겹치면 탭이 통째로 죽는 걸 실측으로 확인했다 — iOS
+ * 에서만 "느리게" 쪽 하한을 좁혀 최악의 버퍼 크기를 제한한다. "빠르게" 쪽은
+ * 배속>1이라 버퍼가 오히려 작아지므로 그대로 둔다. 정확히 몇 %가 "안전한
+ * 하한"인지는 0.652(65.2%)에서 실제로 죽은 사례 하나뿐이라 0.7(70%)은
+ * 안전 마진을 더한 추정값 — 의뢰인이 실기기로 재검증 필요(CLAUDE.md §1,
+ * "모르는 정보는 지어내지 마라" — 보장된 수치가 아님을 명시). */
+export const IOS_MIN_PLAYBACK_RATIO = 0.7
+
+/** `score.meta.bpm`(원곡 BPM) 기준 연습 속도 조절 가능 범위.
+ * PracticeCanvas.tsx·EditorScreen.tsx 둘 다 이 함수로 통일(중복 로직 방지 —
+ * 기존엔 두 파일에 똑같은 `Math.max(1, Math.round(bpm * 0.5))` 식이 각각
+ * 있었음). */
+export function practiceBpmRange(originalBpm: number): { min: number; max: number } {
+  const minRatio = isIOS() ? IOS_MIN_PLAYBACK_RATIO : 0.5
+  return {
+    min: Math.max(1, Math.round(originalBpm * minRatio)),
+    max: Math.round(originalBpm * 1.5),
+  }
+}
+
 let stemContext: AudioContext | null = null
 let stemContextAttempted = false
 

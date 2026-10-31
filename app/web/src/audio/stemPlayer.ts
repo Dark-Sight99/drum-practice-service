@@ -10,6 +10,15 @@ import { linearGainToDb } from './mixer'
 import { reportPoolCreated, reportPoolDestroyed } from './memoryDiag'
 import { planStemStart, stemNodePlaybackRate, type StemSessionTiming } from './stemSchedule'
 
+/** 2026-10-31(REQ-04, 의뢰인 실기기 보고 — qa-evidence/T6-11-memory-diag/
+ * client-debug.jsonl로 확인) — 연습·편집 화면이 BPM 변경 등으로 스템 풀을
+ * 다시 불러오기 직전, 직전 풀을 destroy()한 뒤 이 시간만큼 기다렸다가 새
+ * 디코딩을 시작한다. iOS Safari가 이전 버퍼의 네이티브 메모리를 회수할
+ * 여유를 주려는 저비용 완화책(스크립트가 GC 시점을 직접 제어할 수 없어
+ * 효과가 보장되진 않음) — PracticeCanvas.tsx·EditorScreen.tsx 둘 다 같은
+ * 값을 쓰도록 여기서 공유. */
+export const STEM_POOL_RELOAD_DELAY_MS = 150
+
 export interface StemSource {
   kind: string
   url: string

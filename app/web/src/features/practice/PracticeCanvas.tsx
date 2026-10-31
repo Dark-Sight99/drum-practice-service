@@ -36,10 +36,12 @@ import {
   musicVolume,
   normalizeMusicChannels,
   playDrumScore,
+  practiceBpmRange,
   selectStemKinds,
   setMusicMuted,
   stemDrumsBoostedGain,
   setMusicVolume,
+  STEM_POOL_RELOAD_DELAY_MS,
   synthDrumsBoostedGain,
   toggleDrumlessPreset,
   type ChannelKey,
@@ -507,9 +509,9 @@ export function PracticeCanvas({
   // 진행바 계산(아래 rAF 루프)이 둘을 똑같이 "멈춤"으로 취급해 버렸다.
   const isPausedRef = useRef(false)
 
-  // --- BPM(REQ-04: 원곡 대비 50%~150%) ---
-  const minBpm = Math.max(1, Math.round(score.meta.bpm * 0.5))
-  const maxBpm = Math.round(score.meta.bpm * 1.5)
+  // --- BPM(REQ-04: 원곡 대비 50%~150%, iOS는 느리게 쪽만 70%로 좁힘 —
+  // practiceBpmRange()의 IOS_MIN_PLAYBACK_RATIO 코멘트 참고) ---
+  const { min: minBpm, max: maxBpm } = practiceBpmRange(score.meta.bpm)
   // 2026-10-31 — initialPlaybackBpm(App.tsx가 편집 화면과 공유하는 값)이
   // 있으면 그걸로 시작(범위 밖 값이 섞여 들어올 일은 없지만 clamp로 방어),
   // 없으면 기존처럼 원곡 속도(score.meta.bpm)로 시작.
@@ -627,42 +629,57 @@ export function PracticeCanvas({
     if (stemKinds.length === 0) return // MIDI-only 곡 등 — 만들 트랙 자체가 없음
     let cancelled = false
     setAudioTracksLoading(true)
-    // T6-11 Step 3(REQ-04, Q-33, work/T6-11/plan.md "API 계약") — 지금
-    // debouncedPlaybackBpm(=stemTempoPermille)에 맞는 음정 유지 변환본을
-    // 서버에서 받아온다. permille이 1000(배속 변경 없음)이면
-    // stemTempoAudioUrl()이 기존 songAudioUrl()과 같은 URL을 주므로 그 경우는
-    // 사실상 Step 2와 동일하게 동작(원본 그대로, 변환 없음).
-    loadStemBufferPool(
-      stemKinds.map((kind) => ({
-        kind,
-        url: stemTempoAudioUrl(songId, kind, stemTempoPermille),
-      })),
-      { bufferTempoRatio: stemTempoPermille / 1000 },
-    )
-      .then((pool) => {
-        if (cancelled) {
-          // 이미 다른 곡으로 넘어갔거나 화면을 떠남 — 이 결과는 안 쓰고
-          // 바로 파괴(모드C 지적 C-002).
-          pool.destroy()
-          return
-        }
-        audioTrackPoolRef.current = pool
-        setAudioTracksLoading(false)
-      })
-      .catch((err) => {
-        if (cancelled) return
-        // 모드C 3라운드(T3-16-feedback-6) 지적 패턴 재사용 — 조용히 포기,
-        // handlePlay()가 보는 "풀이 없음"은 기존 canUseAudioTracks=false
-        // (MIDI-only 등) 경로와 같은 모양이라 신스만 재생되는 폴백으로
-        // 자연스럽게 이어짐. 다만 로딩 상태는 실패해도 반드시 풀어야
-        // 재생 버튼이 영원히 "불러오는 중"에 안 멈춘다(모드C 지적 C-003).
-        // eslint-disable-next-line no-console
-        console.error('오디오 트랙 풀 생성 실패 — 이 세션은 신스 드럼만 재생됩니다', err)
-        setAudioTracksLoading(false)
-        setAudioTracksFailed(true)
-      })
+    // T6-11(2026-10-31, 의뢰인 실기기 보고 — qa-evidence/T6-11-memory-diag/
+    // client-debug.jsonl로 확인) — 이전 풀의 destroy()(직전 effect의 cleanup,
+    // 바로 위에서 이미 동기로 실행됨)가 호출된 직후 곧바로 새 풀(수백 MB
+    // PCM)을 디코딩하기 시작하면, iOS Safari가 이전 버퍼의 네이티브 메모리를
+    // 실제로 회수하기 전에 메모리 사용량이 순간적으로 두 배 가까이 겹칠 수
+    // 있다 — 연습↔편집을 빠르게 오가며 배속을 반복해 바꿀 때 탭이 메모리
+    // 부족으로 강제 종료·재시작(스스로 새로고침된 것처럼 보임)되는 현상을
+    // 이 패턴으로 실측 확인. 짧은 지연으로 브라우저가 이전 버퍼를 회수할
+    // 여유를 준다 — 효과가 보장된 건 아니지만(스크립트가 GC 시점을 직접
+    // 제어할 수 없음) 리스크가 거의 없는 저비용 완화책. 의뢰인 재테스트로
+    // 실제 효과 확인 필요.
+    const startTimer = setTimeout(() => {
+      if (cancelled) return
+      // T6-11 Step 3(REQ-04, Q-33, work/T6-11/plan.md "API 계약") — 지금
+      // debouncedPlaybackBpm(=stemTempoPermille)에 맞는 음정 유지 변환본을
+      // 서버에서 받아온다. permille이 1000(배속 변경 없음)이면
+      // stemTempoAudioUrl()이 기존 songAudioUrl()과 같은 URL을 주므로 그 경우는
+      // 사실상 Step 2와 동일하게 동작(원본 그대로, 변환 없음).
+      loadStemBufferPool(
+        stemKinds.map((kind) => ({
+          kind,
+          url: stemTempoAudioUrl(songId, kind, stemTempoPermille),
+        })),
+        { bufferTempoRatio: stemTempoPermille / 1000 },
+      )
+        .then((pool) => {
+          if (cancelled) {
+            // 이미 다른 곡으로 넘어갔거나 화면을 떠남 — 이 결과는 안 쓰고
+            // 바로 파괴(모드C 지적 C-002).
+            pool.destroy()
+            return
+          }
+          audioTrackPoolRef.current = pool
+          setAudioTracksLoading(false)
+        })
+        .catch((err) => {
+          if (cancelled) return
+          // 모드C 3라운드(T3-16-feedback-6) 지적 패턴 재사용 — 조용히 포기,
+          // handlePlay()가 보는 "풀이 없음"은 기존 canUseAudioTracks=false
+          // (MIDI-only 등) 경로와 같은 모양이라 신스만 재생되는 폴백으로
+          // 자연스럽게 이어짐. 다만 로딩 상태는 실패해도 반드시 풀어야
+          // 재생 버튼이 영원히 "불러오는 중"에 안 멈춘다(모드C 지적 C-003).
+          // eslint-disable-next-line no-console
+          console.error('오디오 트랙 풀 생성 실패 — 이 세션은 신스 드럼만 재생됩니다', err)
+          setAudioTracksLoading(false)
+          setAudioTracksFailed(true)
+        })
+    }, STEM_POOL_RELOAD_DELAY_MS)
     return () => {
       cancelled = true
+      clearTimeout(startTimer)
       audioTrackPoolRef.current?.destroy()
       audioTrackPoolRef.current = null
     }

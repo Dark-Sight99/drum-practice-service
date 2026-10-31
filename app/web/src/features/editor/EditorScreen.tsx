@@ -26,9 +26,11 @@ import {
   MUSIC_STEM_KEYS,
   musicVolume,
   playDrumScore,
+  practiceBpmRange,
   selectStemKinds,
   setMusicVolume,
   stemDrumsBoostedGain,
+  STEM_POOL_RELOAD_DELAY_MS,
   synthDrumsBoostedGain,
   ticksPerBar,
   ticksToSeconds,
@@ -382,8 +384,9 @@ export function EditorScreen({
   // state.meta를 그대로 저장하므로 playbackBpm은 commit()/toDrumScore()를
   // 전혀 거치지 않는다 — 라이브러리에 적힌 BPM(song.original_bpm)은 이제
   // 어떤 경로로도 바뀔 일이 없다.
-  const minBpm = Math.max(1, Math.round(meta.bpm * 0.5))
-  const maxBpm = Math.round(meta.bpm * 1.5)
+  // iOS는 느리게 쪽만 70%로 좁힘 — practiceBpmRange()의
+  // IOS_MIN_PLAYBACK_RATIO 코멘트(PracticeCanvas.tsx와 같은 이유) 참고.
+  const { min: minBpm, max: maxBpm } = practiceBpmRange(meta.bpm)
   // 2026-10-31 — PracticeCanvas.tsx와 같은 이유(§initialPlaybackBpm 주석
   // 참고): App.tsx가 넘겨준 공유 연습 속도가 있으면 그걸로 시작, 없으면
   // 기존처럼 meta.bpm(원곡 속도).
@@ -620,30 +623,38 @@ export function EditorScreen({
     if (!canUseAudioTracks) return
     let cancelled = false
     setAudioTracksLoading(true)
-    loadStemBufferPool(
-      stemKinds.map((kind) => ({ kind, url: stemTempoAudioUrl(song.id, kind, stemTempoPermille) })),
-      { bufferTempoRatio: stemTempoPermille / 1000 },
-    )
-      .then((pool) => {
-        if (cancelled) {
-          pool.destroy()
-          return
-        }
-        audioTrackPoolRef.current = pool
-        setAudioTracksAvailable(true)
-        setAudioTracksLoading(false)
-      })
-      .catch((err) => {
-        if (cancelled) return
-        // PracticeCanvas.tsx의 같은 상황과 같은 폴백 — 조용히 포기하고
-        // 신스 드럼만 재생되는 경로로 넘어간다(원곡 음원 없이도 편집 자체는
-        // 계속할 수 있어야 함).
-        // eslint-disable-next-line no-console
-        console.error('편집 화면 원곡 음원 로딩 실패 — 신스 드럼만 재생됩니다', err)
-        setAudioTracksLoading(false)
-      })
+    // T6-11(2026-10-31, PracticeCanvas.tsx와 같은 이유 — STEM_POOL_RELOAD_DELAY_MS
+    // 코멘트 참고) — 이전 풀 destroy() 직후 곧바로 새 풀을 디코딩하기 시작하면
+    // iOS에서 메모리가 순간적으로 겹쳐 탭이 강제 종료될 수 있다는 걸 실기기로
+    // 확인 — 짧은 지연으로 완화.
+    const startTimer = setTimeout(() => {
+      if (cancelled) return
+      loadStemBufferPool(
+        stemKinds.map((kind) => ({ kind, url: stemTempoAudioUrl(song.id, kind, stemTempoPermille) })),
+        { bufferTempoRatio: stemTempoPermille / 1000 },
+      )
+        .then((pool) => {
+          if (cancelled) {
+            pool.destroy()
+            return
+          }
+          audioTrackPoolRef.current = pool
+          setAudioTracksAvailable(true)
+          setAudioTracksLoading(false)
+        })
+        .catch((err) => {
+          if (cancelled) return
+          // PracticeCanvas.tsx의 같은 상황과 같은 폴백 — 조용히 포기하고
+          // 신스 드럼만 재생되는 경로로 넘어간다(원곡 음원 없이도 편집 자체는
+          // 계속할 수 있어야 함).
+          // eslint-disable-next-line no-console
+          console.error('편집 화면 원곡 음원 로딩 실패 — 신스 드럼만 재생됩니다', err)
+          setAudioTracksLoading(false)
+        })
+    }, STEM_POOL_RELOAD_DELAY_MS)
     return () => {
       cancelled = true
+      clearTimeout(startTimer)
       audioTrackPoolRef.current?.destroy()
       audioTrackPoolRef.current = null
     }
