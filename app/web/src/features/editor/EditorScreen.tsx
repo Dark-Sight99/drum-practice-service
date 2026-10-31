@@ -1663,7 +1663,13 @@ export function EditorScreen({
               setBpmDraft(String(next))
             }}
             disabled={isPlaying}
-            style={{ width: 70 }}
+            // 2026-10-31(의뢰인 재지적, 아이패드 실기기 스크린샷) — 숫자칸을
+            // 세 자리에 맞게 좁히고 그만큼/그 이상 남는 공간을 이 슬라이더가
+            // 먼저 가져가게 한다. flex:1이라 화면이 넓을수록(아이패드 등)
+            // 슬라이더가 더 길어지고, 좁은 화면에선 minWidth까지만 줄어든다
+            // — 고정 px 하나로는 모든 화면 폭에 다 맞출 수 없어서 폭 자체를
+            // "남는 공간을 먼저 차지하는 쪽"으로 바꿈.
+            style={{ flex: '1 1 70px', minWidth: 70 }}
           />
           {/* 2026-10-31(의뢰인 재지적 — "한줄에 같이 있어야하는게 bpm드래그로
            * 옮기는거 포함해서 다 같이 한줄에 있어야한다는 뜻이었어. 불필요하게
@@ -1694,7 +1700,10 @@ export function EditorScreen({
               if (e.key === 'Enter') e.currentTarget.blur()
             }}
             disabled={isPlaying}
-            style={{ width: 56 }}
+            // 2026-10-31(의뢰인 재지적 — "92는 세 자리가 들어갔을 때 딱
+            // 맞게") — 56px는 세 자리 숫자 기준으로 양옆에 불필요한 여백이
+            // 남았음(스크린샷으로 확인) — 세 자리에 맞춰 좁힘.
+            style={{ width: 40 }}
           />
           <button
             type="button"
