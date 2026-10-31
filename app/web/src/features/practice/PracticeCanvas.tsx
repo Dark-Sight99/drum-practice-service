@@ -54,6 +54,9 @@ import {
 } from '../../audio'
 import { fetchMixerSetting, saveMixerSetting } from '../../api/auth'
 import { stemTempoAudioUrl, type SongSummary } from '../../api/songs'
+// T6-11 임시 진단(2026-10-31, audio/memoryDiag.ts 상단 주석 참고) — 조사 끝나면
+// 이 import와 아래 호출부 삭제.
+import { reportScreenLifecycle } from '../../audio/memoryDiag'
 import type { DrumPiece, DrumScore, Hand } from '../../score/types'
 import { createLaneRenderer, type LaneRenderer } from '../../render/laneRenderer'
 import { KitIllustration } from '../../render/KitIllustration'
@@ -415,6 +418,14 @@ export function PracticeCanvas({
   initialPlaybackBpm,
   onPlaybackBpmChange,
 }: PracticeCanvasProps) {
+  // T6-11 임시 진단(2026-10-31, audio/memoryDiag.ts 상단 주석 참고) — 조사
+  // 끝나면 이 effect 삭제.
+  useEffect(() => {
+    reportScreenLifecycle('practice_mount', { songId })
+    return () => reportScreenLifecycle('practice_unmount', { songId })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const rendererRef = useRef<LaneRenderer | null>(null)
   const rafIdRef = useRef<number | null>(null)

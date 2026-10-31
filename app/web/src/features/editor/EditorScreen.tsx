@@ -7,6 +7,9 @@ import type { DrumNote, DrumPiece, DrumScore, Hand } from '../../score/types'
 import { alternateHandsByTick, validateDrumScore } from '../../score'
 import { saveSongDrumScore, stemTempoAudioUrl, type SongSummary } from '../../api/songs'
 import { fetchMixerSetting, saveMixerSetting } from '../../api/auth'
+// T6-11 임시 진단(2026-10-31, audio/memoryDiag.ts 상단 주석 참고) — 조사 끝나면
+// 이 import와 아래 호출부 삭제.
+import { reportScreenLifecycle } from '../../audio/memoryDiag'
 import { ApiError } from '../../api/client'
 import {
   barIndexForTick,
@@ -212,6 +215,14 @@ export function EditorScreen({
   initialPlaybackBpm,
   onPlaybackBpmChange,
 }: EditorScreenProps) {
+  // T6-11 임시 진단(2026-10-31, audio/memoryDiag.ts 상단 주석 참고) — 조사
+  // 끝나면 이 effect 삭제.
+  useEffect(() => {
+    reportScreenLifecycle('editor_mount', { songId: song.id })
+    return () => reportScreenLifecycle('editor_unmount', { songId: song.id })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   const [history, setHistory] = useState<EditHistory<EditorState>>(() =>
     createHistory(toEditorState(initialScore)),
   )
