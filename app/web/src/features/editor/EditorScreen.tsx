@@ -1623,7 +1623,14 @@ export function EditorScreen({
             {playbackError}
           </span>
         )}
-        <label style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 'var(--space-2)' }}>
+        <label
+          style={{
+            display: 'flex',
+            flexWrap: 'wrap',
+            alignItems: 'center',
+            gap: 'var(--space-1)',
+          }}
+        >
           {/* 2026-10-29(의뢰인 요청) — "속도를 bpm을 바꿔서 표기해줘" —
            * 표시되는 값 자체가 이미 BPM 숫자라 라벨도 PracticeCanvas.tsx와
            * 똑같이 "BPM"으로(그동안은 "속도"라는 추상적인 말이라 숫자가
@@ -1632,7 +1639,12 @@ export function EditorScreen({
           {/* PracticeCanvas.tsx의 BPM(연습 속도) 입력과 완전히 같은 패턴 —
            * 재생 시작 시점에 이미 스케줄돼 있어 재생 중 바꿔도 지금
            * 재생엔 반영 안 됨(다음 재생부터 적용) — 혼란을 막기 위해
-           * 재생 중엔 잠금. */}
+           * 재생 중엔 잠금.
+           * 2026-10-31(의뢰인 재지적) — 슬라이더·숫자입력·리셋·적용 네
+           * 요소가 모바일 폭(375px 기준)에서도 전부 한 줄에 들어가야 한다고
+           * 해서, 이 화면 전용으로 슬라이더 폭을 기본(.mixer-slider 120px)
+           * 보다 좁게(인라인 스타일이 클래스보다 우선 적용됨) 줄이고 위
+           * 행 전체의 gap도 줄였다(space-2→space-1). */}
           <input
             type="range"
             className="mixer-slider"
@@ -1651,83 +1663,79 @@ export function EditorScreen({
               setBpmDraft(String(next))
             }}
             disabled={isPlaying}
+            style={{ width: 70 }}
           />
-          {/* 2026-10-31(의뢰인 요청 — "모바일에서 적용버튼이 예쁘게 안 보인다,
-           * 버튼이 너무 커지는 경향... 리셋/적용/숫자입력 크기가 각자 달라서
-           * 리셋버튼이 상대적으로 누르기 어려워 보인다") — 숫자 입력·리셋·적용
-           * 셋을 한 그룹으로 묶어 폭을 균등 분배한다(flex:1씩). 리셋 버튼도
-           * 더 이상 테두리 없는 작은 아이콘(.settings-trigger)이 아니라
-           * 나머지 둘과 같은 기본 버튼 모양(테두리·배경 있음)으로 맞춰
-           * 탭 영역이 비슷해 보이게 한다. */}
-          <div style={{ display: 'flex', gap: 'var(--space-2)', flex: '1 1 auto', minWidth: 0 }}>
-            <input
-              type="number"
-              min={minBpm}
-              max={maxBpm}
-              value={bpmFieldValue}
-              onFocus={() => {
-                setBpmDraft(String(displayedBpm))
-                setIsEditingBpm(true)
-              }}
-              onChange={(e) => setBpmDraft(e.target.value)}
-              onBlur={(e) => {
-                // 2026-10-31 — 슬라이더와 같은 이유로 바로 적용하지 않고
-                // pendingBpm에만 반영한다.
-                setPendingBpm(clampBpm(Number(e.target.value)))
-                setIsEditingBpm(false)
-              }}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') e.currentTarget.blur()
-              }}
-              disabled={isPlaying}
-              style={{ flex: 1, minWidth: 0 }}
-            />
-            <button
-              type="button"
-              onClick={() => {
-                // 2026-10-31 — 이것도 바로 적용하지 않고 대기 값만 원곡 속도로
-                // 맞춰둔다("적용"을 눌러야 실제로 반영 — 아래 버튼과 같은 원칙).
-                setPendingBpm(meta.bpm)
-                setIsEditingBpm(false)
-              }}
-              disabled={isPlaying}
-              aria-label={`원곡 BPM(${meta.bpm})으로 재설정`}
-              title={`원곡 BPM(${meta.bpm})으로 재설정`}
-              style={{ flex: 1, minWidth: 0, display: 'flex', justifyContent: 'center' }}
-            >
-              <RotateCcw size={14} aria-hidden="true" />
-            </button>
-            {/* 2026-10-31(의뢰인 요청 — "적용을 눌러야 한다는 걸 시각적으로 잘
-             * 보여줘야 해") — 대기 중인 변경이 있을 때만 활성화되고, 그때는
-             * warning 색으로 눈에 띄게 — 평소(변경 없음)엔 비활성 회색이라
-             * "지금은 할 일 없음"이 바로 보인다. 모바일 지적 반영 — 버튼
-             * 라벨에 값을 괄호로 더 안 보여줌(버튼이 커지는 원인이었음),
-             * 색만으로 상태를 구분. */}
-            <button
-              type="button"
-              onClick={applyPendingBpm}
-              disabled={!hasPendingBpmChange || isPlaying}
-              style={{
-                flex: 1,
-                minWidth: 0,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: 'var(--space-1)',
-                ...(hasPendingBpmChange
-                  ? { color: 'var(--warning)', borderColor: 'var(--warning)', fontWeight: 600 }
-                  : {}),
-              }}
-              title={
-                hasPendingBpmChange
-                  ? `${pendingBpm} BPM으로 적용(지금은 ${playbackBpm} BPM 재생 중)`
-                  : '적용할 변경 없음'
-              }
-            >
-              <Check size={14} aria-hidden="true" />
-              적용
-            </button>
-          </div>
+          {/* 2026-10-31(의뢰인 재지적 — "한줄에 같이 있어야하는게 bpm드래그로
+           * 옮기는거 포함해서 다 같이 한줄에 있어야한다는 뜻이었어. 불필요하게
+           * 넓잖아 지금") — 직전 수정(숫자입력·리셋·적용 셋만 따로 묶어
+           * flex:1로 폭을 꽉 채움)이 의도를 잘못 짚었음: 슬라이더까지 포함한
+           * 네 요소 전부가 한 줄에 같이, 각자 원래 크기(내용만큼)로 있어야
+           * 한다는 뜻이었음 — 별도 그룹으로 안 묶고 전부 이 label의 직계
+           * 자식으로 두되, 리셋 버튼만 기본 버튼 모양(테두리·배경)을 유지해
+           * (여전히 .settings-trigger 아님) 숫자입력·적용과 탭 영역이 비슷해
+           * 보이게 한다. */}
+          <input
+            type="number"
+            min={minBpm}
+            max={maxBpm}
+            value={bpmFieldValue}
+            onFocus={() => {
+              setBpmDraft(String(displayedBpm))
+              setIsEditingBpm(true)
+            }}
+            onChange={(e) => setBpmDraft(e.target.value)}
+            onBlur={(e) => {
+              // 2026-10-31 — 슬라이더와 같은 이유로 바로 적용하지 않고
+              // pendingBpm에만 반영한다.
+              setPendingBpm(clampBpm(Number(e.target.value)))
+              setIsEditingBpm(false)
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') e.currentTarget.blur()
+            }}
+            disabled={isPlaying}
+            style={{ width: 56 }}
+          />
+          <button
+            type="button"
+            onClick={() => {
+              // 2026-10-31 — 이것도 바로 적용하지 않고 대기 값만 원곡 속도로
+              // 맞춰둔다("적용"을 눌러야 실제로 반영 — 아래 버튼과 같은 원칙).
+              setPendingBpm(meta.bpm)
+              setIsEditingBpm(false)
+            }}
+            disabled={isPlaying}
+            aria-label={`원곡 BPM(${meta.bpm})으로 재설정`}
+            title={`원곡 BPM(${meta.bpm})으로 재설정`}
+          >
+            <RotateCcw size={14} aria-hidden="true" />
+          </button>
+          {/* 2026-10-31(의뢰인 요청 — "적용을 눌러야 한다는 걸 시각적으로 잘
+           * 보여줘야 해") — 대기 중인 변경이 있을 때만 활성화되고, 그때는
+           * warning 색으로 눈에 띄게 — 평소(변경 없음)엔 비활성 회색이라
+           * "지금은 할 일 없음"이 바로 보인다. 버튼 라벨에 값을 괄호로 안
+           * 보여줌(버튼이 커지는 원인이었음), 색만으로 상태를 구분. */}
+          <button
+            type="button"
+            onClick={applyPendingBpm}
+            disabled={!hasPendingBpmChange || isPlaying}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 'var(--space-1)',
+              ...(hasPendingBpmChange
+                ? { color: 'var(--warning)', borderColor: 'var(--warning)', fontWeight: 600 }
+                : {}),
+            }}
+            title={
+              hasPendingBpmChange
+                ? `${pendingBpm} BPM으로 적용(지금은 ${playbackBpm} BPM 재생 중)`
+                : '적용할 변경 없음'
+            }
+          >
+            <Check size={14} aria-hidden="true" />
+            적용
+          </button>
         </label>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--space-3)', marginLeft: 'auto' }}>
           {(audioTracksAvailable

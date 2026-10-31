@@ -1132,29 +1132,10 @@ export function PracticeCanvas({
   const fpsFrameCountRef = useRef(0)
   const fpsWindowStartRef = useRef(performance.now())
   const [fpsDisplay, setFpsDisplay] = useState<number | null>(null)
-  // T6-9(진단용 임시, 2026-10-30) — 캔버스 그리기(fill/stroke/drawImage/clearRect)를
-  // 전부 무력화해도 실기기 렉이 그대로였음(콘솔로 직접 확인) — 다음으로 의심되는
-  // 건 그 주변 계산 로직(위치 계산·보이는 노트 추리기 등) 자체. 콘솔 명령으로
-  // 반복 확인시키는 게 번거롭다는 피드백(의뢰인)을 받아, 화면 버튼으로 그 계산
-  // 블록 전체를 켰다 껐다 할 수 있게 함 — 타이핑 실수 걱정 없이 탭만 하면 됨.
-  // ref는 loop()가 매 프레임 읽는 값(리렌더 유발 안 함), state는 버튼 표시용.
-  const skipLoopBodyRef = useRef(false)
-  const [skipLoopBodyLabel, setSkipLoopBodyLabel] = useState(false)
-  // T6-9 추가 — "계산 끄기"(루프 전체 건너뛰기)가 렉을 없앴음(실기기 확인 완료) —
-  // 범위를 좁히려고 renderer.render() 호출(+그 결과로 하는 setActiveHandByPiece)만
-  // 따로 끌 수 있는 두 번째 토글 추가. resync()·진행바·시간표시는 그대로 둠.
-  const skipRenderRef = useRef(false)
-  const [skipRenderLabel, setSkipRenderLabel] = useState(false)
-  // T6-9 추가 2차 — "그리기만 끄기"는 켜고 꺼도 렉 동일(render()/setActiveHandByPiece
-  // 무죄 확정, 실기기 확인 완료). 남은 용의자(진행바·시간표시 DOM 직접 쓰기)만
-  // 분리하는 세 번째 토글.
-  const skipDomWritesRef = useRef(false)
-  const [skipDomWritesLabel, setSkipDomWritesLabel] = useState(false)
-  // T6-9 추가 3차 — "그리기만 끄기"·"진행바만 끄기" 둘 다 렉 동일(무죄 확정,
-  // 실기기 확인 완료). "계산 끄기"(전체)만 효과 있었으므로 남은 용의자는
-  // 리싱크(tracks.resync() — <audio> currentTime 쓰기 포함)였다 — T6-11에서
-  // resync() 자체를 없앴으므로(위 코멘트 참고) 이 토글은 더 이상 의미가 없어
-  // 삭제(실기기로 리싱크가 fps 저하의 원인임을 이미 확정, work/T6-11/plan.md).
+  // 2026-10-31(의뢰인 요청) — T6-9 진단용으로 추가했던 "계산 끄기"·"그리기만
+  // 끄기"·"진행바만 끄기" 3개 토글(렉 원인을 좁혀가며 하나씩 끄고 실기기로
+  // 비교하던 용도)은 원인 규명이 끝나 더 이상 필요 없어 완전히 제거(버튼·
+  // 상태·loop() 안의 분기 전부 — 아래 loop() 참고).
 
   useEffect(() => {
     // T6-1(성능, 2026-10-30, Q-33 재착수) — 예전엔 getMasterClock()을 loop()
@@ -1179,10 +1160,6 @@ export function PracticeCanvas({
         fpsWindowStartRef.current = fpsNow
       }
 
-      if (skipLoopBodyRef.current) {
-        rafIdRef.current = requestAnimationFrame(loop)
-        return
-      }
       const renderer = rendererRef.current
       const positionSeconds = clock.getPositionSeconds()
       // T2-8(Phase 2 게이트 피드백) — scorePlayer.ts가 노트 소리를
@@ -1196,7 +1173,7 @@ export function PracticeCanvas({
       // 안 생기므로(scorePlayer.ts 참고) 이 rAF 루프에서는 더 이상 트랙을
       // 전혀 건드리지 않는다 — 바로 이 폴링(과 그 안의 <audio> currentTime
       // 강제 seek)이 iOS fps 저하의 확정된 원인이었다.
-      if (renderer && !skipRenderRef.current) {
+      if (renderer) {
         // R/L 표시 제거(2026-10-25, 의뢰인 피드백 "안 맞는 게 너무 많아서") — 자동
         // 추천 손 배정 자체가 부정확해 레인/킷 어느 쪽도 더 이상 표시하지 않음.
         const rendered = renderer.render(
@@ -1232,10 +1209,6 @@ export function PracticeCanvas({
           lastActiveMapRef.current = active
           setActiveHandByPiece(active)
         }
-      }
-      if (skipDomWritesRef.current) {
-        rafIdRef.current = requestAnimationFrame(loop)
-        return
       }
       // 마디 진행바 — activePieces와 같은 이유로, 정수 % 단위로 반올림해 실제로
       // 바뀔 때만 setState한다(그렇지 않으면 이 역시 매 프레임 리렌더를 유발해
@@ -2227,16 +2200,17 @@ export function PracticeCanvas({
            * 하면 좋을 거 같아". 기존엔 이 버튼이 settingsPanelContent
            * 안(Drawer를 열어야만 보임)에만 있었다 — 좁은 화면에서 항상
            * 보이는 이 트리거 행에도 같이 둔다(아래 settingsPanelContent
-           * 안의 버튼은 넓은 화면 사이드바용으로 그대로 둠). */}
+           * 안의 버튼은 넓은 화면 사이드바용으로 그대로 둠).
+           * 2026-10-31 추가(의뢰인 재지적 — "모바일 환경일때 믹서 설정과
+           * 악보편집하기가 눈에 잘 띄지 않는거 같아") — .settings-trigger는
+           * 테두리·배경이 없고 글자색도 흐린(--text-muted) 톤이라, 호버가
+           * 없는 터치 환경에서는 항상 그 흐린 상태로만 보여 존재감이
+           * 약했다 — 기본 버튼 모양(테두리·배경 있음, EditorScreen.tsx의
+           * 리셋 버튼과 같은 수정)으로 바꿔 눈에 더 잘 띄게 한다. */}
           <div style={{ display: 'flex', gap: 'var(--space-2)', alignSelf: 'flex-start' }}>
             <button
               type="button"
-              className="settings-trigger"
               onClick={() => setIsSettingsOpen(true)}
-              // 2026-10-28(의뢰인 요청, 8차) — 위 루트가 이제 항상 stretch라
-              // (main-column이 전체 폭을 받게 하려고) 이 버튼도 같이
-              // 늘어나려 하는데, 트리거 버튼은 원래 내용 크기만큼만이어야
-              // 함 — alignSelf로 개별 예외.
               style={{
                 display: 'flex',
                 alignItems: 'center',
@@ -2251,7 +2225,6 @@ export function PracticeCanvas({
             {song && onEditSong && (
               <button
                 type="button"
-                className="settings-trigger"
                 onClick={handleEditClick}
                 style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}
               >
@@ -2559,72 +2532,6 @@ export function PracticeCanvas({
                     FPS: {fpsDisplay}
                   </div>
                 )}
-                {/* T6-9(진단용 임시, 원인 특정되면 제거) — FPS 표시 바로 아래, 탭 가능한
-                 * 진단용 버튼. pointerEvents는 이 버튼만 auto로 켜줌(부모 FPS
-                 * 표시는 none 유지). */}
-                <button
-                  type="button"
-                  onClick={() => {
-                    skipLoopBodyRef.current = !skipLoopBodyRef.current
-                    setSkipLoopBodyLabel(skipLoopBodyRef.current)
-                  }}
-                  style={{
-                    position: 'absolute',
-                    top: 24,
-                    right: 4,
-                    padding: '2px 6px',
-                    background: skipLoopBodyLabel ? 'var(--danger)' : 'rgba(0,0,0,0.6)',
-                    color: 'var(--text)',
-                    fontSize: '0.7em',
-                    borderRadius: 4,
-                    border: 'none',
-                    pointerEvents: 'auto',
-                  }}
-                >
-                  {skipLoopBodyLabel ? '계산 꺼짐' : '계산 끄기'}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    skipRenderRef.current = !skipRenderRef.current
-                    setSkipRenderLabel(skipRenderRef.current)
-                  }}
-                  style={{
-                    position: 'absolute',
-                    top: 46,
-                    right: 4,
-                    padding: '2px 6px',
-                    background: skipRenderLabel ? 'var(--danger)' : 'rgba(0,0,0,0.6)',
-                    color: 'var(--text)',
-                    fontSize: '0.7em',
-                    borderRadius: 4,
-                    border: 'none',
-                    pointerEvents: 'auto',
-                  }}
-                >
-                  {skipRenderLabel ? '그리기 꺼짐' : '그리기만 끄기'}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    skipDomWritesRef.current = !skipDomWritesRef.current
-                    setSkipDomWritesLabel(skipDomWritesRef.current)
-                  }}
-                  style={{
-                    position: 'absolute',
-                    top: 68,
-                    right: 4,
-                    padding: '2px 6px',
-                    background: skipDomWritesLabel ? 'var(--danger)' : 'rgba(0,0,0,0.6)',
-                    color: 'var(--text)',
-                    fontSize: '0.7em',
-                    borderRadius: 4,
-                    border: 'none',
-                    pointerEvents: 'auto',
-                  }}
-                >
-                  {skipDomWritesLabel ? '진행바 꺼짐' : '진행바만 끄기'}
-                </button>
               </div>
               <div
                 style={{
