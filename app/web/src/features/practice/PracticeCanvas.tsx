@@ -1880,7 +1880,20 @@ export function PracticeCanvas({
           min={minBpm}
           max={maxBpm}
           value={playbackBpm}
-          onChange={(e) => setPlaybackBpm(clampBpm(Number(e.target.value)))}
+          onChange={(e) => {
+            // 2026-10-31(의뢰인 보고 — "숫자 입력칸을 터치해 활성화한 상태에서
+            // 옆 슬라이더로 조절하면 숫자가 안 바뀌고 입력칸 값으로 되돌아간다")
+            // — 입력칸이 포커스된 동안(isEditingBpm)엔 `bpmFieldValue`가 그
+            // 시점에 멈춰있던 bpmDraft를 보여주는데, 슬라이더 조작으로
+            // playbackBpm만 바꾸고 bpmDraft를 안 건드리면: 입력칸은 여전히
+            // 옛 draft를 보여주고, 그 입력칸이 나중에 blur될 때 onBlur가 그
+            // 옛 draft 값으로 playbackBpm을 다시 덮어써버려 슬라이더 조작이
+            // 통째로 무효화됨(실제 재현된 버그). 슬라이더가 움직이는 순간
+            // draft도 같이 갱신해 두 값이 항상 같은 걸 가리키게 한다.
+            const next = clampBpm(Number(e.target.value))
+            setPlaybackBpm(next)
+            setBpmDraft(String(next))
+          }}
           disabled={isPlaying || isPaused}
         />
         {/* Q-44(2026-10-30, 의뢰인 iOS 실기기 발견) — `type="number"`는 iOS

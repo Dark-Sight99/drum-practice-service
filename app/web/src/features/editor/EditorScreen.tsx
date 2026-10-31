@@ -1602,7 +1602,15 @@ export function EditorScreen({
             min={minBpm}
             max={maxBpm}
             value={playbackBpm}
-            onChange={(e) => setPlaybackBpm(clampBpm(Number(e.target.value)))}
+            onChange={(e) => {
+              // 2026-10-31(PracticeCanvas.tsx와 같은 버그·같은 이유 — 그쪽
+              // 코멘트 참고) — 입력칸이 포커스된 동안 슬라이더로 조절하면
+              // bpmDraft가 안 바뀌어, 나중에 입력칸이 blur될 때 그 옛 draft가
+              // playbackBpm을 다시 덮어써 슬라이더 조작이 무효화됐다.
+              const next = clampBpm(Number(e.target.value))
+              setPlaybackBpm(next)
+              setBpmDraft(String(next))
+            }}
             disabled={isPlaying}
           />
           <input
