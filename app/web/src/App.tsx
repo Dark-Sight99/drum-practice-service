@@ -47,14 +47,24 @@ function App() {
   >(undefined)
   const [editorOrigin, setEditorOrigin] = useState<'library' | 'practice'>('library')
   // 2026-10-31(의뢰인 요청) — "연습화면에서 bpm을 바꿨는데 편집화면 넘어가면
-  // 92로 되어있고 다시 연습화면 넘어오면 92로 돌아와있다". PracticeCanvas·
-  // EditorScreen 둘 다 BPM을 자기 안의 useState로만 들고 있어서(화면이
-  // 바뀔 때마다 이 컴포넌트들 자체가 통째로 언마운트·재마운트됨), 그동안
-  // 바꾼 "연습 속도"가 화면을 넘어갈 때마다 사라지고 있었다. 위
-  // editorInitialPositionTicks/practiceInitialPositionTicks와 같은 원칙으로,
-  // 두 화면이 공유하는 "연습 속도"를 여기서 들고 있다가 넘겨준다.
-  // undefined면 "아직 아무 화면에서도 안 건드림"(원곡 속도로 시작).
-  const [sharedPlaybackBpm, setSharedPlaybackBpm] = useState<number | undefined>(undefined)
+  // 92로 되어있고 다시 연습화면 넘어오면 92로 돌아와있다". PracticeCanvas가
+  // BPM을 자기 안의 useState로만 들고 있어서(화면이 바뀔 때마다 통째로
+  // 언마운트·재마운트됨) 그동안 바꾼 "연습 속도"가 화면을 넘어갈 때마다
+  // 사라지고 있었다 — 위 editorInitialPositionTicks/practiceInitialPositionTicks
+  // 와 같은 원칙으로, "연습 화면이 마지막으로 쓰던 속도"를 여기서 기억해뒀다가
+  // PracticeCanvas가 다시 마운트될 때 돌려준다. undefined면 "아직 연습 화면에서
+  // 한 번도 안 건드림"(원곡 속도로 시작).
+  //
+  // 2026-10-31 추가(의뢰인 재지적) — 처음엔 EditorScreen도 이 값을 똑같이
+  // 읽고 쓰게 했었는데("편집→연습 왕복해도 BPM 유지"), 그러면 반대로 "편집
+  // 중 노트를 자세히 들으려고 잠깐 속도를 늦췄는데 연습 화면까지 그 속도로
+  // 바뀌어버리는" 문제가 생김 — 편집 화면의 BPM은 "그 세션 한정 임시 조절"
+  // 이어야지 연습 화면의 "기억되는 속도"와 같은 성격이 아니라는 지적. 그래서
+  // 지금은 **편집 화면 진입 시 1회만** 이 값을 물려받고(연습하던 것과 같은
+  // 속도로 듣기 시작 — 아래 EditorScreen initialPlaybackBpm), 편집 화면
+  // 안에서 바뀌는 값은 이 state에 다시 안 쓴다(EditorScreen에
+  // onPlaybackBpmChange를 안 넘김 — 한쪽 방향으로만 흐름: 연습→편집).
+  const [practicePlaybackBpm, setPracticePlaybackBpm] = useState<number | undefined>(undefined)
   const isCompactHeader = useCompactHeaderLayout()
 
   useEffect(() => {
@@ -187,8 +197,8 @@ function App() {
             availableAudioKinds={practiceSong.song.available_audio_kinds}
             song={practiceSong.song}
             initialPositionTicks={practiceInitialPositionTicks}
-            initialPlaybackBpm={sharedPlaybackBpm}
-            onPlaybackBpmChange={setSharedPlaybackBpm}
+            initialPlaybackBpm={practicePlaybackBpm}
+            onPlaybackBpmChange={setPracticePlaybackBpm}
             onEditSong={(song, drumScore, positionTicks) => {
               setEditingSong({ song, drumScore })
               setEditorInitialPositionTicks(positionTicks)
@@ -216,8 +226,12 @@ function App() {
           song={editingSong.song}
           initialScore={editingSong.drumScore}
           initialPositionTicks={editorInitialPositionTicks}
-          initialPlaybackBpm={sharedPlaybackBpm}
-          onPlaybackBpmChange={setSharedPlaybackBpm}
+          // 2026-10-31 — 연습 화면이 마지막으로 쓰던 속도를 "진입 시 1회"만
+          // 물려받는다(읽기 전용 — 위 practicePlaybackBpm 코멘트 참고).
+          // EditorScreen에는 onPlaybackBpmChange를 일부러 안 넘긴다 — 편집
+          // 화면 안에서 BPM을 바꿔도 이 값(연습 화면의 기억)을 안 건드려야
+          // "편집에서 잠깐 늦춘 속도가 연습 화면까지 새어나가지 않는다".
+          initialPlaybackBpm={practicePlaybackBpm}
           onSaved={() => {
             setEditorInitialPositionTicks(undefined)
             setScreen('library')
@@ -254,13 +268,13 @@ function App() {
         // 2026-10-31 — 위와 같은 이유로, 이전 곡에서 바꿔둔 연습 속도가 새
         // 곡에 새어 들어가지 않게(라이브러리에서 직접 열 때는 항상 원곡
         // 속도부터 시작).
-        setSharedPlaybackBpm(undefined)
+        setPracticePlaybackBpm(undefined)
         setScreen('practice')
       }}
       onEditSong={(song, drumScore) => {
         setEditingSong({ song, drumScore })
         setEditorOrigin('library')
-        setSharedPlaybackBpm(undefined)
+        setPracticePlaybackBpm(undefined)
         setScreen('editor')
       }}
       onLoggedOut={() => {

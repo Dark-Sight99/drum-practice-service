@@ -128,13 +128,16 @@ export interface EditorScreenProps {
    * 커서(틱) 위치를 그대로 넘긴다. 저장 여부와 무관 — "← 라이브러리"
    * (onCancel)와 같은 원칙으로 저장하지 않은 변경은 버리고 이동한다. */
   onBackToPractice?: (positionTicks: number) => void
-  /** 2026-10-31(의뢰인 요청) — PracticeCanvas.tsx의 같은 prop과 대칭(App.tsx가
-   * 연습·편집 화면 사이에서 "연습 속도"를 공유 상태로 들고 있다가 넘겨준다).
-   * undefined면 기존처럼 meta.bpm(원곡 속도)으로 시작한다. */
+  /** 2026-10-31(의뢰인 요청) — 편집 화면 진입 시 연습 화면이 마지막으로 쓰던
+   * 속도를 **1회만** 물려받아 "연습하던 것과 같은 속도로 듣기 시작"한다.
+   * undefined면 기존처럼 meta.bpm(원곡 속도)으로 시작한다. 이 화면 안에서
+   * BPM을 더 바꿔도 App.tsx로 다시 알리지 않는다(의도적 — 편집 중 노트를
+   * 자세히 들으려고 잠깐 늦춘 속도가 연습 화면의 "기억되는 속도"까지 바꿔버리면
+   * 안 된다는 의뢰인 지적 반영, 2026-10-31. PracticeCanvas.tsx는 반대로
+   * onPlaybackBpmChange로 계속 알려서 자기 속도를 기억함 — 두 화면의 역할이
+   * 다름: 연습 화면 속도는 "기억되는 설정", 편집 화면 속도는 "이 세션 한정
+   * 임시 조절"). */
   initialPlaybackBpm?: number
-  /** 위와 쌍 — 이 화면에서 연습 속도가 바뀔 때마다 App.tsx에 알려 공유 상태를
-   * 갱신한다. */
-  onPlaybackBpmChange?: (bpm: number) => void
 }
 
 interface EditableNote extends DrumNote {
@@ -215,7 +218,6 @@ export function EditorScreen({
   initialPositionTicks,
   onBackToPractice,
   initialPlaybackBpm,
-  onPlaybackBpmChange,
 }: EditorScreenProps) {
   // T6-11 임시 진단(2026-10-31, audio/memoryDiag.ts 상단 주석 참고) — 조사
   // 끝나면 이 effect 삭제.
@@ -403,10 +405,10 @@ export function EditorScreen({
   const playbackBpmRef = useRef(playbackBpm)
   useEffect(() => {
     playbackBpmRef.current = playbackBpm
-    // 2026-10-31 — 연습 화면 핸드오프용 공유 상태 갱신(위 initialPlaybackBpm
-    // 코멘트 참고).
-    onPlaybackBpmChange?.(playbackBpm)
-  }, [playbackBpm, onPlaybackBpmChange])
+    // 2026-10-31 — 의도적으로 App.tsx에 알리지 않는다(위 initialPlaybackBpm
+    // 코멘트 참고 — 편집 화면의 BPM 변경은 이 세션 한정, 연습 화면 쪽
+    // "기억되는 속도"에 반영 안 함).
+  }, [playbackBpm])
   // T6-11 Step 4(work/T6-11/plan.md) — PracticeCanvas.tsx Step 3과 완전히
   // 같은 패턴(§stemTempoPermille 주석 참고). 슬라이더를 드래그하는 동안
   // 프레임마다 바뀌는 playbackBpm을 그대로 서버 변환 요청에 쓰면 드래그
