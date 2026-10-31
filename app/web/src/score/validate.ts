@@ -71,7 +71,14 @@ function validateNote(note: unknown, index: number, errors: string[]): void {
   if (!HANDS.includes(note.hand as Hand)) {
     errors.push(`notes[${index}].hand: R|L|RF|LF|null 중 하나가 아님`)
   }
-  if (note.handSource !== undefined && !HAND_SOURCES.includes(note.handSource as HandSource)) {
+  // 2026-10-31(Q-47) — 백엔드가 handSource 미지정 노트를 null로 내려주므로
+  // (types.ts의 같은 주석 참고), null도 undefined와 동일하게 "값 없음"으로
+  // 받아들인다. auto/user가 아닌 다른 값(진짜 손상된 데이터)만 거부.
+  if (
+    note.handSource !== undefined &&
+    note.handSource !== null &&
+    !HAND_SOURCES.includes(note.handSource as HandSource)
+  ) {
     errors.push(`notes[${index}].handSource: auto|user 중 하나가 아님`)
   }
 }

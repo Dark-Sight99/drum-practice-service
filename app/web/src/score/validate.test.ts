@@ -142,6 +142,21 @@ describe('validateDrumScore', () => {
     expect(result.valid).toBe(true)
   })
 
+  it('accepts handSource: null (Q-47 — 백엔드가 미지정 노트를 null로 내려줌, undefined와 동등하게 취급)', () => {
+    const score = minimalScore()
+    score.notes = [{ tick: 0, piece: 'kick', velocity: 100, hand: null, handSource: null }]
+    const result = validateDrumScore(score)
+    expect(result).toEqual({ valid: true, errors: [] })
+  })
+
+  it('still rejects a genuinely invalid handSource value', () => {
+    const score = minimalScore()
+    score.notes = [{ tick: 0, piece: 'kick', velocity: 100, hand: null, handSource: 'bogus' as never }]
+    const result = validateDrumScore(score)
+    expect(result.valid).toBe(false)
+    expect(result.errors[0]).toContain('notes[0].handSource')
+  })
+
   it('does not crash on completely malformed input', () => {
     expect(validateDrumScore(null)).toEqual({ valid: false, errors: ['DrumScore는 객체여야 함'] })
     expect(validateDrumScore('not an object').valid).toBe(false)
