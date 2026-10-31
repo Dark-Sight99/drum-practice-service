@@ -7,9 +7,6 @@ import type { DrumNote, DrumPiece, DrumScore, Hand } from '../../score/types'
 import { alternateHandsByTick, validateDrumScore } from '../../score'
 import { saveSongDrumScore, stemTempoAudioUrl, type SongSummary } from '../../api/songs'
 import { fetchMixerSetting, saveMixerSetting } from '../../api/auth'
-// T6-11 임시 진단(2026-10-31, audio/memoryDiag.ts 상단 주석 참고) — 조사 끝나면
-// 이 import와 아래 호출부 삭제.
-import { reportScreenLifecycle } from '../../audio/memoryDiag'
 import { ApiError } from '../../api/client'
 import {
   barIndexForTick,
@@ -219,14 +216,6 @@ export function EditorScreen({
   onBackToPractice,
   initialPlaybackBpm,
 }: EditorScreenProps) {
-  // T6-11 임시 진단(2026-10-31, audio/memoryDiag.ts 상단 주석 참고) — 조사
-  // 끝나면 이 effect 삭제.
-  useEffect(() => {
-    reportScreenLifecycle('editor_mount', { songId: song.id })
-    return () => reportScreenLifecycle('editor_unmount', { songId: song.id })
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
-
   const [history, setHistory] = useState<EditHistory<EditorState>>(() =>
     createHistory(toEditorState(initialScore)),
   )
@@ -1700,10 +1689,13 @@ export function EditorScreen({
               if (e.key === 'Enter') e.currentTarget.blur()
             }}
             disabled={isPlaying}
-            // 2026-10-31(의뢰인 재지적 — "92는 세 자리가 들어갔을 때 딱
-            // 맞게") — 56px는 세 자리 숫자 기준으로 양옆에 불필요한 여백이
-            // 남았음(스크린샷으로 확인) — 세 자리에 맞춰 좁힘.
-            style={{ width: 40 }}
+            // 2026-10-31 — 56px는 두 자리(92) 기준으로 양옆 여백이 남아
+            // 40px로 좁혔는데, 실제로 세 자리(130 등)를 넣어보니 안쪽
+            // 여백(padding var(--space-2)=8px·border 1px, 양옆 합 18px —
+            // index.css의 공용 input 규칙)을 빼면 숫자 자리 자체가 22px밖에
+            // 안 남아 세 자리째가 잘렸다(실측: 브라우저로 BPM 130 입력해
+            // "13"까지만 보임 확인). 세 자리가 다 들어가게 다시 넓힘.
+            style={{ width: 52 }}
           />
           <button
             type="button"
@@ -1747,7 +1739,15 @@ export function EditorScreen({
           </button>
         </label>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--space-3)', marginLeft: 'auto' }}>
-          {(audioTracksAvailable
+          {/* 2026-10-31(의뢰인 지적) — 이전엔 audioTracksAvailable(로딩 중엔
+           * 항상 false)로 목록 자체를 갈아끼워서, BPM 적용 등으로 스템을
+           * 다시 불러올 때마다("원곡 음원을 불러오는 중…" 문구가 뜨는 바로
+           * 그 구간) 원곡드럼·음악 슬라이더가 DOM에서 통째로 빠졌다 다시
+           * 생기며 신스드럼·메트로놈까지 같이 밀렸다 들어왔다 — "전부
+           * 사라졌다 생긴다"로 보였던 원인. canUseAudioTracks(이 곡에
+           * 스템이 있는지, 화면 안에서 안 바뀌는 값)로 목록 자체는
+           * 고정하고, 로딩 중엔 아래에서 해당 슬라이더만 disabled 처리. */}
+          {(canUseAudioTracks
             ? (['stem_drums', 'music', 'synth_drums', 'metronome'] as const)
             : (['synth_drums', 'metronome'] as const)
           ).map((key) => {
@@ -1784,6 +1784,10 @@ export function EditorScreen({
                     if (key === 'music') updateMusicVolume(next)
                     else updateChannel(key, { volume: next })
                   }}
+                  // 원곡 음원 트랙(스템)만 로딩 중엔 조절해도 반영될 음원
+                  // 자체가 아직 없다 — synth_drums/metronome은 로딩과 무관하게
+                  // 항상 재생되므로 잠그지 않는다.
+                  disabled={(key === 'stem_drums' || key === 'music') && !audioTracksAvailable}
                   style={{ width: 80 }}
                 />
               </label>
