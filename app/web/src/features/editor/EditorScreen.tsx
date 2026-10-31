@@ -1471,7 +1471,14 @@ export function EditorScreen({
         </label>
         <label style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-1)' }}>
           격자
-          <select value={gridUnit} onChange={(e) => setGridUnit(e.target.value as GridUnit)}>
+          {/* 2026-10-31(의뢰인 지적) — 바로 옆 박자표 입력 둘 다
+           * disabled={isPlaying}인데 이 드롭다운만 빠져있었음(일관성 누락,
+           * 재생 중에도 바꿀 수 있었음) — 같은 원칙으로 맞춤. */}
+          <select
+            value={gridUnit}
+            onChange={(e) => setGridUnit(e.target.value as GridUnit)}
+            disabled={isPlaying}
+          >
             <option value="4n">4분</option>
             <option value="8n">8분</option>
             <option value="16n">16분</option>
