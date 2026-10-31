@@ -193,3 +193,16 @@ export const STEM_DRUMS_BOOST_DB = 12
 export function stemDrumsBoostedGain(linear: number): number {
   return linear * 10 ** (STEM_DRUMS_BOOST_DB / 20)
 }
+
+/** 2026-10-31(의뢰인 요청 — "신스드럼의 볼륨도 +12db올려줬으면 좋겠다", 원곡
+ * 드럼 부스트가 좋다는 확인 뒤) — STEM_DRUMS_BOOST_DB와 같은 이유·같은 크기로
+ * 신스 드럼(synth_drums) 채널에도 적용. 신스 드럼은 이미 전용 Limiter(-1dB,
+ * T3-7)를 거치는 체인에 물려 있어 stem_drums 부스트 때처럼 클리핑 걱정 없이
+ * 그대로 올릴 수 있다(stemPlayer.ts의 공유 Limiter와 별개 체인). */
+export const SYNTH_DRUMS_BOOST_DB = 12
+
+/** stemDrumsBoostedGain()과 쌍을 이루는 synth_drums 전용 버전 — 같은 공식,
+ * 다른 상수(향후 둘을 독립적으로 조정해야 할 수 있어 분리해둠). */
+export function synthDrumsBoostedGain(linear: number): number {
+  return linear * 10 ** (SYNTH_DRUMS_BOOST_DB / 20)
+}

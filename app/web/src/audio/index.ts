@@ -19,6 +19,8 @@ export {
   setMusicVolume,
   STEM_DRUMS_BOOST_DB,
   stemDrumsBoostedGain,
+  SYNTH_DRUMS_BOOST_DB,
+  synthDrumsBoostedGain,
   toggleDrumlessPreset,
 } from './mixer'
 export type { ChannelKey, ChannelState, MixerState } from './mixer'

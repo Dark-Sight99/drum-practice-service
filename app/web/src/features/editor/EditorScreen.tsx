@@ -26,6 +26,7 @@ import {
   selectStemKinds,
   setMusicVolume,
   stemDrumsBoostedGain,
+  synthDrumsBoostedGain,
   ticksPerBar,
   ticksToSeconds,
   type ChannelKey,
@@ -122,6 +123,13 @@ export interface EditorScreenProps {
    * 커서(틱) 위치를 그대로 넘긴다. 저장 여부와 무관 — "← 라이브러리"
    * (onCancel)와 같은 원칙으로 저장하지 않은 변경은 버리고 이동한다. */
   onBackToPractice?: (positionTicks: number) => void
+  /** 2026-10-31(의뢰인 요청) — PracticeCanvas.tsx의 같은 prop과 대칭(App.tsx가
+   * 연습·편집 화면 사이에서 "연습 속도"를 공유 상태로 들고 있다가 넘겨준다).
+   * undefined면 기존처럼 meta.bpm(원곡 속도)으로 시작한다. */
+  initialPlaybackBpm?: number
+  /** 위와 쌍 — 이 화면에서 연습 속도가 바뀔 때마다 App.tsx에 알려 공유 상태를
+   * 갱신한다. */
+  onPlaybackBpmChange?: (bpm: number) => void
 }
 
 interface EditableNote extends DrumNote {
@@ -201,6 +209,8 @@ export function EditorScreen({
   onCancel,
   initialPositionTicks,
   onBackToPractice,
+  initialPlaybackBpm,
+  onPlaybackBpmChange,
 }: EditorScreenProps) {
   const [history, setHistory] = useState<EditHistory<EditorState>>(() =>
     createHistory(toEditorState(initialScore)),
@@ -363,7 +373,14 @@ export function EditorScreen({
   // 어떤 경로로도 바뀔 일이 없다.
   const minBpm = Math.max(1, Math.round(meta.bpm * 0.5))
   const maxBpm = Math.round(meta.bpm * 1.5)
-  const [playbackBpm, setPlaybackBpm] = useState(meta.bpm)
+  // 2026-10-31 — PracticeCanvas.tsx와 같은 이유(§initialPlaybackBpm 주석
+  // 참고): App.tsx가 넘겨준 공유 연습 속도가 있으면 그걸로 시작, 없으면
+  // 기존처럼 meta.bpm(원곡 속도).
+  const [playbackBpm, setPlaybackBpm] = useState(() =>
+    initialPlaybackBpm !== undefined
+      ? Math.min(maxBpm, Math.max(minBpm, initialPlaybackBpm))
+      : meta.bpm,
+  )
   // 아래 rAF 루프·handlePlay()의 await 이후 구간이 리렌더 없이 최신 값을
   // 읽어야 해서 ref로도 들고 있는다(stateRef와 같은 이유, PracticeCanvas.tsx의
   // playbackBpmRef와 동일 패턴). 재생 중엔 이 값이 바뀌지 않도록 아래 입력들을
@@ -372,7 +389,10 @@ export function EditorScreen({
   const playbackBpmRef = useRef(playbackBpm)
   useEffect(() => {
     playbackBpmRef.current = playbackBpm
-  }, [playbackBpm])
+    // 2026-10-31 — 연습 화면 핸드오프용 공유 상태 갱신(위 initialPlaybackBpm
+    // 코멘트 참고).
+    onPlaybackBpmChange?.(playbackBpm)
+  }, [playbackBpm, onPlaybackBpmChange])
   // T6-11 Step 4(work/T6-11/plan.md) — PracticeCanvas.tsx Step 3과 완전히
   // 같은 패턴(§stemTempoPermille 주석 참고). 슬라이더를 드래그하는 동안
   // 프레임마다 바뀌는 playbackBpm을 그대로 서버 변환 요청에 쓰면 드래그
@@ -655,7 +675,11 @@ export function EditorScreen({
   // synth_drums 값은 그대로 둔 채), 원곡 드럼은 그 빌려온 음량으로 —
   // 실제로 들리는 소리만 바뀔 뿐 저장되는 mixerState는 전혀 안 건드린다.
   useEffect(() => {
-    const synthGainValue = drumOverrideEngaged ? 0 : effectiveGain(mixerState.synth_drums)
+    // 2026-10-31(의뢰인 요청) — PracticeCanvas.tsx와 같은 이유·같은 +12dB
+    // (stemDrumsBoostedGain과 쌍을 이루는 synthDrumsBoostedGain, mixer.ts).
+    const synthGainValue = drumOverrideEngaged
+      ? 0
+      : synthDrumsBoostedGain(effectiveGain(mixerState.synth_drums))
     const voicesSession = voicesSessionRef.current
     if (voicesSession) voicesSession.synthGain.gain.value = synthGainValue
     const session = playbackSessionRef.current
@@ -780,7 +804,9 @@ export function EditorScreen({
       // 것만으로는 다시 안 돌아 생성 시점 게인이 그대로 남는다 — 생성 시점에
       // 바로 오버레이를 반영해야 "처음 재생"부터 신스가 겹쳐 들리지 않는다.
       synthGain = new Tone.Gain(
-        drumOverrideEngaged ? 0 : effectiveGain(mixerStateRef.current.synth_drums),
+        drumOverrideEngaged
+          ? 0
+          : synthDrumsBoostedGain(effectiveGain(mixerStateRef.current.synth_drums)),
       ).connect(limiter)
       const voices = await createDrumVoices(synthGain)
       if (!isMountedRef.current) {

@@ -40,6 +40,7 @@ import {
   setMusicMuted,
   stemDrumsBoostedGain,
   setMusicVolume,
+  synthDrumsBoostedGain,
   toggleDrumlessPreset,
   type ChannelKey,
   type ChannelState,
@@ -380,6 +381,15 @@ export interface PracticeCanvasProps {
    * 1회만 이 위치로 Transport를 점프시키고, 자동 재생은 하지 않는다(위
    * onEditSong과 같은 "위치만, 재생은 사용자가" 원칙). */
   initialPositionTicks?: number
+  /** 2026-10-31(의뢰인 요청 — "연습화면에서 bpm을 바꿨는데 편집화면 넘어가면
+   * 92로 되어있고 다시 연습화면 넘어오면 92로 돌아와있다") — App.tsx가 연습·
+   * 편집 두 화면 사이에서 "연습 속도"를 공유 상태로 들고 있다가 넘겨준다.
+   * undefined면(이 곡을 라이브러리에서 처음 열었을 때) 기존처럼
+   * score.meta.bpm(원곡 속도)로 시작한다. */
+  initialPlaybackBpm?: number
+  /** 위와 쌍 — 이 화면에서 연습 속도가 바뀔 때마다 App.tsx에 알려 공유 상태를
+   * 갱신한다(편집 화면으로 넘어갈 때 그 값을 그대로 돌려받기 위함). */
+  onPlaybackBpmChange?: (bpm: number) => void
 }
 
 export function PracticeCanvas({
@@ -402,6 +412,8 @@ export function PracticeCanvas({
   songId,
   availableAudioKinds = [],
   initialPositionTicks,
+  initialPlaybackBpm,
+  onPlaybackBpmChange,
 }: PracticeCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const rendererRef = useRef<LaneRenderer | null>(null)
@@ -487,13 +499,24 @@ export function PracticeCanvas({
   // --- BPM(REQ-04: 원곡 대비 50%~150%) ---
   const minBpm = Math.max(1, Math.round(score.meta.bpm * 0.5))
   const maxBpm = Math.round(score.meta.bpm * 1.5)
-  const [playbackBpm, setPlaybackBpm] = useState(score.meta.bpm)
+  // 2026-10-31 — initialPlaybackBpm(App.tsx가 편집 화면과 공유하는 값)이
+  // 있으면 그걸로 시작(범위 밖 값이 섞여 들어올 일은 없지만 clamp로 방어),
+  // 없으면 기존처럼 원곡 속도(score.meta.bpm)로 시작.
+  const [playbackBpm, setPlaybackBpm] = useState(() =>
+    initialPlaybackBpm !== undefined
+      ? Math.min(maxBpm, Math.max(minBpm, initialPlaybackBpm))
+      : score.meta.bpm,
+  )
   // rAF 루프(아래)는 리렌더를 거치지 않고 매 프레임 최신 BPM을 읽어야 해서 ref로도
   // 들고 있는다 — oxlint react(refs)가 렌더 중 ref 쓰기를 금지해 effect에서 동기화.
   const playbackBpmRef = useRef(playbackBpm)
   useEffect(() => {
     playbackBpmRef.current = playbackBpm
-  }, [playbackBpm])
+    // 2026-10-31 — 편집 화면 핸드오프용 공유 상태 갱신(위 initialPlaybackBpm
+    // 코멘트 참고). onPlaybackBpmChange는 App.tsx의 setState라 안정적인
+    // 참조이지만(리렌더마다 새로 안 만들어짐), 혹시 몰라 의존성에도 넣는다.
+    onPlaybackBpmChange?.(playbackBpm)
+  }, [playbackBpm, onPlaybackBpmChange])
   // T6-11 Step 3(REQ-04, Q-33) — BPM이 바뀌면 그 배속에 맞는 음정 유지
   // 변환본을 서버에서 새로 받아야 하는데(아래 스템 풀 로딩 effect), 슬라이더를
   // 드래그하는 동안 프레임마다 바뀌는 playbackBpm을 그대로 의존성에 넣으면
@@ -957,7 +980,9 @@ export function PracticeCanvas({
     for (const key of CHANNEL_KEYS) {
       const gain = effectiveGain(mixerState[key])
       if (key === 'synth_drums') {
-        session.synthGain.gain.value = gain
+        // 2026-10-31(의뢰인 요청) — 원곡 드럼(stemDrumsBoostedGain)과 같은
+        // 이유·같은 +12dB. 전용 Limiter(T3-7)를 거치는 체인이라 안전.
+        session.synthGain.gain.value = synthDrumsBoostedGain(gain)
       } else if (key === 'metronome') {
         session.metronome.setVolume(metronomeGainToDb(gain))
       } else if (key === 'stem_drums') {
@@ -1559,7 +1584,7 @@ export function PracticeCanvas({
     for (const key of CHANNEL_KEYS) {
       const gain = effectiveGain(mixerStateRef.current[key])
       if (key === 'synth_drums') {
-        synthGain.gain.value = gain
+        synthGain.gain.value = synthDrumsBoostedGain(gain)
       } else if (key === 'metronome') {
         metronome.setVolume(metronomeGainToDb(gain))
       } else if (key === 'stem_drums') {
@@ -2153,26 +2178,44 @@ export function PracticeCanvas({
        * 아래 Drawer title도 통일). */}
       {isNarrowSettingsLayout ? (
         <>
-          <button
-            type="button"
-            className="settings-trigger"
-            onClick={() => setIsSettingsOpen(true)}
-            // 2026-10-28(의뢰인 요청, 8차) — 위 루트가 이제 항상 stretch라
-            // (main-column이 전체 폭을 받게 하려고) 이 버튼도 같이
-            // 늘어나려 하는데, 트리거 버튼은 원래 내용 크기만큼만이어야
-            // 함 — alignSelf로 개별 예외.
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 'var(--space-2)',
-              alignSelf: 'flex-start',
-            }}
-            aria-label="믹서·설정 열기"
-            title="믹서"
-          >
-            <Settings size={16} aria-hidden="true" />
-            믹서
-          </button>
+          {/* 2026-10-31(의뢰인 요청) — "모바일 화면에서 악보편집이 믹서를
+           * 눌러야 보이게되는데... 악보 편집하기를 믹서 버튼 옆에 보이게
+           * 하면 좋을 거 같아". 기존엔 이 버튼이 settingsPanelContent
+           * 안(Drawer를 열어야만 보임)에만 있었다 — 좁은 화면에서 항상
+           * 보이는 이 트리거 행에도 같이 둔다(아래 settingsPanelContent
+           * 안의 버튼은 넓은 화면 사이드바용으로 그대로 둠). */}
+          <div style={{ display: 'flex', gap: 'var(--space-2)', alignSelf: 'flex-start' }}>
+            <button
+              type="button"
+              className="settings-trigger"
+              onClick={() => setIsSettingsOpen(true)}
+              // 2026-10-28(의뢰인 요청, 8차) — 위 루트가 이제 항상 stretch라
+              // (main-column이 전체 폭을 받게 하려고) 이 버튼도 같이
+              // 늘어나려 하는데, 트리거 버튼은 원래 내용 크기만큼만이어야
+              // 함 — alignSelf로 개별 예외.
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 'var(--space-2)',
+              }}
+              aria-label="믹서·설정 열기"
+              title="믹서"
+            >
+              <Settings size={16} aria-hidden="true" />
+              믹서
+            </button>
+            {song && onEditSong && (
+              <button
+                type="button"
+                className="settings-trigger"
+                onClick={handleEditClick}
+                style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}
+              >
+                <FileMusic size={16} aria-hidden="true" />
+                악보 편집하기
+              </button>
+            )}
+          </div>
           <Drawer
             open={isSettingsOpen}
             onClose={() => setIsSettingsOpen(false)}

@@ -46,6 +46,15 @@ function App() {
     number | undefined
   >(undefined)
   const [editorOrigin, setEditorOrigin] = useState<'library' | 'practice'>('library')
+  // 2026-10-31(의뢰인 요청) — "연습화면에서 bpm을 바꿨는데 편집화면 넘어가면
+  // 92로 되어있고 다시 연습화면 넘어오면 92로 돌아와있다". PracticeCanvas·
+  // EditorScreen 둘 다 BPM을 자기 안의 useState로만 들고 있어서(화면이
+  // 바뀔 때마다 이 컴포넌트들 자체가 통째로 언마운트·재마운트됨), 그동안
+  // 바꾼 "연습 속도"가 화면을 넘어갈 때마다 사라지고 있었다. 위
+  // editorInitialPositionTicks/practiceInitialPositionTicks와 같은 원칙으로,
+  // 두 화면이 공유하는 "연습 속도"를 여기서 들고 있다가 넘겨준다.
+  // undefined면 "아직 아무 화면에서도 안 건드림"(원곡 속도로 시작).
+  const [sharedPlaybackBpm, setSharedPlaybackBpm] = useState<number | undefined>(undefined)
   const isCompactHeader = useCompactHeaderLayout()
 
   useEffect(() => {
@@ -178,6 +187,8 @@ function App() {
             availableAudioKinds={practiceSong.song.available_audio_kinds}
             song={practiceSong.song}
             initialPositionTicks={practiceInitialPositionTicks}
+            initialPlaybackBpm={sharedPlaybackBpm}
+            onPlaybackBpmChange={setSharedPlaybackBpm}
             onEditSong={(song, drumScore, positionTicks) => {
               setEditingSong({ song, drumScore })
               setEditorInitialPositionTicks(positionTicks)
@@ -205,6 +216,8 @@ function App() {
           song={editingSong.song}
           initialScore={editingSong.drumScore}
           initialPositionTicks={editorInitialPositionTicks}
+          initialPlaybackBpm={sharedPlaybackBpm}
+          onPlaybackBpmChange={setSharedPlaybackBpm}
           onSaved={() => {
             setEditorInitialPositionTicks(undefined)
             setScreen('library')
@@ -238,11 +251,16 @@ function App() {
         // 이전 곡에서 "연습으로 돌아가기"로 남겨둔 위치가 새로 여는 곡에
         // 새어 들어가지 않게 — 라이브러리에서 직접 여는 연습은 항상 0부터.
         setPracticeInitialPositionTicks(undefined)
+        // 2026-10-31 — 위와 같은 이유로, 이전 곡에서 바꿔둔 연습 속도가 새
+        // 곡에 새어 들어가지 않게(라이브러리에서 직접 열 때는 항상 원곡
+        // 속도부터 시작).
+        setSharedPlaybackBpm(undefined)
         setScreen('practice')
       }}
       onEditSong={(song, drumScore) => {
         setEditingSong({ song, drumScore })
         setEditorOrigin('library')
+        setSharedPlaybackBpm(undefined)
         setScreen('editor')
       }}
       onLoggedOut={() => {
