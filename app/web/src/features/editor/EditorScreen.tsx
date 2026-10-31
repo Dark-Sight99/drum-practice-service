@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import * as Tone from 'tone'
-import { FastForward, Pause, Play, Redo2, Rewind, RotateCcw, Undo2 } from 'lucide-react'
+import { Check, FastForward, Pause, Play, Redo2, Rewind, RotateCcw, Undo2 } from 'lucide-react'
 import { Spinner } from '../../components/Spinner'
 import { Modal } from '../../components/Modal'
 import type { DrumNote, DrumPiece, DrumScore, Hand } from '../../score/types'
@@ -433,12 +433,34 @@ export function EditorScreen({
     return Math.min(maxBpm, Math.max(minBpm, Math.round(value)))
   }
 
+  // 2026-10-31(의뢰인 요청 — "연습↔편집을 오가며 BPM을 자주 바꾸면 iOS가
+  // 메모리 부족으로 강제 새로고침된다", qa-evidence/T6-11-memory-diag/
+  // client-debug.jsonl로 확인) — BPM을 건드릴 때마다(슬라이더 드래그·숫자
+  // 입력·원곡 속도로 재설정) 바로 playbackBpm을 바꾸면 그때마다 음원을
+  // 다시 받는다. "실수로 잘못 놓는 경우도 있을 것"(의뢰인 지적)까지 고려해,
+  // 이 화면에서는 어떤 조작도 **"적용" 버튼을 눌러야만** 실제로 반영되게
+  // 한다 — 그 전까지는 슬라이더·입력칸·원곡 속도 재설정 버튼 전부 이
+  // pendingBpm(임시 값)만 바꾸고 playbackBpm(실제로 재생·음원 로딩에 쓰이는
+  // 값)은 그대로 둔다. null이면 "대기 중인 변경 없음"(화면엔 playbackBpm이
+  // 그대로 보임).
+  const [pendingBpm, setPendingBpm] = useState<number | null>(null)
+  const hasPendingBpmChange = pendingBpm !== null && pendingBpm !== playbackBpm
+  // 실제로 화면에 보여줄 기준값 — 대기 중인 변경이 있으면 그 값을, 없으면
+  // 지금 적용된 값을 보여준다(슬라이더·숫자칸 둘 다 이 기준 하나를 공유).
+  const displayedBpm = pendingBpm ?? playbackBpm
+
+  function applyPendingBpm(): void {
+    if (pendingBpm === null) return
+    setPlaybackBpm(pendingBpm)
+    setPendingBpm(null)
+  }
+
   // PracticeCanvas.tsx의 같은 BPM 입력과 같은 이유(§bpmFieldValue 주석 참고) —
-  // 포커스 중엔 자유 입력을 받는 draft로, 포커스가 아닐 땐 playbackBpm에서
+  // 포커스 중엔 자유 입력을 받는 draft로, 포커스가 아닐 땐 displayedBpm에서
   // 바로 파생시켜 슬라이더로 바뀐 값도 항상 반영되게 한다.
   const [isEditingBpm, setIsEditingBpm] = useState(false)
   const [bpmDraft, setBpmDraft] = useState('')
-  const bpmFieldValue = isEditingBpm ? bpmDraft : String(playbackBpm)
+  const bpmFieldValue = isEditingBpm ? bpmDraft : String(displayedBpm)
 
   const [isPlaying, setIsPlaying] = useState(false)
   const [currentSeconds, setCurrentSeconds] = useState(() =>
@@ -1608,14 +1630,16 @@ export function EditorScreen({
             className="mixer-slider"
             min={minBpm}
             max={maxBpm}
-            value={playbackBpm}
+            value={displayedBpm}
             onChange={(e) => {
-              // 2026-10-31(PracticeCanvas.tsx와 같은 버그·같은 이유 — 그쪽
-              // 코멘트 참고) — 입력칸이 포커스된 동안 슬라이더로 조절하면
-              // bpmDraft가 안 바뀌어, 나중에 입력칸이 blur될 때 그 옛 draft가
-              // playbackBpm을 다시 덮어써 슬라이더 조작이 무효화됐다.
+              // 2026-10-31(의뢰인 요청) — 슬라이더는 더 이상 playbackBpm을
+              // 바로 바꾸지 않고 pendingBpm(대기 값)만 바꾼다 — "적용"을
+              // 눌러야 실제로 음원을 다시 받는다(위 pendingBpm 코멘트 참고).
+              // bpmDraft도 같이 갱신하는 이유는 그 위(PracticeCanvas.tsx와
+              // 같은 버그·같은 이유) 코멘트 그대로 — 입력칸이 포커스된 동안
+              // 슬라이더를 조작해도 입력칸 표시가 같이 따라가게.
               const next = clampBpm(Number(e.target.value))
-              setPlaybackBpm(next)
+              setPendingBpm(next)
               setBpmDraft(String(next))
             }}
             disabled={isPlaying}
@@ -1626,12 +1650,14 @@ export function EditorScreen({
             max={maxBpm}
             value={bpmFieldValue}
             onFocus={() => {
-              setBpmDraft(String(playbackBpm))
+              setBpmDraft(String(displayedBpm))
               setIsEditingBpm(true)
             }}
             onChange={(e) => setBpmDraft(e.target.value)}
             onBlur={(e) => {
-              setPlaybackBpm(clampBpm(Number(e.target.value)))
+              // 2026-10-31 — 슬라이더와 같은 이유로 바로 적용하지 않고
+              // pendingBpm에만 반영한다.
+              setPendingBpm(clampBpm(Number(e.target.value)))
               setIsEditingBpm(false)
             }}
             onKeyDown={(e) => {
@@ -1644,7 +1670,9 @@ export function EditorScreen({
             type="button"
             className="settings-trigger"
             onClick={() => {
-              setPlaybackBpm(meta.bpm)
+              // 2026-10-31 — 이것도 바로 적용하지 않고 대기 값만 원곡 속도로
+              // 맞춰둔다("적용"을 눌러야 실제로 반영 — 아래 버튼과 같은 원칙).
+              setPendingBpm(meta.bpm)
               setIsEditingBpm(false)
             }}
             disabled={isPlaying}
@@ -1652,6 +1680,35 @@ export function EditorScreen({
             title={`원곡 BPM(${meta.bpm})으로 재설정`}
           >
             <RotateCcw size={14} aria-hidden="true" />
+          </button>
+          {/* 2026-10-31(의뢰인 요청 — "적용을 눌러야 한다는 걸 시각적으로 잘
+           * 보여줘야 해") — 대기 중인 변경이 있을 때만 활성화되고, 그때는
+           * warning 색으로 눈에 띄게 — 평소(변경 없음)엔 비활성 회색이라
+           * "지금은 할 일 없음"이 바로 보인다. */}
+          <button
+            type="button"
+            onClick={applyPendingBpm}
+            disabled={!hasPendingBpmChange || isPlaying}
+            style={
+              hasPendingBpmChange
+                ? {
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 'var(--space-1)',
+                    color: 'var(--warning)',
+                    borderColor: 'var(--warning)',
+                    fontWeight: 600,
+                  }
+                : { display: 'flex', alignItems: 'center', gap: 'var(--space-1)' }
+            }
+            title={
+              hasPendingBpmChange
+                ? `${pendingBpm} BPM으로 적용(지금은 ${playbackBpm} BPM 재생 중)`
+                : '적용할 변경 없음'
+            }
+          >
+            <Check size={14} aria-hidden="true" />
+            적용{hasPendingBpmChange ? `(${pendingBpm})` : ''}
           </button>
         </label>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--space-3)', marginLeft: 'auto' }}>
